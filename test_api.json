@@ -1,0 +1,35 @@
+{
+  "name": "Test PPL Split",
+  "sessions": [
+    {
+      "name": "Push",
+      "day": 1,
+      "exercises": [
+        {"name": "Bench Press", "sets": 4},
+        {"name": "Overhead Press", "sets": 3},
+        {"name": "Cable Fly", "sets": 3}
+      ]
+    },
+    {
+      "name": "Pull",
+      "day": 2,
+      "exercises": [
+        {"name": "Pullups", "sets": 4},
+        {"name": "Cable Row", "sets": 3},
+        {"name": "Face Pulls", "sets": 3}
+      ]
+    },
+    {
+      "name": "Legs",
+      "day": 3,
+      "exercises": [
+        {"name": "Squat", "sets": 4},
+        {"name": "Romanian Deadlift", "sets": 3},
+        {"name": "Leg Curl", "sets": 3}
+      ]
+    }
+  ],
+  "stimulus_duration": 48,
+  "maintenance_volume": 4,
+  "dataset": "average"
+}
