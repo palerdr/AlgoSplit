@@ -185,7 +185,7 @@ Split.AI uses peer-reviewed research on muscle stimulus and fatigue:
 - **Diminishing Returns**: Uses Schoenfeld & Pelland curves for set-by-set stimulus
 - **CNS Fatigue**: Global fatigue accumulates across the workout
 - **Recovery Penalty**: Insufficient recovery reduces stimulus effectiveness
-- **Unilateral Bonus**: Single-arm/leg movements get 5% stimulus boost
+- **Unilateral Bonus**: Single-arm/leg movements get 5% MUR boost
 
 ### Atrophy Model
 - **Stimulus Window**: Default 48 hours for muscle protein synthesis

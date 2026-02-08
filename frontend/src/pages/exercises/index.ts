@@ -1,0 +1,1 @@
+export { ExercisesPage } from './ExercisesPage';

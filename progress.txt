@@ -1,0 +1,193 @@
+================================================================================
+SPLIT.AI PROJECT PROGRESS TRACKER
+================================================================================
+Last Updated: 2026-01-28 (Session 2)
+
+================================================================================
+PROJECT SCOPE
+================================================================================
+
+Split.AI is a workout split analysis tool that calculates net weekly stimulus
+per muscle region using research-backed models. The system accounts for:
+- Diminishing returns (Schoenfeld/Pelland marginal curves)
+- Recovery windows and atrophy
+- Systemic fatigue (CNS, axial/spinal, bilateral deficit)
+- Motor unit recruitment efficiency (leverage matching)
+- Tiered muscle involvement (prime/secondary/tertiary movers)
+
+Target deliverables:
+1. Backend engine (Python/FastAPI) - analyze splits, classify exercises
+2. Database layer (Supabase) - user accounts, saved splits, workout logs
+3. Frontend (Next.js/React) - modeled after tracked.gg
+4. CLI tools - CSV/Excel import for split analysis
+
+================================================================================
+PHASE 1: BACKEND CORE ENGINE [100% COMPLETE]
+================================================================================
+
+[x] 1.1 Granular Muscle Model (29 regions)
+    - File: backend/core/muscle_regions.py
+    - 29 anatomical regions organized into 14 parent groups
+    - Properties: leverage, damage_tier, recovery_modifier, axial_fatigue_contributor
+    - Status: COMPLETE
+
+[x] 1.2 Tiered Stimulus System
+    - File: backend/core/stimulus_tiers.py
+    - Prime (1.0), Secondary (0.55), Tertiary (0.35), Quaternary (0.15)
+    - Status: COMPLETE
+
+[x] 1.3 Joint-Action Based Patterns
+    - File: backend/core/granular_patterns.py
+    - 42 patterns organized by joint action (compound/isolation)
+    - Unilateral inferred from exercise name, not stored in pattern
+    - Status: COMPLETE
+
+[x] 1.4 Global Fatigue Modifiers
+    - File: backend/core/fatigue_modifiers.py
+    - Axial/spinal fatigue (hinge=1.0, squat=0.8, rows=0.4)
+    - Bilateral penalty (5% MUR reduction)
+    - CNS fatigue decay: g(x) = 0.85 + 0.15 * e^(-0.06x)
+    - Status: COMPLETE
+
+[x] 1.5 Leverage Matching (Resistance Profile)
+    - File: backend/core/MainClasses.py lines 77-107
+    - Matching muscle leverage (S/M/L) to exercise profile (ascending/mid/descending)
+    - Multipliers: 0.75 (mismatch) to 1.0 (perfect match)
+    - Status: COMPLETE
+
+[x] 1.6 Exercise Classification System
+    - File: backend/core/movementMatching.py + backend/core/exercise_parser.py
+    - Multi-stage keyword matching with scoring
+    - Specific rules (55-65), General rules (25-45), Fallback rules (20)
+    - Unilateral detection from exercise name
+    - Wide grip pulls → transverse_adduction_compound (transverse plane)
+    - Narrow/regular pulls → sagittal_adduction_compound (sagittal plane)
+    - Status: COMPLETE
+
+[x] 1.7 Damage Tier Semantics
+    - Converted from hard multiplier to soft volume recommendation
+    - Does NOT affect stimulus calculation
+    - Guidelines: + (can handle more), 0 (standard), - (less is more)
+    - Status: COMPLETE
+
+[x] 1.8 Legacy System Removal
+    - Removed 16-muscle legacy model
+    - Removed use_granular flag from API
+    - Now uses 29-region model exclusively
+    - Status: COMPLETE
+
+================================================================================
+PHASE 2: API & DATABASE [75% COMPLETE]
+================================================================================
+
+[x] 2.1 API Schemas
+    - File: backend/schemas/models.py
+    - SplitRequest, AnalysisResponse, MuscleStats, TieredTargets
+    - Removed legacy response models
+    - Status: COMPLETE
+
+[x] 2.2 Analysis Endpoints
+    - File: backend/api/analysis_routes.py
+    - POST /api/analyze-split
+    - POST /api/parse-exercise
+    - GET /api/patterns
+    - GET /api/muscle-regions
+    - Status: COMPLETE
+
+[x] 2.3 Auth/Splits/Workouts Endpoints
+    - Files: backend/api/routes/{auth,splits,workouts,overrides}.py
+    - Full CRUD operations
+    - Status: COMPLETE (but needs Supabase connection)
+
+[ ] 2.4 Supabase Database Migrations
+    - Need to create tables for granular muscle tracking
+    - Tables: muscle_regions (reference), workout_muscle_stimulus
+    - Status: PENDING (Supabase now active)
+
+================================================================================
+PHASE 3: CLI & TESTING TOOLS [80% COMPLETE]
+================================================================================
+
+[x] 3.1 CSV/Excel Import Tool
+    - File: backend/scripts/analyze_csv.py
+    - Parse CSV format: Session,Day,Exercise,Sets
+    - Output: Full analysis report with verification
+    - Flags: --json, --verify-only, --stimulus-duration, --maintenance
+    - Status: COMPLETE
+
+[x] 3.2 Pattern Verification Script
+    - Integrated into analyze_csv.py with --verify-only flag
+    - Shows tiered targets for each match
+    - Identifies unrecognized exercises
+    - Status: COMPLETE
+
+[ ] 3.3 Comprehensive Test Suite
+    - Unit tests for each module
+    - Integration tests for full split analysis
+    - Status: PENDING
+
+================================================================================
+PHASE 4: FRONTEND [0% COMPLETE]
+================================================================================
+
+[ ] 4.1 Next.js Project Setup
+    - Initialize with shadcn/ui
+    - Configure Supabase auth
+    - Status: PENDING
+
+[ ] 4.2 Split Builder UI
+    - Drag-drop exercise ordering
+    - Live pattern recognition feedback
+    - Status: PENDING
+
+[ ] 4.3 Analysis Dashboard
+    - Muscle stimulus heatmap/charts
+    - Per-region breakdown
+    - Optimization suggestions
+    - Status: PENDING
+
+[ ] 4.4 Workout Logger
+    - Quick-log interface
+    - Set/rep/weight tracking
+    - Status: PENDING
+
+================================================================================
+WEIGHT VERIFICATION ENTRYPOINTS
+================================================================================
+
+When manually verifying/tuning the model coefficients:
+
+FILE: granular_patterns.py
+- Pattern muscle weights (prime/secondary/tertiary targets)
+- Currently 42 patterns
+
+FILE: muscle_regions.py
+- Muscle leverage (S/M/L)
+- Damage tier (+/0/-)
+- Recovery modifier (0.9-1.2)
+
+FILE: MainClasses.py lines 77-90
+- LEVERAGE_MATCH_MULTIPLIERS
+- Resistance profile penalties (0.75-1.0)
+
+FILE: stimulus_tiers.py
+- TIER_BETA_VALUES: Prime=1.0, Secondary=0.55, Tertiary=0.35, Quaternary=0.15
+
+FILE: fatigue_modifiers.py
+- AXIAL_LOAD_VALUES: hinge=1.0, squat=0.8, rows=0.4
+- CNS_FLOOR=0.85, CNS_CEILING=1.0, CNS_DECAY_RATE=0.06
+- BILATERAL_PENALTY=0.05
+
+FILE: MainClasses.py lines 36-46
+- Marginal curves (Schoenfeld/Pelland/Average)
+
+================================================================================
+NEXT IMMEDIATE TASKS
+================================================================================
+
+1. [DONE] Create CSV import tool (scripts/analyze_csv.py)
+2. [DONE] Test full system with sample splits (sample_split.csv verified)
+3. Create Supabase migrations for granular tables
+4. Initialize Next.js frontend project
+
+================================================================================

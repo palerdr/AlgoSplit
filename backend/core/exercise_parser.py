@@ -75,6 +75,10 @@ EXERCISE_MAPPINGS = {
     'lat pulldown': 'vertical pull',
     'unilateral lat pulldown': 'unilateral vertical pull',
     'pull up': 'vertical pull',
+    'chin up': 'vertical pull',
+    'wide grip pull up': 'wide grip vertical pull',
+    'wide grip pulldown': 'wide grip vertical pull',
+    'wide grip lat pulldown': 'wide grip vertical pull',
     'pulldown': 'vertical pull',
     'panatta row': 'horizontal scapular pull',
     'pl lat row': 'horizontal saggital pull',
@@ -155,6 +159,60 @@ EXERCISE_MAPPINGS = {
     'carter exst': 'elbow extension',
     'carter extension': 'elbow extension',
 }
+
+
+# Map legacy pattern names to canonical granular patterns
+CANONICAL_PATTERN_MAP = {
+    'horizontal press': 'humeral_adduction_compound',
+    'incline press': 'humeral_adduction_compound',
+    'decline press': 'humeral_adduction_compound',
+    'chest fly': 'humeral_adduction_isolation',
+    'upper chest fly': 'humeral_adduction_isolation',
+    'vertical press': 'vertical_press_compound',
+    'shoulder flexion': 'shoulder_flexion_isolation',
+    'shoulder abduction': 'shoulder_abduction_isolation',
+    'shoulder transverse abduction': 'shoulder_transverse_abduction_isolation',
+    'vertical pull': 'sagittal_adduction_compound',
+    'unilateral vertical pull': 'sagittal_adduction_compound',
+    'wide grip vertical pull': 'transverse_adduction_compound',
+    'horizontal scapular pull': 'scapular_retraction_compound',
+    'horizontal saggital pull': 'sagittal_adduction_compound',
+    'unilateral horizontal saggital pull': 'sagittal_adduction_compound',
+    'unilateral horizontal pull': 'scapular_retraction_compound',
+    'scapular retraction': 'scapular_retraction_isolation',
+    'straight arm pullover': 'sagittal_adduction_isolation',
+    'squat pattern': 'squat_compound',
+    'unilateral squat pattern': 'squat_compound',
+    'hinge pattern': 'hinge_compound',
+    'unilateral hinge pattern': 'hinge_compound',
+    'lunge pattern': 'lunge_compound',
+    'knee extension': 'knee_extension_isolation',
+    'unilateral knee extension': 'knee_extension_isolation',
+    'knee flexion': 'knee_flexion_isolation',
+    'unilateral knee flexion': 'knee_flexion_isolation',
+    'hip extension': 'hip_extension_isolation',
+    'unilateral hip extension': 'hip_extension_isolation',
+    'hip abduction': 'hip_abduction_isolation',
+    'hip adduction': 'hip_adduction_isolation',
+    'ankle plantarflexion': 'ankle_plantarflexion_isolation',
+    'unilateral ankle plantarflexion': 'ankle_plantarflexion_isolation',
+    'elbow flexion': 'elbow_flexion_isolation',
+    'unilateral elbow flexion': 'elbow_flexion_isolation',
+    'elbow extension': 'elbow_extension_isolation',
+    'unilateral elbow extension': 'elbow_extension_isolation',
+    'wrist flexion': 'wrist_flexion_isolation',
+    'wrist extension': 'wrist_extension_isolation',
+    'spinal flexion': 'spinal_flexion',
+    'spinal extension': 'spinal_extension',
+    'dip': 'humeral_adduction_compound',
+}
+
+
+def canonicalize_pattern(pattern: Optional[str]) -> Optional[str]:
+    """Map legacy pattern names to canonical granular patterns."""
+    if not pattern:
+        return None
+    return CANONICAL_PATTERN_MAP.get(pattern, pattern)
 
 
 # ============================================================================
@@ -277,7 +335,7 @@ def resolve_pattern(
                     pattern = unilateral_pattern
                     confidence = min(confidence + 0.1, 1.0)
 
-        return pattern, confidence
+        return canonicalize_pattern(pattern), confidence
 
     # Case 2: Movement detected - check modifiers
     if 'modifiers' in movement_config and modifiers:
@@ -299,7 +357,7 @@ def resolve_pattern(
             pattern = unilateral_pattern
             confidence = min(confidence + 0.1, 1.0)
 
-    return pattern, confidence
+    return canonicalize_pattern(pattern), confidence
 
 
 def classify_exercise(exercise_name: str) -> Dict:
@@ -509,12 +567,12 @@ def parse_exercise_name(exercise_name, use_intelligent=True, fuzzy_match=True):
 
     # Priority 3: Legacy hardcoded mappings - exact match
     if cleaned in EXERCISE_MAPPINGS:
-        return EXERCISE_MAPPINGS[cleaned]
+        return canonicalize_pattern(EXERCISE_MAPPINGS[cleaned])
 
     # Priority 4: Legacy partial matches
     for key, pattern in EXERCISE_MAPPINGS.items():
         if key in cleaned or cleaned in key:
-            return pattern
+            return canonicalize_pattern(pattern)
 
     # Priority 5: Fuzzy matching for typos
     if fuzzy_match:
@@ -522,7 +580,7 @@ def parse_exercise_name(exercise_name, use_intelligent=True, fuzzy_match=True):
         # Match with 80% similarity threshold
         matches = get_close_matches(cleaned, EXERCISE_MAPPINGS.keys(), n=1, cutoff=0.80)
         if matches:
-            return EXERCISE_MAPPINGS[matches[0]]
+            return canonicalize_pattern(EXERCISE_MAPPINGS[matches[0]])
 
     return None
 

@@ -47,3 +47,12 @@ out/
 *.db
 *.sqlite
 *.sqlite3
+
+#misc
+.claude/
+nul
+*.md
+!README.md
+!DATA_FLOW.md
+!DEPLOYMENT.md
+

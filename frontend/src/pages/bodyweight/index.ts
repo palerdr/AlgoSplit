@@ -1,0 +1,1 @@
+export { BodyweightPage } from './BodyweightPage';
