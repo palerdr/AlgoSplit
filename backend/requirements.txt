@@ -9,6 +9,7 @@ python-multipart>=0.0.6
 # Data validation
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
+email-validator>=2.1.0
 
 # Supabase and Authentication
 supabase>=2.3.0
