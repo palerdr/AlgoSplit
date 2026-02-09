@@ -142,6 +142,7 @@ def health_check():
     }
 
 
+@app.head("/keepalive")
 @app.get("/keepalive")
 def keepalive():
     """
