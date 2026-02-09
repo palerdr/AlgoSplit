@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, ChevronRight, ChevronDown, Trash2, Layers } from 'lucide-react';
+import { Plus, ChevronRight, ChevronDown, Layers } from 'lucide-react';
 import { Button, Spinner, Input } from '@/components/ui';
-import { getMacros, createMacro, createMeso, createMicro, deleteMacro, deleteMeso, deleteMicro, periodizationKeys } from '@/api/periodization.api';
+import { getMacros, createMacro, createMeso, createMicro, periodizationKeys } from '@/api/periodization.api';
 import { useProgramStore } from '@/stores/programStore';
 import { cn } from '@/lib/utils';
-import type { MacroCycleResponse, MesoCycleResponse, MicroCycleResponse } from '@/types/api.types';
+import type { MicroCycleResponse } from '@/types/api.types';
 
 interface PeriodizationSidebarProps {
   programId: string;

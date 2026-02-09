@@ -62,7 +62,7 @@ function SplitRow({
   );
 }
 
-export function TemplateSidebar({ programId }: TemplateSidebarProps) {
+export function TemplateSidebar(_props: TemplateSidebarProps) {
   const [expandedSplits, setExpandedSplits] = useState<Set<string>>(new Set());
 
   const { data, isLoading } = useQuery({

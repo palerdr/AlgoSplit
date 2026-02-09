@@ -42,7 +42,7 @@ function SplitCard({ split }: { split: SplitResponse }) {
       });
       return { previous };
     },
-    onError: (_err: any, _vars: any, context: any) => {
+    onError: (_err, _vars, context: any) => {
       // Roll back to snapshot on error
       if (context?.previous) {
         queryClient.setQueryData(splitKeys.list(), context.previous);

@@ -45,7 +45,7 @@ import {
 } from '@/api/comparisons.api';
 import { useCompareStore } from '@/stores/compareStore';
 import { cn } from '@/lib/utils';
-import type { AnalysisResponse, SplitResponse } from '@/types/api.types';
+import type { AnalysisResponse } from '@/types/api.types';
 
 const SPLIT_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b'];
 const SPLIT_COLOR_CLASSES = [
@@ -498,7 +498,7 @@ function MuscleComparisonChart({
 
   const allChartData = useMemo(() => {
     // Get all unique muscles
-    const muscleMap = new Map<string, Record<string, number>>();
+    const muscleMap = new Map<string, Record<string, number | string>>();
 
     for (const split of splits) {
       for (const muscle of split.result.muscles) {
@@ -564,7 +564,7 @@ function MuscleComparisonChart({
                   borderRadius: '8px',
                 }}
                 labelStyle={{ color: '#E5E7EB' }}
-                formatter={(value: number) => value.toFixed(1)}
+                formatter={((value: number) => value.toFixed(1)) as any}
               />
               <Legend />
               {splits.map((split, i) => (
@@ -720,7 +720,7 @@ function RadarComparisonChart({
                   borderRadius: '8px',
                 }}
                 labelStyle={{ color: '#E5E7EB' }}
-                formatter={(value: number) => value.toFixed(1)}
+                formatter={((value: number) => value.toFixed(1)) as any}
               />
               <Legend />
               {splits.map((split, i) => (

@@ -10,7 +10,7 @@ interface ProgramCalendarProps {
   onSessionClick?: (session: ProgramSessionResponse) => void;
 }
 
-export function ProgramCalendar({ programId, sessions, onSessionClick }: ProgramCalendarProps) {
+export function ProgramCalendar({ sessions, onSessionClick }: ProgramCalendarProps) {
   const { calendarView, calendarDate } = useProgramStore();
   const currentDate = new Date(calendarDate);
 

@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { eachDayOfInterval, format, startOfWeek, differenceInWeeks, parseISO } from 'date-fns';
+import { format, startOfWeek, differenceInWeeks, parseISO } from 'date-fns';
 import { cn } from '@/lib/utils';
 import type { ProgramSessionResponse } from '@/types/api.types';
 
@@ -39,9 +39,6 @@ export function VolumeHeatmap({ sessions, startDate, endDate }: VolumeHeatmapPro
       const exerciseSets = sess.exercises.reduce((sum, ex) => sum + ex.sets, 0);
       setsByDate[dateKey] = (setsByDate[dateKey] || 0) + exerciseSets;
     }
-
-    // Generate all days in the interval
-    const allDays = eachDayOfInterval({ start, end });
 
     // Align start to beginning of week (Monday)
     const weekStart = startOfWeek(start, { weekStartsOn: 1 });

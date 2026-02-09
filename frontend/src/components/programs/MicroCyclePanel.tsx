@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Tag, Trash2 } from 'lucide-react';
+import { Tag } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { assignSessions, periodizationKeys } from '@/api/periodization.api';
 import { programKeys } from '@/api/programs.api';

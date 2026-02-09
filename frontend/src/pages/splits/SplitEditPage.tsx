@@ -89,7 +89,7 @@ export function SplitEditPage() {
   });
 
   // Auto-preview with debouncing
-  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runAutoPreview = useCallback(() => {
     const validSessions = sessions
@@ -192,13 +192,6 @@ export function SplitEditPage() {
       maintenance_volume: maintenanceVolume ?? 3,
       dataset,
     };
-  }
-
-  function handlePreview() {
-    const request = getValidRequest();
-    if (request) {
-      previewMutation.mutate(request);
-    }
   }
 
   function handleSave() {

@@ -9,7 +9,7 @@ interface TemplateCardProps {
   splitName?: string;
 }
 
-export function TemplateCard({ id, name, exerciseCount, splitName }: TemplateCardProps) {
+export function TemplateCard({ id, name, exerciseCount }: TemplateCardProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id,
     data: { sessionId: id, name },

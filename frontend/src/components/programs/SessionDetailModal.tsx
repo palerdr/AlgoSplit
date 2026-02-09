@@ -2,8 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, Unlink, BarChart3 } from 'lucide-react';
 import { Button, Spinner } from '@/components/ui';
 import { detachSession, deleteProgramSession, runDiagnostics, programKeys } from '@/api/programs.api';
-import { useProgramStore } from '@/stores/programStore';
-import type { ProgramSessionResponse, AnalysisResponse } from '@/types/api.types';
+import type { ProgramSessionResponse } from '@/types/api.types';
 import { MuscleChart } from '@/components/analysis';
 
 interface SessionDetailModalProps {
@@ -14,8 +13,6 @@ interface SessionDetailModalProps {
 
 export function SessionDetailModal({ session, programId, onClose }: SessionDetailModalProps) {
   const queryClient = useQueryClient();
-  const { openDiagnostics } = useProgramStore();
-
   const { data: diagnostics, isLoading: diagLoading } = useQuery({
     queryKey: programKeys.diagnostics(programId, session.id),
     queryFn: () => runDiagnostics(programId, { level: 'session', target_id: session.id }),

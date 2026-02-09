@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Play, Save, RotateCcw, Settings2, ChevronDown, FolderOpen, Loader2, BarChart3, Check } from 'lucide-react';
+import { Save, RotateCcw, Settings2, ChevronDown, FolderOpen, Loader2, BarChart3, Check } from 'lucide-react';
 import { analyzeSplit } from '@/api/analysis.api';
 import { createSplit, getSplits, splitKeys, replaceSplit } from '@/api/splits.api';
 import { SessionBuilder, SessionTemplates } from '@/components/splits';
@@ -103,7 +103,7 @@ export function AnalysisPage() {
   });
 
   // Auto-preview with debouncing
-  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const runAutoPreview = useCallback(() => {
     const validSessions = sessions
@@ -216,36 +216,6 @@ export function AnalysisPage() {
 
   function resetForm() {
     reset();
-  }
-
-  function handleAnalyze() {
-    // Filter out empty sessions and exercises, strip client-only fields
-    const validSessions = sessions
-      .filter(s => s.name.trim() || s.exercises.some(e => e.name.trim()))
-      .map(s => ({
-        ...s,
-        name: s.name.trim() || `Day ${s.day}`,
-        exercises: s.exercises
-          .filter(e => e.name.trim())
-          .map(({ id, ...ex }) => ex), // Strip client-only id field
-      }))
-      .filter(s => s.exercises.length > 0);
-
-    if (validSessions.length === 0) {
-      return; // Could show error toast
-    }
-
-    const request: SplitRequest = {
-      name: splitName,
-      sessions: validSessions,
-      cycle_length: cycleLength ?? undefined,
-      stimulus_duration: stimulusDuration ?? 48,
-      maintenance_volume: maintenanceVolume ?? 3,
-      dataset,
-    };
-
-    console.log('Analyzing split:', JSON.stringify(request, null, 2));
-    analyzeMutation.mutate(request);
   }
 
   function handleSave() {

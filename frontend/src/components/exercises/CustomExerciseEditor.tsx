@@ -219,10 +219,6 @@ export function CustomExerciseEditor({
     }
   };
 
-  const getMuscleDisplayName = (muscleId: string) => {
-    return muscleRegions.find((m) => m.region_id === muscleId)?.display_name || muscleId;
-  };
-
   return (
     <Modal
       isOpen={isOpen}
