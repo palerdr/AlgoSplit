@@ -164,7 +164,7 @@ function MuscleBreakdown({ mc }: { mc: MuscleContribution }) {
 }
 
 // Exercise card with all muscle breakdowns
-function ExerciseCard({ exercise, consecutiveDayPenalty }: { exercise: ExerciseBreakdown; consecutiveDayPenalty: number }) {
+function ExerciseCard({ exercise }: { exercise: ExerciseBreakdown }) {
   const [open, setOpen] = useState(false);
 
   const totalStimulus = exercise.muscle_contributions.reduce((sum, mc) => sum + mc.total_stimulus, 0);
@@ -360,7 +360,7 @@ function SessionSection({ session, defaultOpen = false }: { session: SessionBrea
             axialContributors={axialContributors}
           />
           {session.exercises.map((ex, i) => (
-            <ExerciseCard key={i} exercise={ex} consecutiveDayPenalty={session.consecutive_day_penalty ?? 1.0} />
+            <ExerciseCard key={i} exercise={ex} />
           ))}
         </div>
       )}
