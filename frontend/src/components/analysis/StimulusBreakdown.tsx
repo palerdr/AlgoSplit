@@ -15,12 +15,10 @@ function ModifierStep({
   label,
   value,
   description,
-  isLoss,
 }: {
   label: string;
   value: number;
   description: string;
-  isLoss: boolean;
 }) {
   const pctChange = ((value - 1) * 100).toFixed(0);
   const displayPct = value >= 1 ? `+${pctChange}%` : `${pctChange}%`;
@@ -44,7 +42,7 @@ function ModifierStep({
 }
 
 // Visual breakdown for a single muscle
-function MuscleBreakdown({ mc, consecutiveDayPenalty }: { mc: MuscleContribution; consecutiveDayPenalty: number }) {
+function MuscleBreakdown({ mc }: { mc: MuscleContribution }) {
   const [expanded, setExpanded] = useState(false);
   const tierConfig = TIER_CONFIG[mc.tier] || TIER_CONFIG.quaternary;
 
@@ -96,33 +94,28 @@ function MuscleBreakdown({ mc, consecutiveDayPenalty }: { mc: MuscleContribution
                   label="Recovery"
                   value={avgRecovery}
                   description="trained too recently"
-                  isLoss={true}
                 />
               )}
               <ModifierStep
                 label="Bilateral"
                 value={avgBilateral}
                 description={avgBilateral < 1 ? 'bilateral deficit' : avgBilateral > 1 ? 'unilateral boost' : 'neutral'}
-                isLoss={avgBilateral < 1}
               />
               <ModifierStep
                 label="Diminishing Returns"
                 value={avgLocal}
                 description="volume fatigue curve"
-                isLoss={avgLocal < 1}
               />
               <ModifierStep
                 label="CNS Fatigue"
                 value={avgCNS}
                 description="session fatigue"
-                isLoss={avgCNS < 1}
               />
               {avgConsecutive < 1 && (
                 <ModifierStep
                   label="Consecutive Days"
                   value={avgConsecutive}
                   description="training without rest"
-                  isLoss={true}
                 />
               )}
             </div>
@@ -218,7 +211,7 @@ function ExerciseCard({ exercise, consecutiveDayPenalty }: { exercise: ExerciseB
             )}
           </div>
           {exercise.muscle_contributions.map((mc) => (
-            <MuscleBreakdown key={mc.muscle_id} mc={mc} consecutiveDayPenalty={consecutiveDayPenalty} />
+            <MuscleBreakdown key={mc.muscle_id} mc={mc} />
           ))}
         </div>
       )}

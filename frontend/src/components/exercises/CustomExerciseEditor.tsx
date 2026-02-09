@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Plus, Trash2, AlertCircle, Check, X } from 'lucide-react';
+import { Plus, Trash2, AlertCircle, Check } from 'lucide-react';
 import { Modal, Button, Input } from '@/components/ui';
 import { getMuscleRegions } from '@/api/customExercises.api';
 import type {
