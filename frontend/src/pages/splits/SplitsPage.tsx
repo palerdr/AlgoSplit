@@ -1,7 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Plus, Trash2, BarChart3, Edit2 } from 'lucide-react';
+import { Plus, Trash2, BarChart3, Edit2, Upload } from 'lucide-react';
 import { Card, CardContent, Button, Spinner } from '@/components/ui';
+import { CsvImportModal } from '@/components/splits';
 import { getSplits, deleteSplit, splitKeys, analyzeSplit } from '@/api/splits.api';
 import { formatDate } from '@/lib/utils';
 import { SplitStatsRow, SuggestionsSummary } from '@/components/analysis';
@@ -163,6 +164,7 @@ export function SplitsPage() {
     queryKey: splitKeys.list(),
     queryFn: getSplits,
   });
+  const [showImport, setShowImport] = useState(false);
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -172,12 +174,18 @@ export function SplitsPage() {
           <h1 className="text-2xl font-bold text-foreground">Your Splits</h1>
           <p className="text-secondary">Manage your training programs</p>
         </div>
-        <Link to="/splits/new">
-          <Button>
-            <Plus className="mr-2 h-4 w-4" />
-            Create Split
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={() => setShowImport(true)}>
+            <Upload className="h-4 w-4 md:mr-2" />
+            <span className="hidden md:inline">Import CSV</span>
           </Button>
-        </Link>
+          <Link to="/splits/new">
+            <Button size="sm">
+              <Plus className="h-4 w-4 md:mr-2" />
+              <span className="hidden md:inline">Create Split</span>
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Splits list */}
@@ -207,6 +215,8 @@ export function SplitsPage() {
           ))}
         </div>
       )}
+
+      <CsvImportModal isOpen={showImport} onClose={() => setShowImport(false)} />
     </div>
   );
 }

@@ -6,7 +6,7 @@ Handles logging completed workouts and viewing history
 from typing import Optional
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Depends, status, Query
-from db.supabase import get_supabase_client, get_supabase_client_with_token
+from db.supabase import get_supabase_client_with_token
 from schemas.workouts import (
     WorkoutLogCreate,
     WorkoutLogResponse,
@@ -92,7 +92,7 @@ async def log_workout(
     - Supports notes at both workout and exercise level
     """
     try:
-        supabase = get_supabase_client()
+        supabase = get_supabase_client_with_token(current_user.access_token)
 
         # Validate exercise data consistency
         for exercise in workout.exercises:
@@ -119,8 +119,16 @@ async def log_workout(
             "completed_at": completed_at.isoformat(),
         }
 
-        if workout.session_id:
-            workout_data["session_id"] = workout.session_id
+        # Validate session_id FK before inserting — the session may have been
+        # deleted/recreated if the user replaced exercises mid-workout
+        session_id = workout.session_id
+        if session_id:
+            session_check = supabase.table("sessions").select("id").eq(
+                "id", session_id
+            ).execute()
+            if session_check.data:
+                workout_data["session_id"] = session_id
+
         if workout.split_id:
             workout_data["split_id"] = workout.split_id
         if workout.duration_minutes:
@@ -206,7 +214,7 @@ async def get_workout_history(
     - Can filter to recent workouts via days parameter
     """
     try:
-        supabase = get_supabase_client()
+        supabase = get_supabase_client_with_token(current_user.access_token)
 
         # Build query
         query = supabase.table("workout_logs").select("*").eq(
@@ -256,6 +264,146 @@ async def get_workout_history(
         )
 
 
+@router.delete(
+    "/exercises/by-name/{exercise_name}",
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+    },
+    summary="Clear exercise history",
+    description="Delete all past workout_exercises rows for a specific exercise name",
+)
+async def clear_exercise_history(
+    exercise_name: str,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """
+    Delete all logged data for a specific exercise across all workouts.
+    """
+    try:
+        supabase = get_supabase_client_with_token(current_user.access_token)
+
+        # Get user's workout IDs
+        logs = supabase.table("workout_logs").select("id").eq(
+            "user_id", current_user.id
+        ).execute()
+
+        if not logs.data:
+            return {"deleted_count": 0}
+
+        log_ids = [w["id"] for w in logs.data]
+
+        # Delete matching exercises (case-insensitive)
+        result = supabase.table("workout_exercises").delete() \
+            .in_("workout_log_id", log_ids) \
+            .ilike("exercise_name", exercise_name) \
+            .execute()
+
+        return {"deleted_count": len(result.data) if result.data else 0}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to clear exercise history: {str(e)}",
+        )
+
+
+@router.put(
+    "/{workout_id}",
+    response_model=WorkoutLogResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid workout data"},
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+        404: {"model": ErrorResponse, "description": "Workout not found"},
+    },
+    summary="Update a logged workout",
+    description="Replace exercises in a logged workout (does NOT update split template)",
+)
+async def update_workout(
+    workout_id: str,
+    workout: WorkoutLogCreate,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """
+    Update a logged workout's exercises.
+    Deletes existing exercises and replaces with the provided list.
+    This only mutates the logged record — it does NOT touch the split template.
+    """
+    try:
+        supabase = get_supabase_client_with_token(current_user.access_token)
+
+        # Verify workout belongs to user
+        existing = supabase.table("workout_logs").select("id").eq(
+            "id", workout_id
+        ).eq("user_id", current_user.id).execute()
+
+        if not existing.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Workout not found",
+            )
+
+        # Validate exercise data
+        for exercise in workout.exercises:
+            if len(exercise.reps) != exercise.sets_completed:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Exercise '{exercise.exercise_name}': reps length mismatch",
+                )
+            if len(exercise.weight) != exercise.sets_completed:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Exercise '{exercise.exercise_name}': weight length mismatch",
+                )
+
+        # Update workout log metadata
+        update_data = {"session_name": workout.session_name}
+        if workout.completed_at:
+            update_data["completed_at"] = workout.completed_at.isoformat()
+        if workout.duration_minutes is not None:
+            update_data["duration_minutes"] = workout.duration_minutes
+        update_data["notes"] = workout.notes
+
+        supabase.table("workout_logs").update(update_data).eq("id", workout_id).execute()
+
+        # Delete old exercises
+        supabase.table("workout_exercises").delete().eq(
+            "workout_log_id", workout_id
+        ).execute()
+
+        # Insert new exercises
+        exercises_data = []
+        for idx, exercise in enumerate(workout.exercises):
+            exercise_data = {
+                "workout_log_id": workout_id,
+                "exercise_name": exercise.exercise_name,
+                "sets_completed": exercise.sets_completed,
+                "reps": exercise.reps,
+                "weight": exercise.weight,
+                "order_index": idx,
+            }
+            if exercise.notes:
+                exercise_data["notes"] = exercise.notes
+
+            result = supabase.table("workout_exercises").insert(exercise_data).execute()
+            if result.data:
+                exercises_data.append(result.data[0])
+
+        # Fetch updated workout
+        workout_result = supabase.table("workout_logs").select("*").eq(
+            "id", workout_id
+        ).execute()
+
+        return build_workout_response(workout_result.data[0], exercises_data)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update workout: {str(e)}",
+        )
+
+
 @router.get(
     "/{workout_id}",
     response_model=WorkoutLogResponse,
@@ -276,12 +424,12 @@ async def get_workout(
     Returns workout with all exercise details
     """
     try:
-        supabase = get_supabase_client()
+        supabase = get_supabase_client_with_token(current_user.access_token)
 
-        # Get workout log (RLS ensures user can only access their own)
+        # Get workout log (app-level user_id check + RLS)
         workout_result = supabase.table("workout_logs").select("*").eq(
             "id", workout_id
-        ).execute()
+        ).eq("user_id", current_user.id).execute()
 
         if not workout_result.data:
             raise HTTPException(
@@ -333,7 +481,7 @@ async def get_workout_stats(
     - Last workout date
     """
     try:
-        supabase = get_supabase_client()
+        supabase = get_supabase_client_with_token(current_user.access_token)
 
         # Build query
         query = supabase.table("workout_logs").select("*").eq(
@@ -439,10 +587,12 @@ async def delete_workout(
     This will also delete all associated exercises (cascade)
     """
     try:
-        supabase = get_supabase_client()
+        supabase = get_supabase_client_with_token(current_user.access_token)
 
-        # Delete workout (RLS ensures user can only delete their own)
-        result = supabase.table("workout_logs").delete().eq("id", workout_id).execute()
+        # Delete workout (app-level user_id check + RLS)
+        result = supabase.table("workout_logs").delete().eq(
+            "id", workout_id
+        ).eq("user_id", current_user.id).execute()
 
         if not result.data:
             raise HTTPException(

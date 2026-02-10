@@ -207,19 +207,9 @@ export function ProgressPage() {
                 <CardTitle>Muscle Stimulus ({analysisDays}-Day Window)</CardTitle>
               </CardHeader>
               <CardContent>
-                <MuscleChart muscles={analysisData.muscles} height={400} />
+                <MuscleChart muscles={analysisData.muscles} height={400} proportionalColors />
               </CardContent>
             </Card>
-            {analysisData.suggestions.length > 0 && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Optimization Suggestions</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <SuggestionsList suggestions={analysisData.suggestions} maxItems={5} />
-                </CardContent>
-              </Card>
-            )}
           </div>
         )}
       </div>
@@ -398,6 +388,18 @@ export function ProgressPage() {
             </CardContent>
           </Card>
         </>
+      )}
+
+      {/* Suggestions at the very bottom */}
+      {analysisData && analysisData.suggestions.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Optimization Suggestions</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <SuggestionsList suggestions={analysisData.suggestions} maxItems={5} />
+          </CardContent>
+        </Card>
       )}
     </div>
   );

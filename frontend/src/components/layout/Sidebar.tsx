@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, Link } from 'react-router-dom';
 import {
   LayoutDashboard,
   Dumbbell,
@@ -22,8 +22,8 @@ const navItems = [
   { to: '/workout', icon: Dumbbell, label: 'Workout' },
   { to: '/splits', icon: Layers, label: 'Splits' },
   { to: '/analysis', icon: BarChart3, label: 'Analysis' },
-  { to: '/compare', icon: GitCompareArrows, label: 'Compare' },
   { to: '/progress', icon: TrendingUp, label: 'Progress' },
+  { to: '/compare', icon: GitCompareArrows, label: 'Compare' },
   { to: '/programs', icon: CalendarDays, label: 'Programs' },
   { to: '/history', icon: History, label: 'History' },
   { to: '/exercises', icon: Library, label: 'Exercises' },
@@ -37,11 +37,11 @@ export function Sidebar() {
   return (
     <aside className="fixed left-0 top-0 bottom-0 w-56 bg-charcoal border-r border-white/8 flex flex-col">
       {/* Logo */}
-      <div className="h-14 flex items-center px-4 border-b border-white/8">
+      <Link to="/" className="h-14 flex items-center px-4 border-b border-white/8 hover:bg-steel/50 transition-colors">
         <h1 className="text-lg font-bold text-foreground">
           Algo<span className="text-crimson">Split</span>
         </h1>
-      </div>
+      </Link>
 
       {/* Navigation */}
       <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">

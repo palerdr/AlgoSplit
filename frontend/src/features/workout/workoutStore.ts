@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { WorkoutExerciseCreate } from '@/types/api.types';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 export interface SetData {
   reps: number;
@@ -25,6 +26,7 @@ interface ActiveWorkout {
   splitId?: string;
   programSessionId?: string;
   previousData?: Record<string, { reps: number[]; weight: number[] }>;
+  retroDate?: string; // ISO string when user logs a past workout
 }
 
 interface RestTimerState {
@@ -37,10 +39,9 @@ interface RestTimerState {
 interface WorkoutState {
   activeWorkout: ActiveWorkout | null;
   restTimer: RestTimerState;
-  defaultRestDuration: number;
 
   // Workout actions
-  startWorkout: (sessionName: string) => void;
+  startWorkout: (sessionName: string, retroDate?: string) => void;
   startWorkoutFromSession: (
     sessionName: string,
     exercises: Array<{ name: string; sets: number; unilateral: boolean }>,
@@ -48,6 +49,7 @@ interface WorkoutState {
     sessionId?: string,
     splitId?: string,
     programSessionId?: string,
+    retroDate?: string,
   ) => void;
   cancelWorkout: () => void;
   addExercise: (name: string, opts?: { unilateral?: boolean }) => void;
@@ -61,19 +63,20 @@ interface WorkoutState {
   ) => void;
   completeSet: (exerciseId: string, setIndex: number) => void;
   updateExerciseNotes: (exerciseId: string, notes: string) => void;
+  renameExercise: (exerciseId: string, newName: string) => void;
   reorderExercises: (fromIndex: number, toIndex: number) => void;
 
   // Rest timer actions
   startRestTimer: (duration?: number, exerciseId?: string) => void;
   stopRestTimer: () => void;
   tickRestTimer: () => void;
-  setDefaultRestDuration: (duration: number) => void;
 
   // Finalize workout
   getWorkoutData: () => {
     sessionName: string;
     exercises: WorkoutExerciseCreate[];
     durationMinutes: number;
+    completedAt?: string;
     sessionId?: string;
     splitId?: string;
     programSessionId?: string;
@@ -94,19 +97,19 @@ export const useWorkoutStore = create<WorkoutState>()(
         remaining: 0,
         exerciseId: null,
       },
-      defaultRestDuration: 90,
 
-      startWorkout: (sessionName) => {
+      startWorkout: (sessionName, retroDate) => {
         set({
           activeWorkout: {
             sessionName,
-            startedAt: new Date().toISOString(),
+            startedAt: retroDate || new Date().toISOString(),
             exercises: [],
+            retroDate,
           },
         });
       },
 
-      startWorkoutFromSession: (sessionName, exercises, previousData, sessionId, splitId, programSessionId) => {
+      startWorkoutFromSession: (sessionName, exercises, previousData, sessionId, splitId, programSessionId, retroDate) => {
         const workoutExercises: WorkoutExercise[] = exercises.map((ex) => {
           const setCount = ex.sets;
           let sets: SetData[];
@@ -138,12 +141,13 @@ export const useWorkoutStore = create<WorkoutState>()(
         set({
           activeWorkout: {
             sessionName,
-            startedAt: new Date().toISOString(),
+            startedAt: retroDate || new Date().toISOString(),
             exercises: workoutExercises,
             sessionId,
             splitId,
             programSessionId,
             previousData,
+            retroDate,
           },
         });
       },
@@ -296,7 +300,7 @@ export const useWorkoutStore = create<WorkoutState>()(
       },
 
       completeSet: (exerciseId, setIndex) => {
-        const { activeWorkout, startRestTimer, stopRestTimer, defaultRestDuration } = get();
+        const { activeWorkout, startRestTimer, stopRestTimer } = get();
         if (!activeWorkout) return;
 
         // Find current completion state
@@ -323,7 +327,8 @@ export const useWorkoutStore = create<WorkoutState>()(
 
         // Start rest timer only when completing (not uncompleting)
         if (!wasCompleted) {
-          startRestTimer(defaultRestDuration, exerciseId);
+          const restDuration = useSettingsStore.getState().defaultRestDuration;
+          startRestTimer(restDuration, exerciseId);
         } else {
           stopRestTimer();
         }
@@ -338,6 +343,20 @@ export const useWorkoutStore = create<WorkoutState>()(
             ...activeWorkout,
             exercises: activeWorkout.exercises.map((exercise) =>
               exercise.id === exerciseId ? { ...exercise, notes } : exercise
+            ),
+          },
+        });
+      },
+
+      renameExercise: (exerciseId, newName) => {
+        const { activeWorkout } = get();
+        if (!activeWorkout) return;
+
+        set({
+          activeWorkout: {
+            ...activeWorkout,
+            exercises: activeWorkout.exercises.map((exercise) =>
+              exercise.id === exerciseId ? { ...exercise, name: newName } : exercise
             ),
           },
         });
@@ -360,8 +379,7 @@ export const useWorkoutStore = create<WorkoutState>()(
       },
 
       startRestTimer: (duration, exerciseId) => {
-        const { defaultRestDuration } = get();
-        const timerDuration = duration ?? defaultRestDuration;
+        const timerDuration = duration ?? useSettingsStore.getState().defaultRestDuration;
 
         set({
           restTimer: {
@@ -407,10 +425,6 @@ export const useWorkoutStore = create<WorkoutState>()(
         }
       },
 
-      setDefaultRestDuration: (duration) => {
-        set({ defaultRestDuration: duration });
-      },
-
       getWorkoutData: () => {
         const { activeWorkout } = get();
         if (!activeWorkout) return null;
@@ -422,9 +436,36 @@ export const useWorkoutStore = create<WorkoutState>()(
 
         // Transform exercises to API format
         // Auto-save: count any set with reps > 0 as a valid set (no checkmark required)
+        // For unilateral exercises, merge L/R pairs into single sets (L+R = 1 set)
         const exercises: WorkoutExerciseCreate[] = activeWorkout.exercises
           .filter((ex) => ex.sets.some((s) => s.reps > 0))
           .map((exercise) => {
+            if (exercise.unilateral) {
+              // Merge L/R pairs: take max reps/weight from each pair
+              const merged: { reps: number; weight: number; rir?: number }[] = [];
+              for (let i = 0; i < exercise.sets.length; i += 2) {
+                const left = exercise.sets[i];
+                const right = exercise.sets[i + 1];
+                const lValid = left && left.reps > 0;
+                const rValid = right && right.reps > 0;
+                if (!lValid && !rValid) continue;
+                merged.push({
+                  reps: Math.max(left?.reps ?? 0, right?.reps ?? 0),
+                  weight: Math.max(left?.weight ?? 0, right?.weight ?? 0),
+                  rir: left?.rir ?? right?.rir,
+                });
+              }
+              const rirValues = merged.map((s) => s.rir).filter((r): r is number => r !== undefined);
+              return {
+                exercise_name: exercise.name,
+                sets_completed: merged.length,
+                reps: merged.map((s) => s.reps),
+                weight: merged.map((s) => s.weight),
+                rir: rirValues.length > 0 ? rirValues : undefined,
+                notes: exercise.notes || undefined,
+              };
+            }
+
             const validSets = exercise.sets.filter((s) => s.reps > 0);
             const rirValues = validSets.map((s) => s.rir).filter((r): r is number => r !== undefined);
             return {
@@ -441,6 +482,7 @@ export const useWorkoutStore = create<WorkoutState>()(
           sessionName: activeWorkout.sessionName,
           exercises,
           durationMinutes,
+          completedAt: activeWorkout.retroDate || undefined,
           sessionId: activeWorkout.sessionId,
           splitId: activeWorkout.splitId,
           programSessionId: activeWorkout.programSessionId,
@@ -451,7 +493,6 @@ export const useWorkoutStore = create<WorkoutState>()(
       name: 'workout-storage',
       partialize: (state) => ({
         activeWorkout: state.activeWorkout,
-        defaultRestDuration: state.defaultRestDuration,
       }),
     }
   )

@@ -18,6 +18,7 @@ class WorkoutExerciseCreate(BaseModel):
     sets_completed: int = Field(..., gt=0, description="Number of sets completed")
     reps: List[int] = Field(..., min_items=1, description="Reps for each set, e.g., [8, 8, 7]")
     weight: List[float] = Field(..., min_items=1, description="Weight in pounds for each set, e.g., [185, 185, 185]")
+    rir: Optional[List[int]] = Field(None, description="Reps in reserve for each set, e.g., [2, 3, 2]")
     notes: Optional[str] = Field(None, max_length=500, description="Notes about this exercise")
 
     model_config = {

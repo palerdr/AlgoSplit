@@ -87,6 +87,96 @@ export async function replaceSplit(id: string, data: SplitRequest): Promise<Spli
   return response.data;
 }
 
+export async function replaceExerciseInSplit(
+  splitId: string,
+  oldName: string,
+  newName: string,
+): Promise<SplitResponse> {
+  // Fetch current split
+  const split = await getSplit(splitId);
+
+  // Walk sessions, replace exercise name
+  const updatedSessions = split.sessions.map((session) => ({
+    name: session.name,
+    day: session.day_number,
+    exercises: session.exercises.map((ex) => ({
+      name: ex.exercise_name === oldName ? newName : ex.exercise_name,
+      sets: ex.sets,
+      unilateral: ex.unilateral,
+      resistance_profile: ex.resistance_profile,
+    })),
+  }));
+
+  // PUT full replacement
+  return replaceSplit(splitId, {
+    name: split.name,
+    sessions: updatedSessions,
+    cycle_length: split.cycle_length ?? undefined,
+    stimulus_duration: split.stimulus_duration,
+    maintenance_volume: split.maintenance_volume,
+    dataset: split.dataset as 'schoenfeld' | 'pelland' | 'average',
+  });
+}
+
+export async function reorderExercisesInSplit(
+  splitId: string,
+  sessionName: string,
+  exerciseNames: string[],
+): Promise<SplitResponse> {
+  const split = await getSplit(splitId);
+
+  const updatedSessions = split.sessions.map((session) => {
+    if (session.name !== sessionName) {
+      return {
+        name: session.name,
+        day: session.day_number,
+        exercises: session.exercises.map((ex) => ({
+          name: ex.exercise_name,
+          sets: ex.sets,
+          unilateral: ex.unilateral,
+          resistance_profile: ex.resistance_profile,
+        })),
+      };
+    }
+    // Reorder: build new exercise list in the order of exerciseNames
+    const exerciseMap = new Map(
+      session.exercises.map((ex) => [ex.exercise_name, ex])
+    );
+    const reordered = exerciseNames
+      .filter((name) => exerciseMap.has(name))
+      .map((name) => {
+        const ex = exerciseMap.get(name)!;
+        return {
+          name: ex.exercise_name,
+          sets: ex.sets,
+          unilateral: ex.unilateral,
+          resistance_profile: ex.resistance_profile,
+        };
+      });
+    // Append any exercises not in the new order (shouldn't happen, but safety)
+    for (const ex of session.exercises) {
+      if (!exerciseNames.includes(ex.exercise_name)) {
+        reordered.push({
+          name: ex.exercise_name,
+          sets: ex.sets,
+          unilateral: ex.unilateral,
+          resistance_profile: ex.resistance_profile,
+        });
+      }
+    }
+    return { name: session.name, day: session.day_number, exercises: reordered };
+  });
+
+  return replaceSplit(splitId, {
+    name: split.name,
+    sessions: updatedSessions,
+    cycle_length: split.cycle_length ?? undefined,
+    stimulus_duration: split.stimulus_duration,
+    maintenance_volume: split.maintenance_volume,
+    dataset: split.dataset as 'schoenfeld' | 'pelland' | 'average',
+  });
+}
+
 export async function analyzeSplit(id: string): Promise<AnalysisResponse> {
   const response = await apiClient.post<AnalysisResponse>(
     `/api/splits/${id}/analyze`

@@ -36,5 +36,8 @@ export { SettingsPage } from './settings';
 // Tools
 export { ToolsPage } from './tools';
 
+// Landing
+export { LandingPage } from './landing';
+
 // Placeholder for pages not yet built
 export { PlaceholderPage } from './PlaceholderPage';

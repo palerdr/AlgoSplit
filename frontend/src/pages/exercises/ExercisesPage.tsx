@@ -11,7 +11,8 @@ import {
   deleteCustomExercise,
   customExerciseKeys,
 } from '@/api/customExercises.api';
-import type { CustomExerciseCreate, CustomExerciseResponse } from '@/types/api.types';
+import { getPatterns } from '@/api/analysis.api';
+import type { CustomExerciseCreate, CustomExerciseResponse, TieredTargets } from '@/types/api.types';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/features/auth';
 
@@ -27,7 +28,35 @@ const equipmentOptions: { value: Equipment; label: string }[] = [
   { value: 'bodyweight', label: 'Bodyweight' },
 ];
 
-function ExerciseCard({ exercise }: { exercise: Exercise }) {
+function TierBadges({ label, targets, color }: { label: string; targets: Record<string, number>; color: string }) {
+  const entries = Object.entries(targets);
+  if (entries.length === 0) return null;
+
+  const colorMap: Record<string, string> = {
+    crimson: 'bg-crimson/10 text-crimson',
+    yellow: 'bg-yellow-400/10 text-yellow-400',
+    blue: 'bg-blue-400/10 text-blue-400',
+    muted: 'bg-white/5 text-muted',
+  };
+  const cls = colorMap[color] || colorMap.muted;
+
+  return (
+    <div>
+      <span className={`text-xs font-medium ${color === 'crimson' ? 'text-crimson' : color === 'yellow' ? 'text-yellow-400' : color === 'blue' ? 'text-blue-400' : 'text-muted'}`}>
+        {label}:
+      </span>
+      <div className="flex flex-wrap gap-1 mt-1">
+        {entries.map(([muscle, weight]) => (
+          <span key={muscle} className={`px-2 py-0.5 text-xs rounded ${cls}`}>
+            {muscle.replace(/_/g, ' ')} ({(weight * 100).toFixed(0)}%)
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ExerciseCard({ exercise, targets }: { exercise: Exercise; targets?: TieredTargets }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -55,8 +84,8 @@ function ExerciseCard({ exercise }: { exercise: Exercise }) {
         )}
       </div>
       {expanded && (
-        <div className="mt-3 pt-3 border-t border-white/5 text-sm">
-          <div className="flex items-center justify-between mb-2">
+        <div className="mt-3 pt-3 border-t border-white/5 text-sm space-y-3">
+          <div className="flex items-center justify-between">
             <span className="text-secondary">Pattern:</span>
             <span className="text-foreground font-mono text-xs">
               {exercise.pattern.replace(/_/g, ' ')}
@@ -68,13 +97,21 @@ function ExerciseCard({ exercise }: { exercise: Exercise }) {
               <span className="text-foreground">Unilateral (+5% stimulus)</span>
             </div>
           )}
+          {targets && (
+            <div className="space-y-2 pt-1">
+              <TierBadges label="Prime" targets={targets.prime} color="crimson" />
+              <TierBadges label="Secondary" targets={targets.secondary} color="yellow" />
+              <TierBadges label="Tertiary" targets={targets.tertiary} color="blue" />
+              <TierBadges label="Quaternary" targets={targets.quaternary} color="muted" />
+            </div>
+          )}
         </div>
       )}
     </button>
   );
 }
 
-function CategorySection({ category, equipment }: { category: ExerciseCategory; equipment: Equipment }) {
+function CategorySection({ category, equipment, patternMap }: { category: ExerciseCategory; equipment: Equipment; patternMap: Record<string, TieredTargets> }) {
   const [expanded, setExpanded] = useState(true);
 
   const filteredExercises = useMemo(() => {
@@ -99,7 +136,7 @@ function CategorySection({ category, equipment }: { category: ExerciseCategory; 
       {expanded && (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
           {filteredExercises.map((exercise) => (
-            <ExerciseCard key={exercise.name} exercise={exercise} />
+            <ExerciseCard key={exercise.name} exercise={exercise} targets={patternMap[exercise.pattern]} />
           ))}
         </div>
       )}
@@ -239,6 +276,9 @@ export function ExercisesPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [equipment, setEquipment] = useState<Equipment>('all');
 
+  // Pattern targets lookup
+  const [patternMap, setPatternMap] = useState<Record<string, TieredTargets>>({});
+
   // Custom exercises state
   const [customExercises, setCustomExercises] = useState<CustomExerciseResponse[]>([]);
   const [loadingCustom, setLoadingCustom] = useState(false);
@@ -247,6 +287,19 @@ export function ExercisesPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingExercise, setDeletingExercise] = useState<CustomExerciseResponse | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // Load pattern definitions once
+  useEffect(() => {
+    getPatterns()
+      .then((res) => {
+        const map: Record<string, TieredTargets> = {};
+        for (const p of res.patterns) {
+          map[p.name] = p.tiered_targets;
+        }
+        setPatternMap(map);
+      })
+      .catch((err) => console.error('Failed to load patterns:', err));
+  }, []);
 
   // Load custom exercises
   useEffect(() => {
@@ -417,7 +470,7 @@ export function ExercisesPage() {
               ) : (
                 <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
                   {searchResults.map((exercise) => (
-                    <ExerciseCard key={exercise.name} exercise={exercise} />
+                    <ExerciseCard key={exercise.name} exercise={exercise} targets={patternMap[exercise.pattern]} />
                   ))}
                 </div>
               )}
@@ -430,6 +483,7 @@ export function ExercisesPage() {
                   key={category.name}
                   category={category}
                   equipment={equipment}
+                  patternMap={patternMap}
                 />
               ))}
             </div>

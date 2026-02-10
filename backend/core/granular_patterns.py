@@ -421,6 +421,26 @@ GRANULAR_PATTERNS: Dict[str, PatternDef] = {
         "axial_load": 0.0,
         "notes": "Reverse curls (pronated grip) - all flexors in prime for leverage redistribution"
     },
+    # =========================================================================
+    # TRICEP-DOMINANT COMPOUNDS
+    # =========================================================================
+    "tricep_compound": {
+        "prime": {
+            "triceps_lateral_medial": 0.50,
+        },
+        "secondary": {
+            "triceps_long_head": 0.15,
+            "sternocostal": 0.20,
+        },
+        "tertiary": {
+            "anterior_deltoid": 0.10,
+            "clavicular": 0.05,
+        },
+        "quaternary": {},
+        "axial_load": 0.0,
+        "notes": "Close grip bench press, weighted dips - tricep dominant compound pressing with chest involvement"
+    },
+
     "elbow_extension_isolation": {
         "prime": {
             "triceps_long_head": 0.70,

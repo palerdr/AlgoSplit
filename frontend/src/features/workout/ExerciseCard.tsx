@@ -1,21 +1,34 @@
 import { useState } from 'react';
-import { ChevronDown, ChevronUp, Plus, Trash2, GripVertical } from 'lucide-react';
-import { Card } from '@/components/ui';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { ChevronDown, ChevronUp, Plus, Trash2, GripVertical, RefreshCw, RotateCcw } from 'lucide-react';
+import { Card, ConfirmDialog } from '@/components/ui';
 import { SetRow } from './SetRow';
+import { ExercisePicker } from './ExercisePicker';
 import { type WorkoutExercise, useWorkoutStore } from './workoutStore';
+import { replaceExerciseInSplit, splitKeys } from '@/api/splits.api';
+import { clearExerciseHistory, workoutKeys } from '@/api/workouts.api';
 import { cn } from '@/lib/utils';
 
 interface ExerciseCardProps {
   exercise: WorkoutExercise;
   previousExerciseData?: { reps: number[]; weight: number[] };
+  splitId?: string;
+  dragHandleProps?: Record<string, unknown>;
 }
 
 export function ExerciseCard({
   exercise,
   previousExerciseData,
+  splitId,
+  dragHandleProps,
 }: ExerciseCardProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const [showNotes, setShowNotes] = useState(false);
+  const [showReplacePicker, setShowReplacePicker] = useState(false);
+  const [showReplaceConfirm, setShowReplaceConfirm] = useState<{ newName: string } | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  const queryClient = useQueryClient();
 
   const {
     addSet,
@@ -24,13 +37,44 @@ export function ExerciseCard({
     completeSet,
     updateExerciseNotes,
     removeExercise,
+    renameExercise,
   } = useWorkoutStore();
+
+  const replaceMutation = useMutation({
+    mutationFn: ({ oldName, newName }: { oldName: string; newName: string }) =>
+      replaceExerciseInSplit(splitId!, oldName, newName),
+    onSuccess: (_data, { newName }) => {
+      renameExercise(exercise.id, newName);
+      queryClient.invalidateQueries({ queryKey: splitKeys.all });
+      setShowReplaceConfirm(null);
+    },
+  });
+
+  const resetMutation = useMutation({
+    mutationFn: () => clearExerciseHistory(exercise.name),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: workoutKeys.all });
+      setShowResetConfirm(false);
+    },
+  });
 
   const isUnilateral = exercise.unilateral ?? false;
   const completedSets = exercise.sets.filter((s) => s.completed).length;
   const totalSets = exercise.sets.length;
   const logicalSets = isUnilateral ? Math.floor(totalSets / 2) : totalSets;
   const logicalCompleted = isUnilateral ? Math.floor(completedSets / 2) : completedSets;
+
+  const handleReplacePick = (newName: string) => {
+    setShowReplacePicker(false);
+    if (newName !== exercise.name) {
+      setShowReplaceConfirm({ newName });
+    }
+  };
+
+  const handleReplaceConfirm = () => {
+    if (!showReplaceConfirm || !splitId) return;
+    replaceMutation.mutate({ oldName: exercise.name, newName: showReplaceConfirm.newName });
+  };
 
   return (
     <Card className="overflow-hidden">
@@ -39,7 +83,11 @@ export function ExerciseCard({
         className="flex items-center gap-3 p-3 cursor-pointer hover:bg-steel/50 transition-colors"
         onClick={() => setIsExpanded(!isExpanded)}
       >
-        <div className="text-muted cursor-grab">
+        <div
+          className="text-muted cursor-grab touch-none"
+          {...dragHandleProps}
+          onClick={(e) => e.stopPropagation()}
+        >
           <GripVertical size={16} />
         </div>
 
@@ -174,6 +222,24 @@ export function ExerciseCard({
 
             <div className="flex-1" />
 
+            {splitId && (
+              <button
+                onClick={() => setShowReplacePicker(true)}
+                className="p-1.5 text-muted hover:text-foreground transition-colors"
+                title="Replace in program"
+              >
+                <RefreshCw size={16} />
+              </button>
+            )}
+
+            <button
+              onClick={() => setShowResetConfirm(true)}
+              className="p-1.5 text-muted hover:text-foreground transition-colors"
+              title="Reset history"
+            >
+              <RotateCcw size={16} />
+            </button>
+
             <button
               onClick={() => removeExercise(exercise.id)}
               className="p-1.5 text-muted hover:text-error transition-colors"
@@ -198,6 +264,36 @@ export function ExerciseCard({
           )}
         </div>
       )}
+
+      {/* Replace Exercise Picker */}
+      <ExercisePicker
+        isOpen={showReplacePicker}
+        onClose={() => setShowReplacePicker(false)}
+        onSelect={handleReplacePick}
+      />
+
+      {/* Replace Confirmation */}
+      <ConfirmDialog
+        isOpen={!!showReplaceConfirm}
+        onClose={() => setShowReplaceConfirm(null)}
+        onConfirm={handleReplaceConfirm}
+        title="Replace Exercise in Split?"
+        description={`Replace '${exercise.name}' with '${showReplaceConfirm?.newName}' in your split? This updates all sessions that include this exercise.`}
+        confirmText="Replace"
+        loading={replaceMutation.isPending}
+      />
+
+      {/* Reset History Confirmation */}
+      <ConfirmDialog
+        isOpen={showResetConfirm}
+        onClose={() => setShowResetConfirm(false)}
+        onConfirm={() => resetMutation.mutate()}
+        title={`Reset History for '${exercise.name}'?`}
+        description="This will permanently delete all past logged data for this exercise across all workouts. This cannot be undone."
+        confirmText="Reset History"
+        variant="destructive"
+        loading={resetMutation.isPending}
+      />
     </Card>
   );
 }

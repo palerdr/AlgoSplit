@@ -18,6 +18,8 @@ interface MuscleChartProps {
   muscles: MuscleStats[];
   height?: number;
   showAll?: boolean;
+  /** Color bars proportionally to the max value instead of fixed thresholds */
+  proportionalColors?: boolean;
 }
 
 const stimulusColors = [
@@ -33,6 +35,15 @@ const stimulusColors = [
 
 function getBarColor(netStimulus: number): string {
   const level = getStimulusLevel(netStimulus);
+  return stimulusColors[level];
+}
+
+/** Map value to color based on its proportion to the dataset max (0→gray, max→emerald) */
+function getProportionalColor(netStimulus: number, maxStimulus: number): string {
+  if (netStimulus <= 0 || maxStimulus <= 0) return stimulusColors[0];
+  const ratio = netStimulus / maxStimulus; // 0..1
+  // Map ratio to color index 1-7
+  const level = Math.min(7, Math.max(1, Math.round(ratio * 7)));
   return stimulusColors[level];
 }
 
@@ -78,13 +89,18 @@ function MuscleTooltip({ active, payload }: CustomTooltipProps) {
   );
 }
 
-export function MuscleChart({ muscles, height = 600, showAll = true }: MuscleChartProps) {
+export function MuscleChart({ muscles, height = 600, showAll = true, proportionalColors = false }: MuscleChartProps) {
   const [showAllMuscles, setShowAllMuscles] = useState(false);
 
   const allMuscles = useMemo(() => {
     const sorted = [...muscles].sort((a, b) => b.net_stimulus - a.net_stimulus);
     return showAll ? sorted : sorted.filter(m => m.net_stimulus > 0 || m.stimulus > 0);
   }, [muscles, showAll]);
+
+  const maxStimulus = useMemo(() =>
+    allMuscles.reduce((max, m) => Math.max(max, m.net_stimulus), 0),
+    [allMuscles]
+  );
 
   const canTruncate = allMuscles.length > INITIAL_VISIBLE;
   const displayMuscles = canTruncate && !showAllMuscles
@@ -116,7 +132,7 @@ export function MuscleChart({ muscles, height = 600, showAll = true }: MuscleCha
               type="category"
               dataKey="display_name"
               width={150}
-              tick={{ fill: '#E5E7EB', fontSize: 11 }}
+              tick={{ fill: '#F3F4F6', fontSize: 13, fontWeight: 500 }}
               axisLine={false}
               tickLine={false}
               tickFormatter={(value: string) => value.length > 18 ? value.slice(0, 16) + '...' : value}
@@ -129,7 +145,13 @@ export function MuscleChart({ muscles, height = 600, showAll = true }: MuscleCha
               isAnimationActive={false}
             >
               {displayMuscles.map((muscle, index) => (
-                <Cell key={`cell-${index}`} fill={getBarColor(muscle.net_stimulus)} />
+                <Cell
+                  key={`cell-${index}`}
+                  fill={proportionalColors
+                    ? getProportionalColor(muscle.net_stimulus, maxStimulus)
+                    : getBarColor(muscle.net_stimulus)
+                  }
+                />
               ))}
             </Bar>
           </BarChart>
@@ -157,27 +179,31 @@ export function MiniMuscleChart({ muscles }: { muscles: MuscleStats[] }) {
     [muscles]
   );
 
+  const chartHeight = Math.max(200, sortedMuscles.length * 32);
+
   return (
     <div className="chart-fade-in">
-      <ResponsiveContainer width="100%" height={280}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <BarChart
           data={sortedMuscles}
           layout="vertical"
           margin={{ top: 0, right: 10, left: 0, bottom: 0 }}
+          barCategoryGap="20%"
         >
           <XAxis type="number" hide />
           <YAxis
             type="category"
             dataKey="display_name"
-            width={100}
-            tick={{ fill: '#E5E7EB', fontSize: 11 }}
+            width={120}
+            tick={{ fill: '#F3F4F6', fontSize: 13, fontWeight: 500 }}
             axisLine={false}
             tickLine={false}
+            interval={0}
           />
           <Bar
             dataKey="net_stimulus"
             radius={[0, 4, 4, 0]}
-            maxBarSize={16}
+            maxBarSize={18}
             isAnimationActive={false}
           >
             {sortedMuscles.map((muscle, index) => (

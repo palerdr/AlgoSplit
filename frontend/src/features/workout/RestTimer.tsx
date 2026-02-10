@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { X, Play, SkipForward } from 'lucide-react';
 import { useWorkoutStore } from './workoutStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { cn } from '@/lib/utils';
 
 export function RestTimer() {
@@ -9,8 +10,8 @@ export function RestTimer() {
     stopRestTimer,
     tickRestTimer,
     startRestTimer,
-    defaultRestDuration,
   } = useWorkoutStore();
+  const defaultRestDuration = useSettingsStore((s) => s.defaultRestDuration);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Tick the timer every second
@@ -96,9 +97,9 @@ export function RestTimer() {
               </button>
             ) : (
               <button
-                onClick={() => startRestTimer(restTimer.remaining + 30)}
+                onClick={stopRestTimer}
                 className="p-2 text-muted hover:text-foreground transition-colors"
-                title="Add 30 seconds"
+                title="Skip rest"
               >
                 <SkipForward size={18} />
               </button>

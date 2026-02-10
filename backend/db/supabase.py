@@ -85,18 +85,14 @@ def reset_clients():
     _supabase_admin = None
 
 
-_user_client: Optional[Client] = None
-
-
 def get_supabase_client_with_token(access_token: str) -> Client:
     """
     Get a Supabase client authenticated with the user's JWT token.
 
-    Reuses a singleton client instance and swaps the auth header to avoid
-    the overhead of creating a new httpx client on every request.
-
-    This allows RLS policies using auth.uid() to work correctly,
-    ensuring database-level security enforcement.
+    Creates a fresh client per request to avoid race conditions where
+    concurrent requests overwrite each other's auth headers on a shared
+    singleton. This ensures RLS policies using auth.uid() always resolve
+    to the correct user.
 
     Args:
         access_token: The user's JWT access token from authentication
@@ -104,14 +100,6 @@ def get_supabase_client_with_token(access_token: str) -> Client:
     Returns:
         Client: Supabase client with the user's auth context
     """
-    global _user_client
-
-    if _user_client is None:
-        _user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-
-    # Set the Authorization header on the PostgREST wrapper's headers.
-    # In postgrest-py, self.headers are passed as per-request headers to httpx,
-    # which take precedence over session.headers. So we must set them here.
-    _user_client.postgrest.headers["authorization"] = f"Bearer {access_token}"
-
-    return _user_client
+    client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    client.postgrest.headers["authorization"] = f"Bearer {access_token}"
+    return client

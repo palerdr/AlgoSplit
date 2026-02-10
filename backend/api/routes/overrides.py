@@ -4,7 +4,7 @@ Allows users to correct exercise classifications
 """
 
 from fastapi import APIRouter, HTTPException, Depends, status
-from db.supabase import get_supabase_client
+from db.supabase import get_supabase_client_with_token
 from schemas.overrides import (
     ExerciseOverrideCreate,
     ExerciseOverrideResponse,
@@ -39,7 +39,7 @@ async def list_overrides(
     Returns all user-specific exercise pattern corrections
     """
     try:
-        supabase = get_supabase_client()
+        supabase = get_supabase_client_with_token(current_user.access_token)
 
         # Get all overrides for user
         result = supabase.table("exercise_overrides").select("*").eq(
@@ -92,15 +92,14 @@ async def create_override(
     - Applies to all future uses of this exercise for this user
     """
     try:
-        supabase = get_supabase_client()
+        supabase = get_supabase_client_with_token(current_user.access_token)
 
         # Validate pattern exists
         if override.pattern_override not in GRANULAR_PATTERNS:
-            available_patterns = list(GRANULAR_PATTERNS.keys())
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid pattern '{override.pattern_override}'. "
-                       f"Use /api/movement-patterns to see available patterns.",
+                       f"Use GET /api/patterns to see available patterns.",
             )
 
         # Insert override (unique constraint will prevent duplicates)
@@ -164,11 +163,11 @@ async def get_override(
     Get a specific override by ID
     """
     try:
-        supabase = get_supabase_client()
+        supabase = get_supabase_client_with_token(current_user.access_token)
 
         result = supabase.table("exercise_overrides").select("*").eq(
             "id", override_id
-        ).execute()
+        ).eq("user_id", current_user.id).execute()
 
         if not result.data:
             raise HTTPException(
@@ -218,7 +217,7 @@ async def update_override(
     Only the pattern can be updated (exercise name is immutable)
     """
     try:
-        supabase = get_supabase_client()
+        supabase = get_supabase_client_with_token(current_user.access_token)
 
         # Validate pattern exists
         if pattern_override not in GRANULAR_PATTERNS:
@@ -227,10 +226,10 @@ async def update_override(
                 detail=f"Invalid pattern '{pattern_override}'",
             )
 
-        # Update override (RLS ensures user can only update their own)
+        # Update override (app-level user_id check + RLS)
         result = supabase.table("exercise_overrides").update({
             "pattern_override": pattern_override,
-        }).eq("id", override_id).execute()
+        }).eq("id", override_id).eq("user_id", current_user.id).execute()
 
         if not result.data:
             raise HTTPException(
@@ -278,12 +277,12 @@ async def delete_override(
     After deletion, the exercise will use default classification
     """
     try:
-        supabase = get_supabase_client()
+        supabase = get_supabase_client_with_token(current_user.access_token)
 
-        # Delete override (RLS ensures user can only delete their own)
+        # Delete override (app-level user_id check + RLS)
         result = supabase.table("exercise_overrides").delete().eq(
             "id", override_id
-        ).execute()
+        ).eq("user_id", current_user.id).execute()
 
         if not result.data:
             raise HTTPException(

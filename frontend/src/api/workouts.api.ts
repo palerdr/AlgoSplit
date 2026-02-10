@@ -38,8 +38,22 @@ export async function logWorkout(data: WorkoutLogCreate): Promise<WorkoutLogResp
   return response.data;
 }
 
+export async function updateWorkout(id: string, data: WorkoutLogCreate): Promise<WorkoutLogResponse> {
+  const response = await apiClient.put<WorkoutLogResponse>(`/api/workouts/${id}`, data);
+  return response.data;
+}
+
 export async function deleteWorkout(id: string): Promise<void> {
   await apiClient.delete(`/api/workouts/${id}`);
+}
+
+export async function clearExerciseHistory(
+  exerciseName: string,
+): Promise<{ deleted_count: number }> {
+  const response = await apiClient.delete<{ deleted_count: number }>(
+    `/api/workouts/exercises/by-name/${encodeURIComponent(exerciseName)}`
+  );
+  return response.data;
 }
 
 export async function getWorkoutStats(days?: number): Promise<WorkoutStatsResponse> {

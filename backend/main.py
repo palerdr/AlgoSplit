@@ -1,18 +1,18 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict
+from fastapi.responses import JSONResponse
+import logging
 import os
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 # Add backend to path for imports
 backend_path = Path(__file__).parent
 sys.path.insert(0, str(backend_path))
 
-from schemas.models import (
-    SplitRequest, AnalysisResponse, MuscleStats, OptimizationSuggestion, SummaryStats,
-    ExerciseParseRequest, ExerciseParseResponse
-)
+from api.security import AUTH_COOKIE_NAME
+from core.rate_limit import RateLimitRule, RateLimiter
 from db.supabase import get_supabase_client
 
 # Initialize FastAPI app
@@ -23,6 +23,95 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
+
+logger = logging.getLogger("splitai.api")
+
+
+@app.exception_handler(HTTPException)
+async def safe_http_exception_handler(_: Request, exc: HTTPException):
+    if exc.status_code >= 500:
+        request_id = uuid4().hex
+        logger.exception("HTTP %s [request_id=%s]", exc.status_code, request_id)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": "Internal server error", "request_id": request_id},
+        )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=exc.headers,
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(_: Request, exc: Exception):
+    request_id = uuid4().hex
+    logger.exception("Unhandled exception [request_id=%s]", request_id, exc_info=exc)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error", "request_id": request_id},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true"
+
+# Rule order matters; first match wins.
+RATE_LIMIT_RULES = [
+    RateLimitRule(prefixes=["/auth/login", "/auth/signup"], limit=5, window=60, scope="ip"),
+    RateLimitRule(
+        prefixes=["/api/analyze-split", "/api/parse-exercise", "/api/analyze-workouts"],
+        limit=200,
+        window=60,
+        scope="ip",
+    ),
+    RateLimitRule(prefixes=["/auth/"], limit=60, window=60, scope="ip"),
+    RateLimitRule(prefixes=["/api/"], limit=120, window=60, scope="user_or_ip"),
+]
+RATE_LIMIT_REDIS_URL = os.getenv("RATE_LIMIT_REDIS_URL", os.getenv("REDIS_URL"))
+RATE_LIMIT_MAX_BUCKETS = int(os.getenv("RATE_LIMIT_MAX_BUCKETS", "50000"))
+RATE_LIMIT_CLEANUP_INTERVAL = int(os.getenv("RATE_LIMIT_CLEANUP_INTERVAL", "300"))
+
+# Set TRUST_PROXY=true only when running behind a verified reverse proxy
+# (e.g., Render, Railway, Vercel serverless functions, or your own nginx).
+TRUST_PROXY = os.getenv("TRUST_PROXY", "false").lower() == "true"
+
+rate_limiter = RateLimiter(
+    RATE_LIMIT_RULES,
+    enabled=RATE_LIMIT_ENABLED,
+    trust_proxy=TRUST_PROXY,
+    token_cookie_name=AUTH_COOKIE_NAME,
+    redis_url=RATE_LIMIT_REDIS_URL,
+    max_buckets=RATE_LIMIT_MAX_BUCKETS,
+    cleanup_interval=RATE_LIMIT_CLEANUP_INTERVAL,
+)
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    limit_result = await rate_limiter.check(request)
+    if limit_result and not limit_result.allowed:
+        # Return JSONResponse directly instead of raising HTTPException
+        # to avoid ExceptionGroup crashes in ASGI middleware stack
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded"},
+            headers={
+                "Retry-After": str(limit_result.retry_after),
+                "X-RateLimit-Limit": str(limit_result.limit),
+                "X-RateLimit-Remaining": "0",
+                "X-RateLimit-Reset": str(limit_result.retry_after),
+            },
+        )
+
+    response = await call_next(request)
+    if limit_result:
+        response.headers["X-RateLimit-Limit"] = str(limit_result.limit)
+        response.headers["X-RateLimit-Remaining"] = str(limit_result.remaining)
+        response.headers["X-RateLimit-Reset"] = str(limit_result.retry_after)
+    return response
 
 # CORS middleware for frontend access
 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
@@ -40,8 +129,8 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*", "Authorization", "Content-Type"],
-    expose_headers=["*"],
+    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
+    expose_headers=["Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
 )
 
 
@@ -162,6 +251,11 @@ def keepalive():
         raise HTTPException(status_code=503, detail=f"Supabase keepalive failed: {exc}")
 
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    await rate_limiter.close()
+
+
 # Import API routes
 from api import analysis_routes
 from api.routes import (
@@ -185,4 +279,3 @@ app.include_router(program_diagnostics_router)  # Program diagnostics router (ha
 app.include_router(periodization_router)  # Periodization router (has its own /api/programs/{id}/periodization prefix)
 app.include_router(meso_templates_router)  # Meso templates router (has its own /api/meso-templates prefix)
 app.include_router(analysis_routes.router, prefix="/api", tags=["analysis"])  # Analysis endpoints
-

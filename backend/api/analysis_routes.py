@@ -31,7 +31,7 @@ from core.MainClasses import Split, MuscleRegion
 from core.movementMatching import move_match
 from core.muscle_regions import get_all_muscle_regions, get_parent_groups
 from api.dependencies import get_current_user, AuthUser
-from db.supabase import get_supabase_client
+from db.supabase import get_supabase_client_with_token
 from core.granular_patterns import (
     GRANULAR_PATTERNS, get_pattern_muscle_targets,
     get_pattern_axial_load, get_pattern_resistance_profile
@@ -96,7 +96,7 @@ async def analyze_workouts(
     converts it to Split format, and runs the stimulus engine.
     """
     try:
-        supabase = get_supabase_client()
+        supabase = get_supabase_client_with_token(current_user.access_token)
 
         # Fetch workout logs within the time window
         cutoff_date = datetime.utcnow() - timedelta(days=days)
@@ -196,6 +196,15 @@ async def analyze_workouts(
                 ),
             )
 
+        # Compute actual training span: earliest workout to latest workout
+        # This avoids penalizing users for empty days before their first log
+        newest_date = datetime.fromisoformat(
+            workouts_result.data[-1]["completed_at"].replace("Z", "+00:00")
+        ).date()
+        actual_span = (newest_date - oldest_date).days + 1  # inclusive
+        # Use at least 7 days so a single session isn't treated as a 1-day cycle
+        effective_cycle = max(actual_span, 7)
+
         # Create and simulate split
         split = Split(
             name="Logged Workouts",
@@ -203,15 +212,31 @@ async def analyze_workouts(
             stimulus_duration=stimulus_duration,
             maintenance_volume=maintenance_volume,
             dataset=dataset,
-            cycle_length=days,
+            cycle_length=effective_cycle,
         )
         split.simulate_split()
+
+        # When we don't have a full week of data, the weekly atrophy model
+        # over-projects decay. Scale atrophy based on how much of the
+        # atrophy window has actually elapsed.
+        actual_hours = actual_span * 24
+        atrophy_window = 168 - stimulus_duration  # hours where atrophy can occur in a full week
+        if actual_hours <= stimulus_duration:
+            # Still within stimulus window — no atrophy has started yet
+            for muscle in split.muscles.values():
+                muscle.atrophy = 0
+        elif actual_span < 7:
+            # Partial week: only a fraction of the atrophy period has elapsed
+            elapsed_atrophy_hours = actual_hours - stimulus_duration
+            atrophy_scale = elapsed_atrophy_hours / atrophy_window if atrophy_window > 0 else 0
+            for muscle in split.muscles.values():
+                muscle.atrophy *= atrophy_scale
 
         # Build a synthetic SplitRequest for _build_response
         synthetic_request = SplitRequest(
             name="Logged Workouts",
             sessions=sessions_for_request,
-            cycle_length=min(days, 14),  # Schema max is 14
+            cycle_length=min(effective_cycle, 14),  # Schema max is 14
             stimulus_duration=stimulus_duration,
             maintenance_volume=maintenance_volume,
             dataset=dataset,

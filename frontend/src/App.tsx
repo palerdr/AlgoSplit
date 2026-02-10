@@ -28,6 +28,7 @@ const ProgressPage = lazy(() => import('@/pages/progress/ProgressPage').then(m =
 const BodyweightPage = lazy(() => import('@/pages/bodyweight/BodyweightPage').then(m => ({ default: m.BodyweightPage })));
 const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const ToolsPage = lazy(() => import('@/pages/tools/ToolsPage').then(m => ({ default: m.ToolsPage })));
+const LandingPage = lazy(() => import('@/pages/landing/LandingPage').then(m => ({ default: m.LandingPage })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -92,7 +93,7 @@ function AppRoutes() {
     if (!sessionStorage.getItem('algosplit-session')) {
       sessionStorage.setItem('algosplit-session', '1');
       const path = window.location.pathname;
-      if (path !== '/dashboard' && path !== '/login' && path !== '/signup') {
+      if (path !== '/' && path !== '/dashboard' && path !== '/login' && path !== '/signup') {
         navigate('/dashboard', { replace: true });
       }
     }
@@ -130,9 +131,9 @@ function AppRoutes() {
         </Route>
       </Route>
 
-      {/* Default redirect */}
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      {/* Landing page */}
+      <Route path="/" element={<Suspense fallback={<PageLoader />}><LandingPage /></Suspense>} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }

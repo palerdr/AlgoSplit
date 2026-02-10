@@ -3,8 +3,8 @@ Authentication routes
 Handles user signup, login, and user info retrieval
 """
 
-from fastapi import APIRouter, HTTPException, Depends, status
-from db.supabase import get_supabase_client
+from fastapi import APIRouter, HTTPException, Depends, status, Response
+from db.supabase import get_supabase_client, get_supabase_client_with_token
 from schemas.auth import (
     SignUpRequest,
     LoginRequest,
@@ -13,6 +13,11 @@ from schemas.auth import (
     ErrorResponse,
 )
 from api.dependencies import get_current_user, AuthUser
+from api.security import (
+    AUTH_EXPOSE_ACCESS_TOKEN,
+    clear_auth_cookies,
+    set_auth_cookies,
+)
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -28,7 +33,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     summary="Sign up a new user",
     description="Create a new user account with email and password",
 )
-async def signup(request: SignUpRequest):
+async def signup(request: SignUpRequest, http_response: Response):
     """
     Create a new user account
 
@@ -45,27 +50,31 @@ async def signup(request: SignUpRequest):
         supabase = get_supabase_client()
 
         # Sign up the user using Supabase Auth
-        response = supabase.auth.sign_up(
+        sign_up_response = supabase.auth.sign_up(
             {
                 "email": request.email,
                 "password": request.password,
             }
         )
 
-        if not response.user:
+        if not sign_up_response.user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Failed to create user account",
             )
 
         # Return authentication response
+        access_token = sign_up_response.session.access_token if sign_up_response.session else ""
+        expires_in = sign_up_response.session.expires_in if sign_up_response.session else 3600
+        if access_token:
+            set_auth_cookies(http_response, access_token, expires_in)
         return AuthResponse(
-            access_token=response.session.access_token if response.session else "",
+            access_token=access_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
             token_type="bearer",
-            expires_in=response.session.expires_in if response.session else 3600,
+            expires_in=expires_in,
             user=UserInfo(
-                id=response.user.id,
-                email=response.user.email,
+                id=sign_up_response.user.id,
+                email=sign_up_response.user.email,
             ),
         )
 
@@ -99,7 +108,7 @@ async def signup(request: SignUpRequest):
     summary="Log in a user",
     description="Authenticate a user with email and password",
 )
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, http_response: Response):
     """
     Log in a user
 
@@ -116,27 +125,32 @@ async def login(request: LoginRequest):
         supabase = get_supabase_client()
 
         # Sign in the user using Supabase Auth
-        response = supabase.auth.sign_in_with_password(
+        login_response = supabase.auth.sign_in_with_password(
             {
                 "email": request.email,
                 "password": request.password,
             }
         )
 
-        if not response.user or not response.session:
+        if not login_response.user or not login_response.session:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",
             )
 
         # Return authentication response
+        set_auth_cookies(
+            http_response,
+            login_response.session.access_token,
+            login_response.session.expires_in,
+        )
         return AuthResponse(
-            access_token=response.session.access_token,
+            access_token=login_response.session.access_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
             token_type="bearer",
-            expires_in=response.session.expires_in,
+            expires_in=login_response.session.expires_in,
             user=UserInfo(
-                id=response.user.id,
-                email=response.user.email,
+                id=login_response.user.id,
+                email=login_response.user.email,
             ),
         )
 
@@ -191,12 +205,15 @@ async def get_user(current_user: AuthUser = Depends(get_current_user)):
     summary="Log out the current user",
     description="Invalidate the current user's session",
 )
-async def logout(current_user: AuthUser = Depends(get_current_user)):
+async def logout(
+    response: Response,
+    current_user: AuthUser = Depends(get_current_user),
+):
     """
     Log out the current user
 
     This endpoint signs out the user by invalidating their session on the server.
-    The client should also remove the access token from storage.
+    The client should also clear any in-memory auth state.
 
     Args:
         current_user: The authenticated user (injected by dependency)
@@ -205,10 +222,12 @@ async def logout(current_user: AuthUser = Depends(get_current_user)):
         204 No Content on success
     """
     try:
-        supabase = get_supabase_client()
+        # Use a token-scoped client so the caller's session is revoked.
+        supabase = get_supabase_client_with_token(current_user.access_token)
         supabase.auth.sign_out()
-        return None
-    except Exception as e:
-        # Even if sign out fails on the server, we still return success
-        # because the client will remove the token anyway
-        return None
+    except Exception:
+        # Even if sign out fails server-side, clear browser cookies.
+        pass
+
+    clear_auth_cookies(response)
+    return None

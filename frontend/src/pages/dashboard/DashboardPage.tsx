@@ -1,14 +1,15 @@
-import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useEffect, useRef } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
-import { Dumbbell, TrendingUp, Target, Clock, BarChart3, ArrowRight, Play, Loader2, Calendar } from 'lucide-react';
+import { Dumbbell, TrendingUp, Target, Clock, BarChart3, ArrowRight, Play, Loader2, Calendar, Timer } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, Button, Spinner } from '@/components/ui';
-import { getWorkoutStats, workoutKeys, getWorkouts } from '@/api/workouts.api';
-import { getSplits, splitKeys, analyzeSplit as analyzeSplitById } from '@/api/splits.api';
+import { getWorkoutStats, workoutKeys, getWorkouts, logWorkout } from '@/api/workouts.api';
+import { getSplits, splitKeys } from '@/api/splits.api';
+import { analyzeWorkouts, analysisKeys } from '@/api/analysis.api';
 import { getTodaySessions, getProgramSessionExercises, programKeys } from '@/api/programs.api';
 import { useWorkoutStore } from '@/features/workout/workoutStore';
 import { formatDate, getRelativeTime } from '@/lib/utils';
-import { MiniMuscleChart, CompactSummary, SuggestionsSummary } from '@/components/analysis';
+import { MuscleChart, CompactSummary, SuggestionsSummary } from '@/components/analysis';
 import type { TodaySessionItem } from '@/types/api.types';
 
 function formatTodayDate(): string {
@@ -19,10 +20,53 @@ function formatTodayDate(): string {
   return `${y}-${m}-${day}`;
 }
 
+const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
+
 export function DashboardPage() {
   const navigate = useNavigate();
-  const { startWorkoutFromSession } = useWorkoutStore();
+  const queryClient = useQueryClient();
+  const { activeWorkout, startWorkoutFromSession, getWorkoutData, cancelWorkout } = useWorkoutStore();
   const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
+  const autoSaveAttempted = useRef(false);
+
+  // Auto-end workout after 24 hours
+  const autoSaveMutation = useMutation({
+    mutationFn: logWorkout,
+    onSuccess: () => {
+      cancelWorkout();
+      queryClient.invalidateQueries({ queryKey: workoutKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: workoutKeys.stats() });
+    },
+    onError: () => {
+      // If auto-save fails, just cancel to prevent stale state
+      cancelWorkout();
+    },
+  });
+
+  useEffect(() => {
+    if (!activeWorkout || autoSaveAttempted.current) return;
+    const startedAt = new Date(activeWorkout.startedAt).getTime();
+    const elapsed = Date.now() - startedAt;
+
+    if (elapsed > TWENTY_FOUR_HOURS_MS) {
+      autoSaveAttempted.current = true;
+      const data = getWorkoutData();
+      if (data && data.exercises.length > 0) {
+        autoSaveMutation.mutate({
+          session_name: data.sessionName,
+          exercises: data.exercises,
+          duration_minutes: data.durationMinutes,
+          completed_at: data.completedAt,
+          session_id: data.sessionId,
+          split_id: data.splitId,
+          program_session_id: data.programSessionId,
+        });
+      } else {
+        // No valid exercises — just discard
+        cancelWorkout();
+      }
+    }
+  }, [activeWorkout]);
 
   const todayDate = formatTodayDate();
 
@@ -91,12 +135,11 @@ export function DashboardPage() {
     queryFn: getSplits,
   });
 
-  // Get the first split as "active" and auto-analyze it
-  const activeSplit = splits?.splits?.[0];
+  // Analyze stimulus from actual workout history (last 30 days)
   const { data: analysisData, isLoading: analysisLoading } = useQuery({
-    queryKey: splitKeys.analysis(activeSplit?.id ?? ''),
-    queryFn: () => analyzeSplitById(activeSplit!.id),
-    enabled: !!activeSplit?.id,
+    queryKey: analysisKeys.workouts(30),
+    queryFn: () => analyzeWorkouts(30),
+    enabled: (stats?.total_workouts ?? 0) > 0,
   });
 
   return (
@@ -114,6 +157,39 @@ export function DashboardPage() {
           </Button>
         </Link>
       </div>
+
+      {/* Continue Workout Banner */}
+      {activeWorkout && !autoSaveMutation.isPending && (() => {
+        const started = new Date(activeWorkout.startedAt);
+        const startTimeStr = started.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        const setsWithData = activeWorkout.exercises.reduce(
+          (acc, ex) => acc + ex.sets.filter((s) => s.reps > 0).length, 0
+        );
+        return (
+          <Card className="border-crimson/30 bg-crimson/5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-crimson/10 rounded-md">
+                  <Timer className="h-5 w-5 text-crimson" />
+                </div>
+                <div>
+                  <p className="font-semibold text-foreground">{activeWorkout.sessionName}</p>
+                  <p className="text-xs text-secondary">
+                    {startTimeStr} &mdash; <span className="text-crimson font-bold">&infin;</span>
+                    {setsWithData > 0 && <span className="ml-2">{setsWithData} sets logged</span>}
+                  </p>
+                </div>
+              </div>
+              <Link to="/workout">
+                <Button size="sm">
+                  <Play size={14} className="mr-1" />
+                  Continue
+                </Button>
+              </Link>
+            </div>
+          </Card>
+        );
+      })()}
 
       {/* Today's Sessions */}
       {todaySessions && todaySessions.sessions.length > 0 && (
@@ -158,8 +234,8 @@ export function DashboardPage() {
         </Card>
       )}
 
-      {/* Stimulus Overview - Only show if user has a split */}
-      {activeSplit && (
+      {/* Stimulus Overview - Only show if user has logged workouts */}
+      {(stats?.total_workouts ?? 0) > 0 && (
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -168,7 +244,7 @@ export function DashboardPage() {
                 <CardTitle>Stimulus Overview</CardTitle>
               </div>
               <Link
-                to={`/analysis`}
+                to="/progress"
                 className="text-sm text-crimson hover:text-crimson-hover flex items-center gap-1"
               >
                 View Analysis <ArrowRight className="w-3 h-3" />
@@ -190,10 +266,10 @@ export function DashboardPage() {
                   />
                   <SuggestionsSummary suggestions={analysisData.suggestions} />
                 </div>
-                <MiniMuscleChart muscles={analysisData.muscles} />
+                <MuscleChart muscles={analysisData.muscles} height={400} showAll={false} proportionalColors />
                 <div className="flex items-center justify-between text-xs text-muted pt-2 border-t border-white/5">
-                  <span>Based on: <span className="text-foreground">{activeSplit.name}</span></span>
-                  <span>{activeSplit.sessions.length} sessions</span>
+                  <span>Based on last 30 days of logged workouts</span>
+                  <span>{stats?.total_workouts ?? 0} workouts</span>
                 </div>
               </div>
             ) : (

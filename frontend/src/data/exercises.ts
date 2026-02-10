@@ -44,7 +44,6 @@ export const EXERCISE_DATABASE: ExerciseCategory[] = [
       { name: 'Machine Chest Press', pattern: 'humeral_adduction_compound', equipment: 'machine' },
       { name: 'Chest Press Machine', pattern: 'humeral_adduction_compound', equipment: 'machine' },
       { name: 'Smith Machine Bench Press', pattern: 'humeral_adduction_compound', equipment: 'smith' },
-      { name: 'Close Grip Bench Press', pattern: 'humeral_adduction_compound', equipment: 'barbell' },
       { name: 'Push Up', pattern: 'humeral_adduction_compound', equipment: 'bodyweight' },
       { name: 'Pushup', pattern: 'humeral_adduction_compound', equipment: 'bodyweight' },
       { name: 'Weighted Push Up', pattern: 'humeral_adduction_compound', equipment: 'bodyweight' },
@@ -52,9 +51,6 @@ export const EXERCISE_DATABASE: ExerciseCategory[] = [
       // DECLINE PRESSING - sternocostal (mid-lower chest emphasis)
       { name: 'Decline Bench Press', pattern: 'humeral_adduction_compound', equipment: 'barbell' },
       { name: 'Decline Dumbbell Press', pattern: 'humeral_adduction_compound', equipment: 'dumbbell' },
-      { name: 'Dip', pattern: 'humeral_adduction_compound', equipment: 'bodyweight' },
-      { name: 'Chest Dip', pattern: 'humeral_adduction_compound', equipment: 'bodyweight' },
-      { name: 'Weighted Dip', pattern: 'humeral_adduction_compound', equipment: 'bodyweight' },
 
       // INCLINE PRESSING - clavicular (upper chest)
       { name: 'Incline Bench Press', pattern: 'clavicular_humeral_adduction_compound', equipment: 'barbell' },
@@ -349,6 +345,12 @@ export const EXERCISE_DATABASE: ExerciseCategory[] = [
       { name: 'Machine Curl', pattern: 'elbow_flexion_isolation', equipment: 'machine' },
       { name: 'Bicep Machine', pattern: 'elbow_flexion_isolation', equipment: 'machine' },
 
+      // Triceps - compound (close grip pressing)
+      { name: 'Close Grip Bench Press', pattern: 'tricep_compound', equipment: 'barbell' },
+      { name: 'Dip', pattern: 'tricep_compound', equipment: 'bodyweight' },
+      { name: 'Chest Dip', pattern: 'tricep_compound', equipment: 'bodyweight' },
+      { name: 'Weighted Dip', pattern: 'tricep_compound', equipment: 'bodyweight' },
+
       // Triceps - standard (elbow at side/behind)
       { name: 'Tricep Pushdown', pattern: 'elbow_extension_isolation', equipment: 'cable' },
       { name: 'Cable Tricep Pushdown', pattern: 'elbow_extension_isolation', equipment: 'cable' },
@@ -368,7 +370,7 @@ export const EXERCISE_DATABASE: ExerciseCategory[] = [
       { name: 'Tricep Dip', pattern: 'elbow_extension_isolation', equipment: 'bodyweight' },
       { name: 'Bench Dip', pattern: 'elbow_extension_isolation', equipment: 'bodyweight' },
       { name: 'Diamond Push Up', pattern: 'elbow_extension_isolation', equipment: 'bodyweight' },
-      { name: 'Close Grip Push Up', pattern: 'elbow_extension_isolation', equipment: 'bodyweight' },
+      { name: 'Close Grip Push Up', pattern: 'tricep_compound', equipment: 'bodyweight' },
       { name: 'Tricep Machine', pattern: 'elbow_extension_isolation', equipment: 'machine' },
 
       // Triceps - overhead (long head emphasis)

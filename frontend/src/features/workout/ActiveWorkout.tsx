@@ -1,15 +1,69 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, X, Check, Clock } from 'lucide-react';
+import { Plus, X, Check, Clock, CalendarClock } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { Button, ConfirmDialog } from '@/components/ui';
 import { ExerciseCard } from './ExerciseCard';
 import { ExercisePicker } from './ExercisePicker';
 import { RestTimer } from './RestTimer';
-import { useWorkoutStore } from './workoutStore';
+import { useWorkoutStore, type WorkoutExercise } from './workoutStore';
 import { logWorkout, workoutKeys } from '@/api/workouts.api';
 import { programKeys } from '@/api/programs.api';
+import { reorderExercisesInSplit, splitKeys } from '@/api/splits.api';
 import { getErrorMessage } from '@/api/client';
+
+function SortableExerciseCard({
+  exercise,
+  previousExerciseData,
+  splitId,
+}: {
+  exercise: WorkoutExercise;
+  previousExerciseData?: { reps: number[]; weight: number[] };
+  splitId?: string;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: exercise.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 100 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <ExerciseCard
+        exercise={exercise}
+        previousExerciseData={previousExerciseData}
+        splitId={splitId}
+        dragHandleProps={{ ...attributes, ...listeners }}
+      />
+    </div>
+  );
+}
 
 export function ActiveWorkout() {
   const navigate = useNavigate();
@@ -26,8 +80,40 @@ export function ActiveWorkout() {
     return () => clearInterval(interval);
   }, []);
 
-  const { activeWorkout, addExercise, cancelWorkout, getWorkoutData } =
+  const { activeWorkout, addExercise, cancelWorkout, getWorkoutData, reorderExercises } =
     useWorkoutStore();
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || !activeWorkout || active.id === over.id) return;
+
+    const oldIndex = activeWorkout.exercises.findIndex((ex) => ex.id === active.id);
+    const newIndex = activeWorkout.exercises.findIndex((ex) => ex.id === over.id);
+
+    if (oldIndex !== -1 && newIndex !== -1) {
+      reorderExercises(oldIndex, newIndex);
+
+      // Propagate reorder to split template
+      if (activeWorkout.splitId) {
+        const reordered = [...activeWorkout.exercises];
+        const [moved] = reordered.splice(oldIndex, 1);
+        reordered.splice(newIndex, 0, moved);
+        const names = reordered.map((ex) => ex.name);
+        reorderExercisesInSplit(activeWorkout.splitId, activeWorkout.sessionName, names)
+          .then(() => queryClient.invalidateQueries({ queryKey: splitKeys.all }))
+          .catch((err) => console.error('Failed to update split order:', err));
+      }
+    }
+  };
 
   const logWorkoutMutation = useMutation({
     mutationFn: logWorkout,
@@ -49,16 +135,21 @@ export function ActiveWorkout() {
   }
 
   // Calculate elapsed time
+  const isRetro = !!activeWorkout.retroDate;
   const startDate = new Date(activeWorkout.startedAt);
-  const startTimeStr = startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const startTimeStr = isRetro
+    ? startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : startDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   const elapsedMs = Date.now() - startDate.getTime();
   const elapsedSec = Math.floor(elapsedMs / 1000);
   const elapsedH = Math.floor(elapsedSec / 3600);
   const elapsedM = Math.floor((elapsedSec % 3600) / 60);
   const elapsedS = elapsedSec % 60;
-  const elapsedStr = elapsedH > 0
-    ? `${elapsedH}:${String(elapsedM).padStart(2, '0')}:${String(elapsedS).padStart(2, '0')}`
-    : `${elapsedM}:${String(elapsedS).padStart(2, '0')}`;
+  const elapsedStr = isRetro
+    ? 'Past workout'
+    : elapsedH > 0
+      ? `${elapsedH}:${String(elapsedM).padStart(2, '0')}:${String(elapsedS).padStart(2, '0')}`
+      : `${elapsedM}:${String(elapsedS).padStart(2, '0')}`;
 
   // Count sets with data (reps > 0) - these will be saved
   const totalSetsWithData = activeWorkout.exercises.reduce(
@@ -87,6 +178,7 @@ export function ActiveWorkout() {
       session_name: data.sessionName,
       exercises: data.exercises,
       duration_minutes: data.durationMinutes,
+      completed_at: data.completedAt,
       session_id: data.sessionId,
       split_id: data.splitId,
       program_session_id: data.programSessionId,
@@ -104,7 +196,7 @@ export function ActiveWorkout() {
             </h1>
             <div className="flex items-center gap-3 text-sm text-secondary">
               <span className="flex items-center gap-1">
-                <Clock size={14} />
+                {isRetro ? <CalendarClock size={14} /> : <Clock size={14} />}
                 <span className="font-mono tabular-nums">{startTimeStr} · {elapsedStr}</span>
               </span>
               <span>{totalSetsWithData} sets</span>
@@ -155,13 +247,25 @@ export function ActiveWorkout() {
           </div>
         ) : (
           <>
-            {activeWorkout.exercises.map((exercise) => (
-              <ExerciseCard
-                key={exercise.id}
-                exercise={exercise}
-                previousExerciseData={activeWorkout.previousData?.[exercise.name]}
-              />
-            ))}
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
+            >
+              <SortableContext
+                items={activeWorkout.exercises.map((ex) => ex.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {activeWorkout.exercises.map((exercise) => (
+                  <SortableExerciseCard
+                    key={exercise.id}
+                    exercise={exercise}
+                    previousExerciseData={activeWorkout.previousData?.[exercise.name]}
+                    splitId={activeWorkout.splitId}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
 
             {/* Add exercise button */}
             <button

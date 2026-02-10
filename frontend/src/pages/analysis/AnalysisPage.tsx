@@ -252,17 +252,17 @@ export function AnalysisPage() {
   );
 
   return (
-    <div className="min-h-screen pb-20">
+    <div className="min-h-screen pb-20 p-4 md:p-6">
       <div className="max-w-6xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
+        <div className="flex items-center justify-between mb-6 gap-3">
+          <div className="min-w-0">
             <h1 className="text-2xl font-bold text-foreground">Analyze a Split</h1>
-            <p className="text-secondary mt-1">
+            <p className="text-secondary mt-1 text-sm">
               Enter your training split to calculate net weekly stimulus per muscle
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             {/* Load Split Dropdown */}
             {savedSplits && savedSplits.splits.length > 0 && (
               <div className="relative">
@@ -271,9 +271,9 @@ export function AnalysisPage() {
                   size="sm"
                   onClick={() => setShowLoadSplitDropdown(!showLoadSplitDropdown)}
                 >
-                  <FolderOpen className="w-4 h-4 mr-1" />
-                  Load Split
-                  <ChevronDown className={cn('w-3 h-3 ml-1 transition-transform', showLoadSplitDropdown && 'rotate-180')} />
+                  <FolderOpen className="w-4 h-4 md:mr-1" />
+                  <span className="hidden md:inline">Load Split</span>
+                  <ChevronDown className={cn('w-3 h-3 ml-1 transition-transform hidden md:block', showLoadSplitDropdown && 'rotate-180')} />
                 </Button>
                 {showLoadSplitDropdown && (
                   <>
@@ -300,8 +300,8 @@ export function AnalysisPage() {
               </div>
             )}
             <Button variant="ghost" size="sm" onClick={resetForm}>
-              <RotateCcw className="w-4 h-4 mr-1" />
-              Reset
+              <RotateCcw className="w-4 h-4 md:mr-1" />
+              <span className="hidden md:inline">Reset</span>
             </Button>
             {analyzeMutation.isPending && (
               <Loader2 className="w-4 h-4 animate-spin text-muted" />

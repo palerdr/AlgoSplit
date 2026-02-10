@@ -19,3 +19,4 @@ python-dotenv>=1.0.0
 # Development
 pytest>=7.4.3
 httpx>=0.25.2
+redis>=5.0.0

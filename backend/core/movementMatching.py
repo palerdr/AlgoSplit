@@ -124,6 +124,10 @@ class PatternMatcher:
             ("flutterkick", "flutter kick"),
             ("scissorkick", "scissor kick"),
             ("mountainclimber", "mountain climber"),
+            # Directional cable phrases – order matters but token-set matching
+            # is bag-of-words, so we convert to unique directional tokens.
+            ("high to low", "htl"),
+            ("low to high", "lth"),
         ]
 
         # -------------------------
@@ -159,6 +163,15 @@ class PatternMatcher:
             Rule(required=("clamshell",), any_of=(), banned=(), pattern="hip_abduction_isolation", weight=55),
             Rule(required=("hip", "adduction"), any_of=(), banned=(), pattern="hip_adduction_isolation", weight=60),
             Rule(required=("adductor",), any_of=(), banned=(), pattern="hip_adduction_isolation", weight=55),
+
+            # Close grip pressing (tricep-dominant compound)
+            Rule(required=("close", "grip", "bench"), any_of=(), banned=(), pattern="tricep_compound", weight=70),
+            Rule(required=("close", "grip", "press"), any_of=(), banned=(), pattern="tricep_compound", weight=70),
+            Rule(required=("close", "bench"), any_of=(), banned=(), pattern="tricep_compound", weight=65),
+            Rule(required=("close", "grip", "push", "up"), any_of=(), banned=(), pattern="tricep_compound", weight=70),
+            Rule(required=("narrow", "grip", "bench"), any_of=(), banned=(), pattern="tricep_compound", weight=70),
+            Rule(required=("narrow", "grip", "press"), any_of=(), banned=(), pattern="tricep_compound", weight=70),
+            Rule(required=("narrow", "push", "up"), any_of=(), banned=(), pattern="tricep_compound", weight=65),
 
             # Triceps isolation (protect against overhead press)
             Rule(required=("tricep", "extension"), any_of=(), banned=(), pattern="elbow_extension_isolation", weight=60),
@@ -196,8 +209,8 @@ class PatternMatcher:
             # CHEST - INCLINE (clavicular/upper chest focus)
             Rule(required=("incline", "fly"), any_of=(), banned=(), pattern="clavicular_humeral_adduction_isolation", weight=70),
             Rule(required=("incline", "cable", "fly"), any_of=(), banned=(), pattern="clavicular_humeral_adduction_isolation", weight=70),
-            Rule(required=("low", "cable", "fly"), any_of=(), banned=(), pattern="clavicular_humeral_adduction_isolation", weight=70),
-            Rule(required=("low", "to", "high", "fly"), any_of=(), banned=(), pattern="clavicular_humeral_adduction_isolation", weight=70),
+            Rule(required=("low", "cable", "fly"), any_of=(), banned=("high",), pattern="clavicular_humeral_adduction_isolation", weight=70),
+            Rule(required=("lth", "fly"), any_of=(), banned=(), pattern="clavicular_humeral_adduction_isolation", weight=75),
             Rule(required=("incline", "press"), any_of=(), banned=(), pattern="clavicular_humeral_adduction_compound", weight=70),
             Rule(required=("incline", "bench"), any_of=(), banned=(), pattern="clavicular_humeral_adduction_compound", weight=70),
             Rule(required=("incline", "db"), any_of=("press",), banned=(), pattern="clavicular_humeral_adduction_compound", weight=70),
@@ -209,11 +222,11 @@ class PatternMatcher:
             Rule(required=("decline", "press"), any_of=(), banned=(), pattern="humeral_adduction_compound", weight=65),
             Rule(required=("decline", "bench"), any_of=(), banned=(), pattern="humeral_adduction_compound", weight=65),
             Rule(required=("decline", "fly"), any_of=(), banned=(), pattern="humeral_adduction_isolation", weight=65),
-            Rule(required=("high", "to", "low", "fly"), any_of=(), banned=(), pattern="humeral_adduction_isolation", weight=65),
-            Rule(required=("high", "cable", "fly"), any_of=(), banned=(), pattern="humeral_adduction_isolation", weight=65),
+            Rule(required=("htl", "fly"), any_of=(), banned=(), pattern="humeral_adduction_isolation", weight=75),
+            Rule(required=("high", "cable", "fly"), any_of=(), banned=("low",), pattern="humeral_adduction_isolation", weight=70),
             Rule(required=("crossover",), any_of=(), banned=("low",), pattern="humeral_adduction_isolation", weight=55),
             Rule(required=("pec", "fly"), any_of=(), banned=("incline", "upper"), pattern="humeral_adduction_isolation", weight=55),
-            Rule(required=("dip",), any_of=("chest", "weighted"), banned=("bench", "tricep"), pattern="humeral_adduction_compound", weight=55),
+            Rule(required=("dip",), any_of=("chest", "weighted"), banned=("bench", "tricep"), pattern="tricep_compound", weight=55),
 
             # Shoulder isolation
             Rule(required=("front", "raise"), any_of=(), banned=("calf",), pattern="shoulder_flexion_isolation", weight=60),
@@ -275,7 +288,7 @@ class PatternMatcher:
             Rule(required=("chest", "press"), any_of=(), banned=("row", "incline"), pattern="humeral_adduction_compound", weight=40),
             Rule(required=("machine", "press"), any_of=("chest", "bench"), banned=("row", "incline"), pattern="humeral_adduction_compound", weight=35),
             Rule(required=("push", "up"), any_of=(), banned=("row", "diamond", "close", "incline"), pattern="humeral_adduction_compound", weight=35),
-            Rule(required=("dip",), any_of=(), banned=("bench", "tricep"), pattern="humeral_adduction_compound", weight=35),
+            Rule(required=("dip",), any_of=(), banned=("bench", "tricep"), pattern="tricep_compound", weight=35),
 
             # SHOULDERS - Overhead pressing (pronated grip by default)
             Rule(required=("shoulder", "press"), any_of=(), banned=("extension",), pattern="pronated_vertical_press_compound", weight=40),

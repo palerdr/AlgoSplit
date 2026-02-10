@@ -131,6 +131,10 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Hide scrollbar utility */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
 /* Chart fade-in — GPU-composited opacity transition replaces Recharts SVG animation */
 @keyframes chart-fade-in {
   from { opacity: 0; transform: translateY(4px); }
