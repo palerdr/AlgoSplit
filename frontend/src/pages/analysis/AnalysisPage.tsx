@@ -7,7 +7,7 @@ import { SessionBuilder, SessionTemplates } from '@/components/splits';
 import {
   MuscleChart,
   AnalysisSummary,
-  GroupSummaryCards,
+
   SuggestionsList,
   StimulusBreakdown,
 } from '@/components/analysis';
@@ -451,20 +451,6 @@ export function AnalysisPage() {
           </div>
         </div>
 
-        {/* Full results below on mobile / expanded view */}
-        {lastResults && (
-          <div className="mt-8 lg:hidden space-y-6">
-            <Card>
-              <h3 className="font-semibold text-foreground mb-4">Group Summary</h3>
-              <GroupSummaryCards groups={lastResults.group_summaries} />
-            </Card>
-
-            <Card>
-              <h3 className="font-semibold text-foreground mb-4">Full Muscle Chart</h3>
-              <MuscleChart muscles={lastResults.muscles} />
-            </Card>
-          </div>
-        )}
       </div>
     </div>
   );
