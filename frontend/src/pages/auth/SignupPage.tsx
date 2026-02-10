@@ -51,7 +51,7 @@ export function SignupPage() {
         {/* Logo */}
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-foreground">
-            Split<span className="text-crimson">.AI</span>
+            Algo<span className="text-crimson">Split</span>
           </h1>
           <p className="text-secondary mt-2">Create your account</p>
         </div>

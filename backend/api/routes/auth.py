@@ -78,23 +78,35 @@ async def signup(request: SignUpRequest, http_response: Response):
             ),
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         # Check for specific Supabase errors
-        error_message = str(e)
-        if "already registered" in error_message.lower() or "already exists" in error_message.lower():
+        error_message = str(e).lower()
+        if "already registered" in error_message or "already exists" in error_message:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="User with this email already exists",
             )
-        elif "invalid" in error_message.lower():
+        elif "email not confirmed" in error_message:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid request: {error_message}",
+                detail="Please check your email and confirm your account before signing in",
+            )
+        elif "signups not allowed" in error_message or "signup is disabled" in error_message:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Signups are currently disabled",
+            )
+        elif "invalid" in error_message or "weak" in error_message:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid request: {str(e)}",
             )
         else:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to create account: {error_message}",
+                detail=f"Failed to create account: {str(e)}",
             )
 
 
@@ -155,19 +167,28 @@ async def login(request: LoginRequest, http_response: Response):
         )
 
     except HTTPException:
-        # Re-raise HTTP exceptions as-is
         raise
     except Exception as e:
-        error_message = str(e)
-        if "invalid" in error_message.lower() or "credentials" in error_message.lower():
+        error_message = str(e).lower()
+        if "invalid" in error_message or "credentials" in error_message:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",
             )
+        elif "email not confirmed" in error_message:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Please check your email and confirm your account before signing in",
+            )
+        elif "signups not allowed" in error_message or "signup is disabled" in error_message:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Signups are currently disabled",
+            )
         else:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Login failed: {error_message}",
+                detail=f"Login failed: {str(e)}",
             )
 
 
