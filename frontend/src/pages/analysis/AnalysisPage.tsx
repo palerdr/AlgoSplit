@@ -257,8 +257,8 @@ export function AnalysisPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-6 gap-3">
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold text-foreground">Analyze a Split</h1>
-            <p className="text-secondary mt-1 text-sm">
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground">Analyze a Split</h1>
+            <p className="text-secondary mt-1 text-xs sm:text-sm">
               Enter your training split to calculate net weekly stimulus per muscle
             </p>
           </div>
@@ -328,9 +328,9 @@ export function AnalysisPage() {
 
             {/* Sessions */}
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-lg font-semibold text-foreground">Sessions</h2>
-                <div className="text-sm text-muted">
+                <div className="text-xs sm:text-sm text-muted">
                   {sessions.length} session{sessions.length !== 1 ? 's' : ''} | {totalExercises} exercises | {totalSets} sets
                 </div>
               </div>

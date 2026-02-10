@@ -166,17 +166,17 @@ export function ProgramDetailPage() {
   return (
     <div className="p-4 md:p-6 space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 sm:gap-4 min-w-0">
           <Link to="/programs">
             <Button variant="ghost" size="sm">
               <ArrowLeft className="w-4 h-4" />
             </Button>
           </Link>
-          <div>
-            <h1 className="text-xl font-bold text-foreground">{program.name}</h1>
+          <div className="min-w-0">
+            <h1 className="text-lg sm:text-xl font-bold text-foreground truncate">{program.name}</h1>
             {program.goal && (
-              <p className="text-sm text-secondary">{program.goal}</p>
+              <p className="text-xs sm:text-sm text-secondary truncate">{program.goal}</p>
             )}
           </div>
         </div>
@@ -185,7 +185,7 @@ export function ProgramDetailPage() {
           <div className="flex items-center gap-1 bg-steel rounded-md p-0.5">
             <button
               onClick={() => setActiveTab('calendar')}
-              className={`px-3 py-1 text-xs rounded ${
+              className={`px-2 sm:px-3 py-1 text-xs rounded ${
                 activeTab === 'calendar' ? 'bg-charcoal text-foreground' : 'text-muted hover:text-secondary'
               }`}
             >
@@ -193,7 +193,7 @@ export function ProgramDetailPage() {
             </button>
             <button
               onClick={() => setActiveTab('periodization')}
-              className={`px-3 py-1 text-xs rounded ${
+              className={`px-2 sm:px-3 py-1 text-xs rounded ${
                 activeTab === 'periodization' ? 'bg-charcoal text-foreground' : 'text-muted hover:text-secondary'
               }`}
             >
@@ -209,8 +209,8 @@ export function ProgramDetailPage() {
       {/* 3-column layout */}
       <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragEnd={handleDragEnd}>
         <div className="grid lg:grid-cols-[220px,1fr] xl:grid-cols-[220px,1fr,280px] gap-4">
-          {/* Left sidebar */}
-          <Card className="lg:block">
+          {/* Left sidebar - hidden on mobile */}
+          <Card className="hidden lg:block">
             <CardContent className="pt-4">
               {activeTab === 'calendar' ? (
                 <TemplateSidebar programId={program.id} />

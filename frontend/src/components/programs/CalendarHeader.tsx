@@ -30,12 +30,12 @@ export function CalendarHeader() {
     : `Week of ${format(currentDate, 'MMM d, yyyy')}`;
 
   return (
-    <div className="flex items-center justify-between mb-4">
-      <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+      <div className="flex items-center gap-1">
         <Button variant="ghost" size="sm" onClick={goBack}>
           <ChevronLeft className="w-4 h-4" />
         </Button>
-        <h3 className="text-lg font-semibold text-foreground min-w-[200px] text-center">
+        <h3 className="text-sm sm:text-lg font-semibold text-foreground text-center whitespace-nowrap">
           {title}
         </h3>
         <Button variant="ghost" size="sm" onClick={goForward}>

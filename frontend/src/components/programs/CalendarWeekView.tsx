@@ -28,7 +28,7 @@ export function CalendarWeekView({ currentDate, sessions, onSessionClick }: Cale
     <div>
       <div className="grid grid-cols-7 mb-1">
         {WEEKDAYS.map((day) => (
-          <div key={day} className="text-center text-xs text-muted py-2 font-medium">
+          <div key={day} className="text-center text-[10px] sm:text-xs text-muted py-1 sm:py-2 font-medium">
             {day}
           </div>
         ))}

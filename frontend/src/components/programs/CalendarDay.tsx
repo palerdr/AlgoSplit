@@ -35,8 +35,8 @@ export function CalendarDay({ date, sessions, currentMonth, onSessionClick, expa
         }
       }}
       className={cn(
-        'border border-white/5 p-1 transition-colors',
-        expanded ? 'min-h-[120px]' : 'min-h-[80px]',
+        'border border-white/5 p-0.5 sm:p-1 transition-colors',
+        expanded ? 'min-h-[100px] sm:min-h-[120px]' : 'min-h-[60px] sm:min-h-[80px]',
         !inMonth && 'opacity-40',
         isOver && 'bg-crimson/10 border-crimson/30',
         isSelected && 'bg-blue-500/10 border-blue-500/30',
