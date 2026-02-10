@@ -197,17 +197,17 @@ export const ExerciseRow = memo(function ExerciseRow({
   }
 
   return (
-    <div ref={containerRef} className="flex items-center gap-2 group">
+    <div ref={containerRef} className="flex flex-wrap items-center gap-x-2 gap-y-1.5 group">
       {/* Drag handle */}
       <div
         {...dragHandleProps}
-        className="p-1 text-muted hover:text-secondary cursor-grab opacity-0 group-hover:opacity-100 transition-opacity"
+        className="p-1 text-muted hover:text-secondary cursor-grab opacity-0 group-hover:opacity-100 transition-opacity hidden sm:block"
       >
         <GripVertical className="w-4 h-4" />
       </div>
 
       {/* Exercise name input with autocomplete */}
-      <div className="relative flex-1" style={{ zIndex: showSuggestions ? 100 : 1 }}>
+      <div className="relative flex-1 min-w-[180px]" style={{ zIndex: showSuggestions ? 100 : 1 }}>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
           <input
@@ -268,80 +268,83 @@ export const ExerciseRow = memo(function ExerciseRow({
         )}
       </div>
 
-      {/* Unilateral toggle - always visible since most exercises have unilateral variants */}
-      <button
-        type="button"
-        onClick={toggleUnilateral}
-        title="Unilateral exercise (+5% stimulus)"
-        className={cn(
-          'px-2 py-1.5 rounded text-xs font-medium transition-colors',
-          isUnilateral
-            ? 'bg-crimson/20 text-crimson border border-crimson/30'
-            : 'bg-steel text-muted hover:text-secondary'
-        )}
-      >
-        UNI
-      </button>
-
-      {/* Resistance profile selector */}
-      <div className="relative">
-        <select
-          value={resistanceProfile || ''}
-          onChange={(e) => {
-            const val = e.target.value as ResistanceProfile;
-            onResistanceProfileChange?.(val || null);
-          }}
-          title="Resistance profile (affects leverage matching)"
-          className={cn(
-            'appearance-none pl-2 pr-6 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer',
-            resistanceProfile
-              ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
-              : 'bg-steel text-muted hover:text-secondary'
-          )}
-        >
-          <option value="">Auto</option>
-          <option value="ascending">Asc</option>
-          <option value="mid">Mid</option>
-          <option value="descending">Desc</option>
-        </select>
-        <ChevronDown className="absolute right-1 top-1/2 -translate-y-1/2 w-3 h-3 text-muted pointer-events-none" />
-      </div>
-
-      {/* Sets input */}
-      <div className="flex items-center gap-1">
-        <button
-          type="button"
-          onClick={() => onSetsChange(Math.max(1, sets - 1))}
-          className="w-7 h-7 flex items-center justify-center rounded bg-steel hover:bg-charcoal text-secondary hover:text-foreground transition-colors"
-        >
-          -
-        </button>
-        <input
-          type="number"
-          value={sets}
-          onChange={(e) => onSetsChange(Math.max(1, parseInt(e.target.value) || 1))}
-          min={1}
-          max={20}
-          className="w-12 bg-charcoal border border-white/10 rounded-md px-2 py-2 text-sm text-center text-foreground focus:outline-none focus:border-crimson/50"
-        />
-        <button
-          type="button"
-          onClick={() => onSetsChange(Math.min(20, sets + 1))}
-          className="w-7 h-7 flex items-center justify-center rounded bg-steel hover:bg-charcoal text-secondary hover:text-foreground transition-colors"
-        >
-          +
-        </button>
-        <span className="text-xs text-muted w-8">sets</span>
-      </div>
-
-      {/* Remove button */}
+      {/* Remove button - on same line as name on mobile */}
       <button
         type="button"
         onClick={onRemove}
-        className="p-1.5 text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all"
+        className="p-1.5 text-muted hover:text-red-400 sm:opacity-0 sm:group-hover:opacity-100 transition-all sm:order-last"
       >
         <X className="w-4 h-4" />
       </button>
+
+      {/* Controls row - wraps below name on mobile */}
+      <div className="flex items-center gap-2">
+        {/* Unilateral toggle */}
+        <button
+          type="button"
+          onClick={toggleUnilateral}
+          title="Unilateral exercise (+5% stimulus)"
+          className={cn(
+            'px-2 py-1.5 rounded text-xs font-medium transition-colors',
+            isUnilateral
+              ? 'bg-crimson/20 text-crimson border border-crimson/30'
+              : 'bg-steel text-muted hover:text-secondary'
+          )}
+        >
+          UNI
+        </button>
+
+        {/* Resistance profile selector */}
+        <div className="relative">
+          <select
+            value={resistanceProfile || ''}
+            onChange={(e) => {
+              const val = e.target.value as ResistanceProfile;
+              onResistanceProfileChange?.(val || null);
+            }}
+            title="Resistance profile (affects leverage matching)"
+            className={cn(
+              'appearance-none pl-2 pr-6 py-1.5 rounded text-xs font-medium transition-colors cursor-pointer',
+              resistanceProfile
+                ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                : 'bg-steel text-muted hover:text-secondary'
+            )}
+          >
+            <option value="">Auto</option>
+            <option value="ascending">Asc</option>
+            <option value="mid">Mid</option>
+            <option value="descending">Desc</option>
+          </select>
+          <ChevronDown className="absolute right-1 top-1/2 -translate-y-1/2 w-3 h-3 text-muted pointer-events-none" />
+        </div>
+
+        {/* Sets input */}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => onSetsChange(Math.max(1, sets - 1))}
+            className="w-7 h-7 flex items-center justify-center rounded bg-steel hover:bg-charcoal text-secondary hover:text-foreground transition-colors"
+          >
+            -
+          </button>
+          <input
+            type="number"
+            value={sets}
+            onChange={(e) => onSetsChange(Math.max(1, parseInt(e.target.value) || 1))}
+            min={1}
+            max={20}
+            className="w-12 bg-charcoal border border-white/10 rounded-md px-2 py-2 text-sm text-center text-foreground focus:outline-none focus:border-crimson/50"
+          />
+          <button
+            type="button"
+            onClick={() => onSetsChange(Math.min(20, sets + 1))}
+            className="w-7 h-7 flex items-center justify-center rounded bg-steel hover:bg-charcoal text-secondary hover:text-foreground transition-colors"
+          >
+            +
+          </button>
+          <span className="text-xs text-muted w-8">sets</span>
+        </div>
+      </div>
     </div>
   );
 });

@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { DndContext, PointerSensor, useSensor, useSensors, pointerWithin } from '@dnd-kit/core';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { addDays, format } from 'date-fns';
-import { ArrowLeft, Settings } from 'lucide-react';
+import { ArrowLeft, Settings, ChevronDown, LayoutGrid } from 'lucide-react';
 import { Button, Card, CardContent, Spinner } from '@/components/ui';
 import { getProgram, programKeys, scheduleSession, batchScheduleSessions } from '@/api/programs.api';
 import { createTemplateFromSession } from '@/api/sessionTemplates.api';
@@ -36,6 +36,7 @@ function makePlaceholderSession(programId: string, date: string, name: string): 
 export function ProgramDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [selectedSession, setSelectedSession] = useState<ProgramSessionResponse | null>(null);
+  const [showMobileTemplates, setShowMobileTemplates] = useState(false);
   const { activeTab, setActiveTab, diagnosticsLevel, diagnosticsTargetId, diagnosticsOpen, selectedDates, clearSelectedDates } = useProgramStore();
   const queryClient = useQueryClient();
 
@@ -208,8 +209,33 @@ export function ProgramDetailPage() {
 
       {/* 3-column layout */}
       <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragEnd={handleDragEnd}>
+        {/* Mobile templates toggle */}
+        <div className="lg:hidden">
+          <button
+            onClick={() => setShowMobileTemplates(!showMobileTemplates)}
+            className="w-full flex items-center justify-between px-4 py-3 bg-steel rounded-lg border border-white/5 text-sm font-medium text-foreground"
+          >
+            <span className="flex items-center gap-2">
+              <LayoutGrid className="w-4 h-4 text-muted" />
+              {activeTab === 'calendar' ? 'Templates' : 'Periodization'}
+            </span>
+            <ChevronDown className={`w-4 h-4 text-muted transition-transform ${showMobileTemplates ? 'rotate-180' : ''}`} />
+          </button>
+          {showMobileTemplates && (
+            <Card className="mt-2">
+              <CardContent className="pt-4">
+                {activeTab === 'calendar' ? (
+                  <TemplateSidebar programId={program.id} />
+                ) : (
+                  <PeriodizationSidebar programId={program.id} />
+                )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
         <div className="grid lg:grid-cols-[220px,1fr] xl:grid-cols-[220px,1fr,280px] gap-4">
-          {/* Left sidebar - hidden on mobile */}
+          {/* Left sidebar - hidden on mobile (shown via toggle above) */}
           <Card className="hidden lg:block">
             <CardContent className="pt-4">
               {activeTab === 'calendar' ? (

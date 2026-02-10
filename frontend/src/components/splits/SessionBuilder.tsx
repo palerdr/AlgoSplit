@@ -154,7 +154,7 @@ export function SessionBuilder({ session, onUpdate, onRemove, canRemove }: Sessi
   return (
     <div className="bg-steel rounded-lg border border-white/5 overflow-visible">
       {/* Header */}
-      <div className="flex items-center gap-3 p-4 border-b border-white/5">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3 p-3 sm:p-4 border-b border-white/5">
         <button
           type="button"
           onClick={() => setIsExpanded(!isExpanded)}
@@ -163,30 +163,29 @@ export function SessionBuilder({ session, onUpdate, onRemove, canRemove }: Sessi
           {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </button>
 
-        <div className="flex-1 flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted">Day</span>
-            <input
-              type="number"
-              value={session.day}
-              onChange={(e) => updateDay(parseInt(e.target.value) || 1)}
-              min={1}
-              max={14}
-              className="w-12 bg-charcoal border border-white/10 rounded px-2 py-1 text-sm text-center text-foreground focus:outline-none focus:border-crimson/50"
-            />
-          </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted">Day</span>
           <input
-            type="text"
-            value={session.name}
-            onChange={(e) => updateName(e.target.value)}
-            placeholder="Session name (e.g., Push, Pull, Upper)"
-            className="flex-1 bg-charcoal border border-white/10 rounded px-3 py-1.5 text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-crimson/50"
+            type="number"
+            value={session.day}
+            onChange={(e) => updateDay(parseInt(e.target.value) || 1)}
+            min={1}
+            max={14}
+            className="w-12 bg-charcoal border border-white/10 rounded px-2 py-1 text-sm text-center text-foreground focus:outline-none focus:border-crimson/50"
           />
         </div>
 
-        <div className="flex items-center gap-3">
-          <span className="text-xs text-muted">
-            {exerciseCount} exercise{exerciseCount !== 1 ? 's' : ''} | {totalSets} sets
+        <input
+          type="text"
+          value={session.name}
+          onChange={(e) => updateName(e.target.value)}
+          placeholder="Session name (e.g., Push, Pull)"
+          className="flex-1 min-w-[120px] bg-charcoal border border-white/10 rounded px-3 py-1.5 text-sm text-foreground placeholder:text-muted focus:outline-none focus:border-crimson/50"
+        />
+
+        <div className="flex items-center gap-2 sm:gap-3">
+          <span className="text-xs text-muted whitespace-nowrap">
+            {exerciseCount} ex | {totalSets} sets
           </span>
           {canRemove && (
             <button
