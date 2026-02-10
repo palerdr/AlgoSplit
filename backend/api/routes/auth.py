@@ -3,7 +3,10 @@ Authentication routes
 Handles user signup, login, and user info retrieval
 """
 
+import logging
 from fastapi import APIRouter, HTTPException, Depends, status, Response
+
+logger = logging.getLogger("splitai.auth")
 from db.supabase import get_supabase_client, get_supabase_client_with_token
 from schemas.auth import (
     SignUpRequest,
@@ -104,8 +107,9 @@ async def signup(request: SignUpRequest, http_response: Response):
                 detail=f"Invalid request: {str(e)}",
             )
         else:
+            logger.exception("Signup failed with unexpected error")
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Failed to create account: {str(e)}",
             )
 
@@ -186,8 +190,9 @@ async def login(request: LoginRequest, http_response: Response):
                 detail="Signups are currently disabled",
             )
         else:
+            logger.exception("Login failed with unexpected error")
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Login failed: {str(e)}",
             )
 
