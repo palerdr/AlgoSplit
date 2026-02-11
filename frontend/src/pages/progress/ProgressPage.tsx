@@ -1,11 +1,11 @@
 import { useState, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { TrendingUp, Award, Calendar, Search, Activity, BarChart3, Flame } from 'lucide-react';
+import { TrendingUp, Calendar, Search, Activity, BarChart3, Flame } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, Spinner } from '@/components/ui';
 import { getWorkouts, workoutKeys } from '@/api/workouts.api';
 import { analyzeWorkouts, analysisKeys } from '@/api/analysis.api';
 import { listCustomExercises, customExerciseKeys } from '@/api/customExercises.api';
-import { calculate1RM, calculateEffectiveReps, formatDate } from '@/lib/utils';
+import { calculateEffectiveReps, formatDate } from '@/lib/utils';
 import { searchExercises } from '@/data/exercises';
 import { useSettingsStore, formatWeightWithUnit, convertWeight } from '@/stores/settingsStore';
 import { MuscleChart, AnalysisSummary, SuggestionsList } from '@/components/analysis';
@@ -51,7 +51,7 @@ export function ProgressPage() {
       weight: number;
       reps: number;
       rir: number | null;
-      effectiveReps: number | null;
+      effectiveReps: number;
       isRecent: boolean;
     }> = [];
 
@@ -104,27 +104,16 @@ export function ProgressPage() {
     if (heatmapData.length === 0) return null;
 
     // Peak stimulus: highest effective reps value
-    const effectiveValues = heatmapData
-      .map((d) => d.effectiveReps)
-      .filter((v): v is number => v !== null);
-    const peakStimulus = effectiveValues.length > 0 ? Math.max(...effectiveValues) : null;
+    const peakStimulus = Math.max(...heatmapData.map((d) => d.effectiveReps));
 
     // Max weight
     const maxWeight = Math.max(...heatmapData.map((d) => d.weight));
     const displayMaxWeight = units === 'metric' ? convertWeight(maxWeight, 'imperial', 'metric') : maxWeight;
 
-    // Fallback Est. 1RM (used when no RIR data)
-    let max1RM = 0;
-    for (const point of heatmapData) {
-      const est = calculate1RM(point.weight, point.reps);
-      if (est > max1RM) max1RM = est;
-    }
-    const display1RM = units === 'metric' ? convertWeight(max1RM, 'imperial', 'metric') : max1RM;
-
     // Session count
     const uniqueDates = new Set(heatmapData.map((d) => d.date));
 
-    return { peakStimulus, maxWeight: displayMaxWeight, max1RM: display1RM, sessions: uniqueDates.size };
+    return { peakStimulus, maxWeight: displayMaxWeight, sessions: uniqueDates.size };
   }, [heatmapData, units]);
 
   // Get unique exercises from workout history
@@ -366,23 +355,11 @@ export function ProgressPage() {
                 <div className="grid grid-cols-3 gap-4">
                   <Card>
                     <CardContent className="pt-4 text-center">
-                      {prs.peakStimulus !== null ? (
-                        <>
-                          <Flame className="w-6 h-6 mx-auto mb-2 text-crimson" />
-                          <p className="text-2xl font-bold text-foreground">
-                            {prs.peakStimulus}
-                          </p>
-                          <p className="text-xs text-muted">Peak Stimulus</p>
-                        </>
-                      ) : (
-                        <>
-                          <Award className="w-6 h-6 mx-auto mb-2 text-crimson" />
-                          <p className="text-2xl font-bold text-foreground">
-                            {formatWeightWithUnit(prs.max1RM, units)}
-                          </p>
-                          <p className="text-xs text-muted">Est. 1RM</p>
-                        </>
-                      )}
+                      <Flame className="w-6 h-6 mx-auto mb-2 text-crimson" />
+                      <p className="text-2xl font-bold text-foreground">
+                        {prs.peakStimulus}
+                      </p>
+                      <p className="text-xs text-muted">Peak Stimulus</p>
                     </CardContent>
                   </Card>
                   <Card>

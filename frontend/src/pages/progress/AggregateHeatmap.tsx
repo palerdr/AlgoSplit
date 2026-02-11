@@ -14,7 +14,6 @@ const COLOR_STOPS = [
   { at: 5, r: 220, g: 38, b: 38 },  // crimson
 ];
 
-const NO_RIR_COLOR = '#334155'; // slate-700
 const EMPTY_COLOR = 'transparent';
 
 function lerpColor(value: number): string {
@@ -38,7 +37,7 @@ function lerpColor(value: number): string {
 }
 
 interface CellData {
-  avgEffectiveReps: number | null;
+  avgEffectiveReps: number;
   setCount: number;
   dateLabel: string;
 }
@@ -82,13 +81,12 @@ export function AggregateHeatmap({ workoutsData, onSelectExercise }: AggregateHe
         for (let i = 0; i < ex.sets_completed; i++) {
           const reps = ex.reps[i];
           const rir = ex.rir?.[i] ?? null;
-          const er = calculateEffectiveReps(reps, rir);
-          if (er !== null) effectiveValues.push(er);
+          effectiveValues.push(calculateEffectiveReps(reps, rir));
         }
 
         const avgER = effectiveValues.length > 0
           ? effectiveValues.reduce((a, b) => a + b, 0) / effectiveValues.length
-          : null;
+          : 0;
 
         if (!gridMap.has(ex.exercise_name)) {
           gridMap.set(ex.exercise_name, new Map());
@@ -98,12 +96,7 @@ export function AggregateHeatmap({ workoutsData, onSelectExercise }: AggregateHe
         if (existing) {
           // Merge multiple workouts on same day: weighted average of effective reps
           const totalSets = existing.setCount + ex.sets_completed;
-          let combinedER: number | null;
-          if (existing.avgEffectiveReps !== null && avgER !== null) {
-            combinedER = (existing.avgEffectiveReps * existing.setCount + avgER * ex.sets_completed) / totalSets;
-          } else {
-            combinedER = existing.avgEffectiveReps ?? avgER;
-          }
+          const combinedER = (existing.avgEffectiveReps * existing.setCount + avgER * ex.sets_completed) / totalSets;
           exMap.set(dateKey, { avgEffectiveReps: combinedER, setCount: totalSets, dateLabel });
         } else {
           exMap.set(dateKey, { avgEffectiveReps: avgER, setCount: ex.sets_completed, dateLabel });
@@ -177,9 +170,7 @@ export function AggregateHeatmap({ workoutsData, onSelectExercise }: AggregateHe
                           </td>
                         );
                       }
-                      const bg = cell.avgEffectiveReps !== null
-                        ? lerpColor(cell.avgEffectiveReps)
-                        : NO_RIR_COLOR;
+                      const bg = lerpColor(cell.avgEffectiveReps);
                       // Scale opacity by set count (min 0.5, max 1.0)
                       const opacity = Math.min(1, 0.5 + cell.setCount * 0.1);
                       return (
@@ -216,9 +207,7 @@ export function AggregateHeatmap({ workoutsData, onSelectExercise }: AggregateHe
               <div className="flex gap-3 mt-1 text-xs">
                 <span className="text-secondary">{tooltip.cell.setCount} sets</span>
                 <span className="text-crimson font-medium">
-                  {tooltip.cell.avgEffectiveReps !== null
-                    ? `${tooltip.cell.avgEffectiveReps.toFixed(1)} ER`
-                    : 'No RIR'}
+                  {tooltip.cell.avgEffectiveReps.toFixed(1)} ER
                 </span>
               </div>
             </div>
@@ -236,10 +225,6 @@ export function AggregateHeatmap({ workoutsData, onSelectExercise }: AggregateHe
             }}
           />
           <span>5</span>
-          <div className="flex items-center gap-1 ml-3">
-            <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: NO_RIR_COLOR }} />
-            <span>No RIR</span>
-          </div>
         </div>
       </CardContent>
     </Card>

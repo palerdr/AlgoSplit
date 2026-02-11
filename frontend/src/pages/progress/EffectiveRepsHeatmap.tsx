@@ -17,7 +17,7 @@ interface HeatmapPoint {
   weight: number;
   reps: number;
   rir: number | null;
-  effectiveReps: number | null;
+  effectiveReps: number;
   isRecent: boolean;
 }
 
@@ -35,10 +35,7 @@ const EFFECTIVE_REPS_COLORS: Record<number, string> = {
   5: '#dc2626', // crimson
 };
 
-const NO_RIR_COLOR = '#475569'; // slate-600
-
-function getColor(effectiveReps: number | null): string {
-  if (effectiveReps === null) return NO_RIR_COLOR;
+function getColor(effectiveReps: number): string {
   const clamped = Math.min(5, Math.max(0, effectiveReps));
   return EFFECTIVE_REPS_COLORS[clamped] ?? EFFECTIVE_REPS_COLORS[5];
 }
@@ -73,7 +70,7 @@ function HeatmapTooltip({
         <div className="flex justify-between gap-4">
           <span className="text-secondary">Effective Reps:</span>
           <span className="text-crimson font-medium">
-            {point.effectiveReps !== null ? point.effectiveReps : 'N/A'}
+            {point.effectiveReps}
           </span>
         </div>
       </div>
@@ -130,8 +127,6 @@ export function EffectiveRepsHeatmap({ data }: EffectiveRepsHeatmapProps) {
                     key={index}
                     fill={getColor(point.effectiveReps)}
                     fillOpacity={point.isRecent ? 1 : 0.4}
-                    stroke={point.effectiveReps === null ? '#94a3b8' : 'none'}
-                    strokeWidth={point.effectiveReps === null ? 1.5 : 0}
                     r={6}
                   />
                 ))}
@@ -152,13 +147,6 @@ export function EffectiveRepsHeatmap({ data }: EffectiveRepsHeatmapProps) {
               <span>{n}</span>
             </div>
           ))}
-          <div className="flex items-center gap-1 ml-2">
-            <div
-              className="w-3 h-3 rounded-full border border-slate-400"
-              style={{ backgroundColor: NO_RIR_COLOR }}
-            />
-            <span>No RIR</span>
-          </div>
         </div>
       </CardContent>
     </Card>

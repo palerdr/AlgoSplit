@@ -100,8 +100,9 @@ export const storage = {
 
 // Calculate effective (stimulating) reps from total reps and RIR
 // The last 5 reps before failure are considered stimulating
-export function calculateEffectiveReps(reps: number, rir: number | null): number | null {
-  if (rir === null || rir === undefined) return null;
+// No RIR logged = assume trained to/near failure = 5 effective reps
+export function calculateEffectiveReps(reps: number, rir: number | null): number {
+  if (rir === null || rir === undefined) return Math.min(reps, 5);
   return Math.min(reps, Math.max(0, 5 - rir));
 }
 
