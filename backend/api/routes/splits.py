@@ -48,6 +48,143 @@ def validate_exercises(exercises: List[dict]) -> List[str]:
     return unrecognized
 
 
+def _detach_completed_session(supabase, program_session_id: str, template_id: str):
+    """
+    Freeze a completed program session by copying its template exercises
+    into program_session_exercises and unlinking the template.
+
+    Idempotent: skips if session already has program_session_exercises.
+    """
+    # Check if already detached (has override exercises)
+    existing = supabase.table("program_session_exercises").select("id").eq(
+        "program_session_id", program_session_id
+    ).limit(1).execute()
+
+    if existing.data:
+        # Already has exercises — just unlink template_id
+        supabase.table("program_sessions").update(
+            {"template_id": None}
+        ).eq("id", program_session_id).execute()
+        return
+
+    # Copy current template exercises into program_session_exercises
+    tex = supabase.table("session_template_exercises").select("*").eq(
+        "template_id", template_id
+    ).order("order_index").execute()
+
+    if tex.data:
+        rows = [
+            {
+                "program_session_id": program_session_id,
+                "exercise_name": ex["exercise_name"],
+                "sets": ex["sets"],
+                "order_index": ex["order_index"],
+                "unilateral": ex.get("unilateral", False),
+                "resistance_profile": ex.get("resistance_profile"),
+            }
+            for ex in tex.data
+        ]
+        supabase.table("program_session_exercises").insert(rows).execute()
+
+    # Unlink template
+    supabase.table("program_sessions").update(
+        {"template_id": None}
+    ).eq("id", program_session_id).execute()
+
+
+def sync_linked_templates(supabase, split_id: str, new_sessions: List[dict]) -> dict:
+    """
+    After a split is replaced, cascade exercise changes to all linked
+    session templates. Completed program sessions are detached first so
+    their exercises are frozen.
+
+    Args:
+        supabase: Authenticated Supabase client
+        split_id: The split that was just saved
+        new_sessions: List of dicts with keys: id, name, exercises
+            where exercises is a list of dicts from the exercises table
+
+    Returns:
+        Stats dict with templates_updated, sessions_detached, errors
+    """
+    stats = {"templates_updated": 0, "sessions_detached": 0, "errors": []}
+
+    # Find all templates linked to this split
+    templates_result = supabase.table("session_templates").select(
+        "id, name, source_session_id"
+    ).eq("source_split_id", split_id).execute()
+
+    if not templates_result.data:
+        return stats
+
+    # Build name → new session lookup
+    session_by_name = {}
+    for s in new_sessions:
+        session_by_name[s["name"]] = s
+
+    for template in templates_result.data:
+        template_id = template["id"]
+        template_name = template["name"]
+
+        try:
+            # Match template to new session by name
+            matched_session = session_by_name.get(template_name)
+            if not matched_session:
+                # Session was renamed or removed — skip this template
+                continue
+
+            # Find completed program_sessions referencing this template
+            completed = supabase.table("program_sessions").select("id").eq(
+                "template_id", template_id
+            ).eq("status", "completed").execute()
+
+            for ps in (completed.data or []):
+                try:
+                    _detach_completed_session(supabase, ps["id"], template_id)
+                    stats["sessions_detached"] += 1
+                except Exception as detach_err:
+                    stats["errors"].append(
+                        f"Failed to detach session {ps['id']}: {str(detach_err)}"
+                    )
+
+            # Delete old template exercises
+            supabase.table("session_template_exercises").delete().eq(
+                "template_id", template_id
+            ).execute()
+
+            # Insert new exercises from matched session
+            new_exercises = matched_session.get("exercises", [])
+            if new_exercises:
+                exercise_rows = [
+                    {
+                        "template_id": template_id,
+                        "exercise_name": ex["exercise_name"],
+                        "sets": ex["sets"],
+                        "order_index": ex.get("order_index", idx),
+                        "unilateral": ex.get("unilateral", False),
+                        "resistance_profile": ex.get("resistance_profile"),
+                    }
+                    for idx, ex in enumerate(new_exercises)
+                ]
+                supabase.table("session_template_exercises").insert(
+                    exercise_rows
+                ).execute()
+
+            # Update source_session_id to point to new session
+            supabase.table("session_templates").update(
+                {"source_session_id": matched_session["id"]}
+            ).eq("id", template_id).execute()
+
+            stats["templates_updated"] += 1
+
+        except Exception as tmpl_err:
+            stats["errors"].append(
+                f"Failed to sync template {template_id} ({template_name}): {str(tmpl_err)}"
+            )
+
+    return stats
+
+
 def build_split_response(split_data: dict, sessions_data: List[dict]) -> SplitResponse:
     """
     Build a complete SplitResponse from database records
@@ -517,6 +654,26 @@ async def replace_split(
             sd = dict(session_record)
             sd["exercises"] = exercise_map.get(session_record["id"], [])
             sessions_data.append(sd)
+
+        # Cascade exercise changes to linked session templates
+        try:
+            sessions_with_exercises = [
+                {
+                    "id": sessions_result.data[idx]["id"],
+                    "name": sessions_result.data[idx]["name"],
+                    "exercises": exercise_map.get(sessions_result.data[idx]["id"], []),
+                }
+                for idx in range(len(sessions_result.data))
+            ]
+            sync_stats = sync_linked_templates(supabase, split_id, sessions_with_exercises)
+            if sync_stats["errors"]:
+                print(f"[WARN] Template sync had errors: {sync_stats['errors']}")
+            if sync_stats["templates_updated"] > 0:
+                print(f"[INFO] Synced {sync_stats['templates_updated']} template(s), "
+                      f"detached {sync_stats['sessions_detached']} completed session(s)")
+        except Exception as sync_err:
+            # Sync failure should NOT fail the split save
+            print(f"[WARN] Template sync failed (non-fatal): {str(sync_err)}")
 
         # Get updated split record
         split_result = supabase.table("splits").select("*").eq("id", split_id).execute()
