@@ -93,11 +93,21 @@ export function AggregateHeatmap({ workoutsData, onSelectExercise }: AggregateHe
         if (!gridMap.has(ex.exercise_name)) {
           gridMap.set(ex.exercise_name, new Map());
         }
-        gridMap.get(ex.exercise_name)!.set(dateKey, {
-          avgEffectiveReps: avgER,
-          setCount: ex.sets_completed,
-          dateLabel,
-        });
+        const exMap = gridMap.get(ex.exercise_name)!;
+        const existing = exMap.get(dateKey);
+        if (existing) {
+          // Merge multiple workouts on same day: weighted average of effective reps
+          const totalSets = existing.setCount + ex.sets_completed;
+          let combinedER: number | null;
+          if (existing.avgEffectiveReps !== null && avgER !== null) {
+            combinedER = (existing.avgEffectiveReps * existing.setCount + avgER * ex.sets_completed) / totalSets;
+          } else {
+            combinedER = existing.avgEffectiveReps ?? avgER;
+          }
+          exMap.set(dateKey, { avgEffectiveReps: combinedER, setCount: totalSets, dateLabel });
+        } else {
+          exMap.set(dateKey, { avgEffectiveReps: avgER, setCount: ex.sets_completed, dateLabel });
+        }
       }
     }
 

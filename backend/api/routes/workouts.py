@@ -211,7 +211,7 @@ async def log_workout(
 )
 async def get_workout_history(
     current_user: AuthUser = Depends(get_current_user),
-    limit: int = Query(50, ge=1, le=100, description="Number of workouts to return"),
+    limit: int = Query(50, ge=1, le=500, description="Number of workouts to return"),
     offset: int = Query(0, ge=0, description="Number of workouts to skip"),
     days: Optional[int] = Query(None, ge=1, description="Filter to last N days"),
 ):
@@ -243,14 +243,23 @@ async def get_workout_history(
         if not result.data:
             return WorkoutHistoryResponse(workouts=[], total=0)
 
-        # For each workout, get exercises
+        # Batch-fetch all exercises for returned workouts (avoids N+1 queries)
+        workout_ids = [w["id"] for w in result.data]
+        exercises_result = supabase.table("workout_exercises").select("*").in_(
+            "workout_log_id", workout_ids
+        ).order("order_index").execute()
+
+        # Group exercises by workout_log_id
+        exercises_by_workout: dict[str, list] = {}
+        for ex in (exercises_result.data or []):
+            wid = ex["workout_log_id"]
+            if wid not in exercises_by_workout:
+                exercises_by_workout[wid] = []
+            exercises_by_workout[wid].append(ex)
+
         workouts = []
         for workout_data in result.data:
-            exercises_result = supabase.table("workout_exercises").select("*").eq(
-                "workout_log_id", workout_data["id"]
-            ).order("order_index").execute()
-
-            exercises_data = exercises_result.data or []
+            exercises_data = exercises_by_workout.get(workout_data["id"], [])
             workouts.append(build_workout_response(workout_data, exercises_data))
 
         # Get total count (for pagination)
