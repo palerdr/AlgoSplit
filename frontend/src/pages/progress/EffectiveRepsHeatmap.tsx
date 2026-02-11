@@ -9,7 +9,6 @@ import {
   Cell,
 } from 'recharts';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui';
-import { formatDate } from '@/lib/utils';
 import { useSettingsStore, formatWeightWithUnit, convertWeight } from '@/stores/settingsStore';
 
 interface HeatmapPoint {
