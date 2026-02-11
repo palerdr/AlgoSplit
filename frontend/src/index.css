@@ -143,3 +143,8 @@ body {
 .chart-fade-in {
   animation: chart-fade-in 300ms ease-out both;
 }
+
+/* iOS PWA safe area */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}

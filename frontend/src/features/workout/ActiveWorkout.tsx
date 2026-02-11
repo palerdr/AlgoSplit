@@ -34,7 +34,7 @@ function SortableExerciseCard({
   splitId,
 }: {
   exercise: WorkoutExercise;
-  previousExerciseData?: { reps: number[]; weight: number[] };
+  previousExerciseData?: { reps: number[]; weight: number[]; rir?: (number | null)[] };
   splitId?: string;
 }) {
   const {

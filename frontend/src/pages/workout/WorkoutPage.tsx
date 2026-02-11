@@ -3,6 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Dumbbell, ChevronRight, ChevronDown, ChevronLeft, Plus, Loader2, Calendar, Play, Layers } from 'lucide-react';
 import { Button, Card, Input } from '@/components/ui';
 import { useWorkoutStore, ActiveWorkout } from '@/features/workout';
+import { MobileActiveWorkout } from '@/features/workout/MobileActiveWorkout';
+import { useIsMobile } from '@/hooks/useIsMobile';
 import { getWorkouts, workoutKeys } from '@/api/workouts.api';
 import { getSplits, splitKeys } from '@/api/splits.api';
 import { getTodaySessions, getProgramSessionExercises, programKeys } from '@/api/programs.api';
@@ -53,6 +55,8 @@ function formatTodayDate(): string {
 
 export function WorkoutPage() {
   const { activeWorkout, startWorkout, startWorkoutFromSession } = useWorkoutStore();
+  const isMobile = useIsMobile();
+  const [forceListView, setForceListView] = useState(false);
   const [customName, setCustomName] = useState('');
   const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
   const [expandedSplitId, setExpandedSplitId] = useState<string | null>(null);
@@ -102,6 +106,9 @@ export function WorkoutPage() {
 
   // If there's an active workout, show it
   if (activeWorkout) {
+    if (isMobile && !forceListView) {
+      return <MobileActiveWorkout onSwitchToList={() => setForceListView(true)} />;
+    }
     return <ActiveWorkout />;
   }
 
