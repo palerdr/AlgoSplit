@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Dumbbell, ChevronRight, ChevronDown, ChevronLeft, Plus, Loader2, Calendar, Play, Layers } from 'lucide-react';
 import { Button, Card, Input } from '@/components/ui';
 import { useWorkoutStore, ActiveWorkout } from '@/features/workout';
-import { getWorkouts } from '@/api/workouts.api';
+import { getWorkouts, workoutKeys } from '@/api/workouts.api';
 import { getSplits, splitKeys } from '@/api/splits.api';
 import { getTodaySessions, getProgramSessionExercises, programKeys } from '@/api/programs.api';
 import type { TodaySessionItem, SessionResponse } from '@/types/api.types';
@@ -74,6 +74,24 @@ export function WorkoutPage() {
     queryFn: getSplits,
   });
 
+  // Fetch recent workouts to mark dates with logged workouts
+  const { data: recentWorkoutsData } = useQuery({
+    queryKey: workoutKeys.list({ limit: 200, days: 90 }),
+    queryFn: () => getWorkouts({ limit: 200, days: 90 }),
+    enabled: !activeWorkout,
+  });
+
+  const workoutDates = useMemo(() => {
+    const set = new Set<string>();
+    if (!recentWorkoutsData?.workouts) return set;
+    for (const w of recentWorkoutsData.workouts) {
+      const d = new Date(w.completed_at);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      set.add(key);
+    }
+    return set;
+  }, [recentWorkoutsData]);
+
   useEffect(() => {
     setSelectedDate(today);
     requestAnimationFrame(() => {
@@ -123,7 +141,7 @@ export function WorkoutPage() {
         unilateral: ex.unilateral,
       }));
 
-      let previousData: Record<string, { reps: number[]; weight: number[] }> | undefined;
+      let previousData: Record<string, { reps: number[]; weight: number[]; rir?: (number | null)[] }> | undefined;
       try {
         const history = await getWorkouts({ limit: 20, days: 90 });
         const previousWorkout = history.workouts.find(
@@ -135,6 +153,7 @@ export function WorkoutPage() {
             previousData[ex.exercise_name] = {
               reps: ex.reps,
               weight: ex.weight,
+              rir: ex.rir ?? undefined,
             };
           }
         }
@@ -165,7 +184,7 @@ export function WorkoutPage() {
         unilateral: ex.unilateral,
       }));
 
-      let previousData: Record<string, { reps: number[]; weight: number[] }> | undefined;
+      let previousData: Record<string, { reps: number[]; weight: number[]; rir?: (number | null)[] }> | undefined;
       try {
         const history = await getWorkouts({ limit: 20, days: 90 });
         const previousWorkout = history.workouts.find(
@@ -177,6 +196,7 @@ export function WorkoutPage() {
             previousData[ex.exercise_name] = {
               reps: ex.reps,
               weight: ex.weight,
+              rir: ex.rir ?? undefined,
             };
           }
         }
@@ -215,6 +235,8 @@ export function WorkoutPage() {
           {dates.map((date) => {
             const selected = isSameDay(date, selectedDate);
             const dateIsToday = isSameDay(date, today);
+            const dateKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+            const hasWorkout = workoutDates.has(dateKey);
             return (
               <button
                 key={date.toISOString()}
@@ -228,8 +250,10 @@ export function WorkoutPage() {
               >
                 <span className="text-[10px] leading-none">{dateIsToday ? 'Today' : DAY_ABBREVS[date.getDay()]}</span>
                 <span className="text-base font-semibold leading-tight mt-0.5">{date.getDate()}</span>
-                {dateIsToday && (
-                  <span className={`w-1 h-1 rounded-full mt-0.5 ${selected ? 'bg-crimson' : 'bg-muted'}`} />
+                {(dateIsToday || hasWorkout) && (
+                  <span className={`w-1 h-1 rounded-full mt-0.5 ${
+                    hasWorkout ? 'bg-crimson' : selected ? 'bg-crimson' : 'bg-muted'
+                  }`} />
                 )}
               </button>
             );

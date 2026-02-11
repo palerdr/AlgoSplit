@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 interface SetRowProps {
   setIndex: number;
   data: SetData;
-  previousSet?: { reps: number; weight: number };
+  previousSet?: { reps: number; weight: number; rir?: number | null };
   sideLabel?: 'L' | 'R';
   onUpdate: (data: Partial<SetData>) => void;
   onComplete: () => void;
@@ -92,6 +92,7 @@ export function SetRow({
         {previousSet ? (
           <span className="text-xs text-secondary font-mono">
             {previousSet.weight}x{previousSet.reps}
+            {previousSet.rir != null && <span className="text-faint"> @{previousSet.rir}</span>}
           </span>
         ) : (
           <span className="text-xs text-faint">-</span>
@@ -139,7 +140,7 @@ export function SetRow({
           inputMode="numeric"
           value={data.rir ?? ''}
           onChange={handleRirChange}
-          placeholder="-"
+          placeholder={previousSet?.rir != null ? previousSet.rir.toString() : '-'}
           className={cn(
             'w-full h-9 px-2 bg-steel border border-white/8 rounded-sm text-center font-mono text-foreground tabular-nums',
             'focus:outline-none focus:border-crimson',

@@ -25,7 +25,7 @@ interface ActiveWorkout {
   sessionId?: string;
   splitId?: string;
   programSessionId?: string;
-  previousData?: Record<string, { reps: number[]; weight: number[] }>;
+  previousData?: Record<string, { reps: number[]; weight: number[]; rir?: (number | null)[] }>;
   retroDate?: string; // ISO string when user logs a past workout
 }
 
@@ -45,7 +45,7 @@ interface WorkoutState {
   startWorkoutFromSession: (
     sessionName: string,
     exercises: Array<{ name: string; sets: number; unilateral: boolean }>,
-    previousData?: Record<string, { reps: number[]; weight: number[] }>,
+    previousData?: Record<string, { reps: number[]; weight: number[]; rir?: (number | null)[] }>,
     sessionId?: string,
     splitId?: string,
     programSessionId?: string,

@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 
 interface ExerciseCardProps {
   exercise: WorkoutExercise;
-  previousExerciseData?: { reps: number[]; weight: number[] };
+  previousExerciseData?: { reps: number[]; weight: number[]; rir?: (number | null)[] };
   splitId?: string;
   dragHandleProps?: Record<string, unknown>;
 }
@@ -149,6 +149,7 @@ export function ExerciseCard({
                             ? {
                                 reps: previousExerciseData.reps[lIndex],
                                 weight: previousExerciseData.weight[lIndex],
+                                rir: previousExerciseData.rir?.[lIndex],
                               }
                             : undefined
                         }
@@ -166,6 +167,7 @@ export function ExerciseCard({
                             ? {
                                 reps: previousExerciseData.reps[rIndex],
                                 weight: previousExerciseData.weight[rIndex],
+                                rir: previousExerciseData.rir?.[rIndex],
                               }
                             : undefined
                         }
@@ -187,6 +189,7 @@ export function ExerciseCard({
                         ? {
                             reps: previousExerciseData.reps[index],
                             weight: previousExerciseData.weight[index],
+                            rir: previousExerciseData.rir?.[index],
                           }
                         : undefined
                     }

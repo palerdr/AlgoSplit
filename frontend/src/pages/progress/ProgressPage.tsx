@@ -1,14 +1,16 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { TrendingUp, Award, Calendar, Search, Activity, BarChart3, Flame } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, Spinner } from '@/components/ui';
 import { getWorkouts, workoutKeys } from '@/api/workouts.api';
 import { analyzeWorkouts, analysisKeys } from '@/api/analysis.api';
+import { listCustomExercises, customExerciseKeys } from '@/api/customExercises.api';
 import { calculate1RM, calculateEffectiveReps, formatDate } from '@/lib/utils';
 import { searchExercises } from '@/data/exercises';
 import { useSettingsStore, formatWeightWithUnit, convertWeight } from '@/stores/settingsStore';
 import { MuscleChart, AnalysisSummary, SuggestionsList } from '@/components/analysis';
 import { EffectiveRepsHeatmap } from './EffectiveRepsHeatmap';
+import { AggregateHeatmap } from './AggregateHeatmap';
 
 type ProgressTab = 'analytics' | 'exercise';
 
@@ -21,6 +23,13 @@ export function ProgressPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [analysisDays, setAnalysisDays] = useState<number>(7);
+  const exerciseSectionRef = useRef<HTMLDivElement>(null);
+
+  const { data: customExercises } = useQuery({
+    queryKey: customExerciseKeys.list(),
+    queryFn: listCustomExercises,
+    staleTime: 5 * 60 * 1000,
+  });
 
   const { data: workoutsData, isLoading } = useQuery({
     queryKey: workoutKeys.list({ limit: 100 }),
@@ -118,11 +127,6 @@ export function ProgressPage() {
     return { peakStimulus, maxWeight: displayMaxWeight, max1RM: display1RM, sessions: uniqueDates.size };
   }, [heatmapData, units]);
 
-  const searchResults = useMemo(() => {
-    if (searchQuery.length < 2) return [];
-    return searchExercises(searchQuery, 10);
-  }, [searchQuery]);
-
   // Get unique exercises from workout history
   const exercisesInHistory = useMemo(() => {
     if (!workoutsData?.workouts) return new Set<string>();
@@ -134,6 +138,38 @@ export function ProgressPage() {
     }
     return exercises;
   }, [workoutsData]);
+
+  const searchResults = useMemo(() => {
+    if (searchQuery.length < 2) return [];
+    const lowerQuery = searchQuery.toLowerCase();
+
+    // Built-in exercises
+    const builtIn = searchExercises(searchQuery, 10).map((e) => ({ name: e.name, isCustom: false }));
+
+    // Custom exercises matching query
+    const custom = (customExercises?.exercises || [])
+      .filter((ce) => ce.exercise_name.toLowerCase().includes(lowerQuery))
+      .slice(0, 5)
+      .map((ce) => ({ name: ce.exercise_name, isCustom: true }));
+
+    // History exercises matching query
+    const historyMatches = Array.from(exercisesInHistory)
+      .filter((name) => name.toLowerCase().includes(lowerQuery))
+      .slice(0, 5)
+      .map((name) => ({ name, isCustom: false }));
+
+    // Merge: custom first, then history, then built-in — deduplicate by lowercase name
+    const seen = new Set<string>();
+    const merged: Array<{ name: string; isCustom: boolean }> = [];
+    for (const ex of [...custom, ...historyMatches, ...builtIn]) {
+      const key = ex.name.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(ex);
+      }
+    }
+    return merged.slice(0, 12);
+  }, [searchQuery, customExercises, exercisesInHistory]);
 
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -241,8 +277,23 @@ export function ProgressPage() {
       {/* ============================================ */}
       {activeTab === 'exercise' && (
         <div className="space-y-4">
+          {/* Aggregate Heatmap */}
+          {workoutsData && workoutsData.workouts.length > 0 && (
+            <AggregateHeatmap
+              workoutsData={workoutsData}
+              onSelectExercise={(name) => {
+                setSelectedExercise(name);
+                setShowSearch(false);
+                setSearchQuery('');
+                requestAnimationFrame(() => {
+                  exerciseSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                });
+              }}
+            />
+          )}
+
           {/* Exercise selector header */}
-          <div className="flex items-center gap-2">
+          <div ref={exerciseSectionRef} className="flex items-center gap-2">
             <TrendingUp className="w-5 h-5 text-blue-400" />
             <h2 className="text-lg font-semibold text-foreground">Exercise Progress</h2>
           </div>
@@ -266,20 +317,25 @@ export function ProgressPage() {
                   />
                   {showSearch && searchResults.length > 0 && (
                     <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-charcoal border border-white/10 rounded-md shadow-lg overflow-hidden max-h-64 overflow-y-auto">
-                      {searchResults.map((exercise) => (
+                      {searchResults.map((result) => (
                         <button
-                          key={exercise.name}
+                          key={result.name}
                           onClick={() => {
-                            setSelectedExercise(exercise.name);
+                            setSelectedExercise(result.name);
                             setShowSearch(false);
                             setSearchQuery('');
                           }}
                           className="w-full px-3 py-2 text-left text-sm text-secondary hover:bg-steel hover:text-foreground transition-colors flex items-center justify-between"
                         >
-                          <span>{exercise.name}</span>
-                          {exercisesInHistory.has(exercise.name) && (
-                            <span className="text-xs text-crimson">Has data</span>
-                          )}
+                          <span>{result.name}</span>
+                          <span className="flex items-center gap-2">
+                            {result.isCustom && (
+                              <span className="text-xs text-blue-400">Custom</span>
+                            )}
+                            {exercisesInHistory.has(result.name) && (
+                              <span className="text-xs text-crimson">Has data</span>
+                            )}
+                          </span>
                         </button>
                       ))}
                     </div>

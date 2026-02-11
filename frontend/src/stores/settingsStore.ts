@@ -25,6 +25,11 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'algosplit-settings',
+      version: 1,
+      merge: (persisted, current) => ({
+        ...(current as SettingsState),
+        ...(persisted as Partial<SettingsState>),
+      }),
     }
   )
 );

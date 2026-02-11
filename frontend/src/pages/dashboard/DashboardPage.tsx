@@ -87,7 +87,7 @@ export function DashboardPage() {
       }));
 
       // Fetch previous workout data for this session name
-      let previousData: Record<string, { reps: number[]; weight: number[] }> | undefined;
+      let previousData: Record<string, { reps: number[]; weight: number[]; rir?: (number | null)[] }> | undefined;
       try {
         const history = await getWorkouts({ limit: 20, days: 90 });
         const previousWorkout = history.workouts.find(
@@ -99,6 +99,7 @@ export function DashboardPage() {
             previousData[ex.exercise_name] = {
               reps: ex.reps,
               weight: ex.weight,
+              rir: ex.rir ?? undefined,
             };
           }
         }
