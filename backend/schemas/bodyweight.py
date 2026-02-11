@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class BodyweightEntryCreate(BaseModel):
-    weight: float = Field(..., gt=0, description="Weight in lbs")
+    weight: float = Field(..., gt=0, le=9999.99, description="Weight in lbs")
     recorded_at: Optional[datetime] = Field(default=None, description="When recorded (defaults to now)")
     notes: Optional[str] = Field(default=None, max_length=500)
 
@@ -29,4 +29,4 @@ class BodyweightEntryListResponse(BaseModel):
 
 class BodyweightBatchCreate(BaseModel):
     """Import multiple entries at once (for migrating localStorage data)"""
-    entries: List[BodyweightEntryCreate] = Field(..., min_length=1)
+    entries: List[BodyweightEntryCreate] = Field(..., min_length=1, max_length=500)
