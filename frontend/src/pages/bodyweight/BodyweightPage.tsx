@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   LineChart,
   Line,
@@ -7,26 +8,22 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { Scale, TrendingDown, TrendingUp, Calendar, Plus } from 'lucide-react';
+import { Scale, TrendingDown, TrendingUp, Calendar, Plus, Trash2 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, Button } from '@/components/ui';
 import { formatDate } from '@/lib/utils';
 import { useSettingsStore, formatWeightWithUnit, convertWeight } from '@/stores/settingsStore';
 import { storage } from '@/lib/utils';
+import {
+  getBodyweightEntries,
+  createBodyweightEntry,
+  batchCreateBodyweightEntries,
+  deleteBodyweightEntry,
+  bodyweightKeys,
+} from '@/api/bodyweight.api';
+import type { BodyweightEntryResponse } from '@/types/api.types';
 
-interface WeightEntry {
-  date: string;
-  weight: number; // Always stored in lbs
-}
-
-const STORAGE_KEY = 'algosplit-bodyweight';
-
-function loadWeightHistory(): WeightEntry[] {
-  return storage.get<WeightEntry[]>(STORAGE_KEY) || [];
-}
-
-function saveWeightHistory(entries: WeightEntry[]): void {
-  storage.set(STORAGE_KEY, entries);
-}
+const LOCAL_STORAGE_KEY = 'algosplit-bodyweight';
+const MIGRATED_FLAG = 'algosplit-bodyweight-migrated';
 
 interface ChartDataPoint {
   date: string;
@@ -51,46 +48,90 @@ function WeightTooltip({ active, payload }: { active?: boolean; payload?: Array<
 
 export function BodyweightPage() {
   const units = useSettingsStore((s) => s.units);
-  const [entries, setEntries] = useState<WeightEntry[]>(() => loadWeightHistory());
   const [inputWeight, setInputWeight] = useState('');
+  const queryClient = useQueryClient();
+  const migrationAttempted = useRef(false);
+
+  // Fetch entries from API
+  const { data, isLoading } = useQuery({
+    queryKey: bodyweightKeys.list(),
+    queryFn: getBodyweightEntries,
+  });
+
+  const entries = data?.entries ?? [];
+
+  // Migrate localStorage data on first load (once)
+  useEffect(() => {
+    if (migrationAttempted.current) return;
+    if (isLoading) return;
+    migrationAttempted.current = true;
+
+    const alreadyMigrated = storage.get<boolean>(MIGRATED_FLAG);
+    if (alreadyMigrated) return;
+
+    const localEntries = storage.get<Array<{ date: string; weight: number }>>(LOCAL_STORAGE_KEY);
+    if (!localEntries || localEntries.length === 0) {
+      storage.set(MIGRATED_FLAG, true);
+      return;
+    }
+
+    // Batch upload local entries to the API
+    const batchData = localEntries.map((e) => ({
+      weight: e.weight,
+      recorded_at: e.date,
+    }));
+
+    batchCreateBodyweightEntries({ entries: batchData })
+      .then(() => {
+        storage.set(MIGRATED_FLAG, true);
+        storage.remove(LOCAL_STORAGE_KEY);
+        queryClient.invalidateQueries({ queryKey: bodyweightKeys.all });
+      })
+      .catch((err) => {
+        console.error('Failed to migrate localStorage bodyweight data:', err);
+      });
+  }, [isLoading, queryClient]);
+
+  const addMutation = useMutation({
+    mutationFn: createBodyweightEntry,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: bodyweightKeys.all });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteBodyweightEntry,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: bodyweightKeys.all });
+    },
+  });
 
   function addEntry() {
     const weightValue = parseFloat(inputWeight);
     if (isNaN(weightValue) || weightValue <= 0) return;
 
-    // Convert to lbs if user is in metric mode
     const weightInLbs = units === 'metric'
       ? convertWeight(weightValue, 'metric', 'imperial')
       : weightValue;
 
-    const newEntry: WeightEntry = {
-      date: new Date().toISOString(),
-      weight: weightInLbs,
-    };
-
-    const newEntries = [...entries, newEntry].sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
-    setEntries(newEntries);
-    saveWeightHistory(newEntries);
+    addMutation.mutate({ weight: weightInLbs });
     setInputWeight('');
   }
 
   const chartData = useMemo<ChartDataPoint[]>(() => {
-    return entries.map((entry) => ({
-      date: entry.date,
-      dateFormatted: formatDate(entry.date),
+    return entries.map((entry: BodyweightEntryResponse) => ({
+      date: entry.recorded_at,
+      dateFormatted: formatDate(entry.recorded_at),
       weight: units === 'metric'
         ? convertWeight(entry.weight, 'imperial', 'metric')
         : entry.weight,
     }));
   }, [entries, units]);
 
-  // Calculate stats
   const stats = useMemo(() => {
     if (entries.length === 0) return null;
 
-    const weights = entries.map((e) =>
+    const weights = entries.map((e: BodyweightEntryResponse) =>
       units === 'metric' ? convertWeight(e.weight, 'imperial', 'metric') : e.weight
     );
 
@@ -100,18 +141,10 @@ export function BodyweightPage() {
     const min = Math.min(...weights);
     const max = Math.max(...weights);
 
-    // Calculate 7-day average
     const last7 = weights.slice(-7);
     const avg7Day = last7.reduce((a, b) => a + b, 0) / last7.length;
 
-    return {
-      current,
-      starting,
-      change,
-      min,
-      max,
-      avg7Day,
-    };
+    return { current, starting, change, min, max, avg7Day };
   }, [entries, units]);
 
   return (
@@ -140,7 +173,7 @@ export function BodyweightPage() {
                 onKeyDown={(e) => e.key === 'Enter' && addEntry()}
               />
             </div>
-            <Button onClick={addEntry} disabled={!inputWeight}>
+            <Button onClick={addEntry} disabled={!inputWeight || addMutation.isPending}>
               <Plus className="w-4 h-4 mr-1" />
               Log Weight
             </Button>
@@ -148,7 +181,13 @@ export function BodyweightPage() {
         </CardContent>
       </Card>
 
-      {entries.length === 0 ? (
+      {isLoading ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-muted">Loading entries...</p>
+          </CardContent>
+        </Card>
+      ) : entries.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">
             <Scale className="w-12 h-12 mx-auto mb-3 text-muted" />
@@ -249,20 +288,29 @@ export function BodyweightPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-2 max-h-64 overflow-y-auto">
-                {[...entries].reverse().slice(0, 10).map((entry) => {
+                {[...entries].reverse().slice(0, 10).map((entry: BodyweightEntryResponse) => {
                   const displayWeight = units === 'metric'
                     ? convertWeight(entry.weight, 'imperial', 'metric')
                     : entry.weight;
 
                   return (
                     <div
-                      key={entry.date}
+                      key={entry.id}
                       className="flex items-center justify-between py-2 border-b border-white/5 last:border-0"
                     >
-                      <span className="text-secondary">{formatDate(entry.date)}</span>
-                      <span className="text-foreground font-medium">
-                        {formatWeightWithUnit(displayWeight, units)}
-                      </span>
+                      <span className="text-secondary">{formatDate(entry.recorded_at)}</span>
+                      <div className="flex items-center gap-3">
+                        <span className="text-foreground font-medium">
+                          {formatWeightWithUnit(displayWeight, units)}
+                        </span>
+                        <button
+                          onClick={() => deleteMutation.mutate(entry.id)}
+                          className="text-muted hover:text-crimson transition-colors"
+                          title="Delete entry"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   );
                 })}

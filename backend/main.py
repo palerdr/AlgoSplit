@@ -262,7 +262,7 @@ from api.routes import (
     auth_router, splits_router, workouts_router, overrides_router,
     custom_exercises_router, comparisons_router,
     programs_router, session_templates_router, program_sessions_router, program_diagnostics_router,
-    periodization_router, meso_templates_router,
+    periodization_router, meso_templates_router, bodyweight_router,
 )
 
 # Include routers
@@ -278,4 +278,5 @@ app.include_router(program_sessions_router)  # Program sessions router (has its 
 app.include_router(program_diagnostics_router)  # Program diagnostics router (has its own /api/programs/{id}/diagnostics prefix)
 app.include_router(periodization_router)  # Periodization router (has its own /api/programs/{id}/periodization prefix)
 app.include_router(meso_templates_router)  # Meso templates router (has its own /api/meso-templates prefix)
+app.include_router(bodyweight_router)  # Bodyweight tracking router (has its own /api/bodyweight prefix)
 app.include_router(analysis_routes.router, prefix="/api", tags=["analysis"])  # Analysis endpoints
