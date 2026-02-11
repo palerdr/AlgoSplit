@@ -98,6 +98,13 @@ export const storage = {
   },
 };
 
+// Calculate effective (stimulating) reps from total reps and RIR
+// The last 5 reps before failure are considered stimulating
+export function calculateEffectiveReps(reps: number, rir: number | null): number | null {
+  if (rir === null || rir === undefined) return null;
+  return Math.min(reps, Math.max(0, 5 - rir));
+}
+
 // Stimulus level helper - returns 0-7 based on net_stimulus value
 // Thresholds tuned so ~4 AUs = excellent (green) for a muscle
 export function getStimulusLevel(netStimulus: number): number {

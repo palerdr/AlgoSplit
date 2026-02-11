@@ -45,6 +45,7 @@ def build_workout_response(workout_data: dict, exercises_data: list) -> WorkoutL
             weight=ex["weight"],
             order_index=ex["order_index"],
             notes=ex.get("notes"),
+            rir=ex.get("rir"),
             created_at=ex["created_at"],
         )
         for ex in exercises_data
@@ -108,6 +109,12 @@ async def log_workout(
                     detail=f"Exercise '{exercise.exercise_name}': weight array length "
                            f"({len(exercise.weight)}) must match sets_completed ({exercise.sets_completed})",
                 )
+            if exercise.rir is not None and len(exercise.rir) != exercise.sets_completed:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Exercise '{exercise.exercise_name}': rir array length "
+                           f"({len(exercise.rir)}) must match sets_completed ({exercise.sets_completed})",
+                )
 
         # Use provided completed_at or default to now
         completed_at = workout.completed_at or datetime.utcnow()
@@ -160,6 +167,8 @@ async def log_workout(
 
             if exercise.notes:
                 exercise_data["notes"] = exercise.notes
+            if exercise.rir is not None:
+                exercise_data["rir"] = exercise.rir
 
             exercise_result = supabase.table("workout_exercises").insert(
                 exercise_data
@@ -354,6 +363,11 @@ async def update_workout(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Exercise '{exercise.exercise_name}': weight length mismatch",
                 )
+            if exercise.rir is not None and len(exercise.rir) != exercise.sets_completed:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Exercise '{exercise.exercise_name}': rir length mismatch",
+                )
 
         # Update workout log metadata
         update_data = {"session_name": workout.session_name}
@@ -383,6 +397,8 @@ async def update_workout(
             }
             if exercise.notes:
                 exercise_data["notes"] = exercise.notes
+            if exercise.rir is not None:
+                exercise_data["rir"] = exercise.rir
 
             result = supabase.table("workout_exercises").insert(exercise_data).execute()
             if result.data:

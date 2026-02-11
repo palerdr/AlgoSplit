@@ -45,6 +45,7 @@ class WorkoutExerciseResponse(BaseModel):
     sets_completed: int = Field(..., description="Sets completed")
     reps: List[int] = Field(..., description="Reps per set")
     weight: List[float] = Field(..., description="Weight per set")
+    rir: Optional[List[int]] = Field(None, description="Reps in reserve per set")
     order_index: int = Field(..., description="Order within workout")
     notes: Optional[str] = Field(None, description="Exercise notes")
     created_at: datetime = Field(..., description="Creation timestamp")

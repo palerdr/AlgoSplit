@@ -284,6 +284,7 @@ export interface WorkoutExerciseResponse {
   sets_completed: number;
   reps: number[];
   weight: number[];
+  rir: number[] | null;
   order_index: number;
   notes: string | null;
   created_at: string;
