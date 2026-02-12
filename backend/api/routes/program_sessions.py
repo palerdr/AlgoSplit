@@ -48,8 +48,8 @@ async def schedule_session(
     try:
         supabase = get_supabase_client_with_token(current_user.access_token)
 
-        # Verify program exists
-        prog = supabase.table("programs").select("id").eq("id", program_id).execute()
+        # Verify program exists and check status for auto-activation
+        prog = supabase.table("programs").select("id, status").eq("id", program_id).execute()
         if not prog.data:
             raise HTTPException(status_code=404, detail="Program not found")
 
@@ -64,6 +64,11 @@ async def schedule_session(
         result = supabase.table("program_sessions").insert(insert_data).execute()
         if not result.data:
             raise HTTPException(status_code=500, detail="Failed to schedule session")
+
+        # Auto-promote program from draft to active on first scheduled session
+        prog_status = prog.data[0].get("status", "draft") if prog.data else "draft"
+        if prog_status == "draft":
+            supabase.table("programs").update({"status": "active"}).eq("id", program_id).execute()
 
         # Re-fetch with joins
         full = supabase.table("program_sessions").select(
@@ -86,7 +91,7 @@ async def batch_schedule(
     try:
         supabase = get_supabase_client_with_token(current_user.access_token)
 
-        prog = supabase.table("programs").select("id").eq("id", program_id).execute()
+        prog = supabase.table("programs").select("id, status").eq("id", program_id).execute()
         if not prog.data:
             raise HTTPException(status_code=404, detail="Program not found")
 
@@ -104,6 +109,11 @@ async def batch_schedule(
         result = supabase.table("program_sessions").insert(rows).execute()
         if not result.data:
             raise HTTPException(status_code=500, detail="Failed to batch schedule")
+
+        # Auto-promote program from draft to active
+        prog_status = prog.data[0].get("status", "draft") if prog.data else "draft"
+        if prog_status == "draft":
+            supabase.table("programs").update({"status": "active"}).eq("id", program_id).execute()
 
         ids = [r["id"] for r in result.data]
         full = supabase.table("program_sessions").select(

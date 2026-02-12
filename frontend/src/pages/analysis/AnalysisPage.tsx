@@ -444,16 +444,20 @@ export function AnalysisPage() {
                   )}
                 </Card>
 
-                {lastResults.session_breakdowns && lastResults.session_breakdowns.length > 0 && (
-                  <Card>
-                    <StimulusBreakdown sessionBreakdowns={lastResults.session_breakdowns} />
-                  </Card>
-                )}
+                {resultsView === 'breakdown' && (
+                  <>
+                    {lastResults.session_breakdowns && lastResults.session_breakdowns.length > 0 && (
+                      <Card>
+                        <StimulusBreakdown sessionBreakdowns={lastResults.session_breakdowns} />
+                      </Card>
+                    )}
 
-                {lastResults.suggestions.length > 0 && (
-                  <Card>
-                    <SuggestionsList suggestions={lastResults.suggestions} maxItems={5} />
-                  </Card>
+                    {lastResults.suggestions.length > 0 && (
+                      <Card>
+                        <SuggestionsList suggestions={lastResults.suggestions} maxItems={5} />
+                      </Card>
+                    )}
+                  </>
                 )}
               </>
             ) : (

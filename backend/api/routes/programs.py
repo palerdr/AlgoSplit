@@ -94,10 +94,21 @@ async def list_programs(current_user: AuthUser = Depends(get_current_user)):
             return ProgramListResponse(programs=[], total=0)
 
         programs = []
+        draft_with_sessions = []
         for p in result.data:
             count_data = p.pop("program_sessions", [])
             session_count = count_data[0]["count"] if count_data else 0
+            # Auto-promote drafts that already have sessions
+            if p.get("status", "draft") == "draft" and session_count > 0:
+                p["status"] = "active"
+                draft_with_sessions.append(p["id"])
             programs.append(build_program_response(p, session_count))
+
+        # Batch-fix stuck drafts in DB
+        if draft_with_sessions:
+            for pid in draft_with_sessions:
+                supabase.table("programs").update({"status": "active"}).eq("id", pid).execute()
+
         return ProgramListResponse(programs=programs, total=len(programs))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to list programs: {str(e)}")
