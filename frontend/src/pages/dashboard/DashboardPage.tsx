@@ -27,9 +27,11 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { activeWorkout, startWorkoutFromSession, getWorkoutData, cancelWorkout } = useWorkoutStore();
-  const stimulusDuration = useSettingsStore((s) => s.stimulusDuration);
-  const maintenanceVolume = useSettingsStore((s) => s.maintenanceVolume);
-  const dataset = useSettingsStore((s) => s.dataset);
+  const { stimulusDuration, maintenanceVolume, dataset } = useSettingsStore((s) => ({
+    stimulusDuration: s.stimulusDuration,
+    maintenanceVolume: s.maintenanceVolume,
+    dataset: s.dataset,
+  }));
   const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
   const autoSaveAttempted = useRef(false);
 
@@ -145,6 +147,7 @@ export function DashboardPage() {
     queryKey: analysisKeys.workouts(30, stimulusDuration, maintenanceVolume, dataset),
     queryFn: () => analyzeWorkouts(30, stimulusDuration, maintenanceVolume, dataset),
     enabled: (stats?.total_workouts ?? 0) > 0,
+    staleTime: 30_000,
   });
 
   return (
