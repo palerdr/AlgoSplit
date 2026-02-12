@@ -20,7 +20,7 @@ export function MobileExerciseNav({
   const isSummary = currentIndex === totalExercises;
 
   return (
-    <div className="fixed bottom-16 left-0 right-0 z-30 bg-charcoal border-t border-white/8">
+    <div className="fixed bottom-16 left-0 right-0 z-30 bg-charcoal border-t border-white/8 pb-safe">
       <div className="flex items-center justify-between px-4 py-3">
         {/* Prev button */}
         <button

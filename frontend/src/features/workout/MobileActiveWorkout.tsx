@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ConfirmDialog } from '@/components/ui';
@@ -54,6 +54,13 @@ export function MobileActiveWorkout({ onSwitchToList }: MobileActiveWorkoutProps
     (e: React.TouchEvent) => {
       if (!touchStartRef.current || !activeWorkout) return;
 
+      // Don't swipe when interacting with inputs/buttons
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'BUTTON' || target.tagName === 'TEXTAREA' || target.closest('button')) {
+        touchStartRef.current = null;
+        return;
+      }
+
       const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
       const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
       touchStartRef.current = null;
@@ -62,14 +69,19 @@ export function MobileActiveWorkout({ onSwitchToList }: MobileActiveWorkoutProps
       if (Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 2) return;
 
       const maxIndex = activeWorkout.exercises.length; // summary page
-      if (dx < 0 && currentIndex < maxIndex) {
-        setCurrentIndex((i) => i + 1);
-      } else if (dx > 0 && currentIndex > 0) {
-        setCurrentIndex((i) => i - 1);
-      }
+      if (dx < 0) setCurrentIndex((i) => Math.min(maxIndex, i + 1));
+      else if (dx > 0) setCurrentIndex((i) => Math.max(0, i - 1));
     },
-    [activeWorkout, currentIndex]
+    [activeWorkout?.exercises.length]
   );
+
+  // Clamp currentIndex when exercises are removed
+  useEffect(() => {
+    if (activeWorkout) {
+      const maxIndex = activeWorkout.exercises.length;
+      setCurrentIndex((i) => Math.min(i, maxIndex));
+    }
+  }, [activeWorkout?.exercises.length]);
 
   if (!activeWorkout) return null;
 
@@ -85,10 +97,10 @@ export function MobileActiveWorkout({ onSwitchToList }: MobileActiveWorkoutProps
   );
 
   const handleAddExercise = (name: string) => {
+    const currentLength = activeWorkout.exercises.length;
     addExercise(name);
     setShowExercisePicker(false);
-    // Navigate to the newly added exercise
-    setCurrentIndex(activeWorkout.exercises.length); // will be new last index after state update
+    setCurrentIndex(currentLength); // new exercise is at this index
   };
 
   const handleCancel = () => {

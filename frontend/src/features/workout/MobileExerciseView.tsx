@@ -122,7 +122,7 @@ export function MobileExerciseView({
                 setIndex={index}
                 data={set}
                 previousSet={
-                  previousExerciseData && previousExerciseData.reps[index]
+                  previousExerciseData && previousExerciseData.reps[index] != null
                     ? { reps: previousExerciseData.reps[index], weight: previousExerciseData.weight[index], rir: previousExerciseData.rir?.[index] }
                     : undefined
                 }

@@ -104,6 +104,11 @@ export function WorkoutPage() {
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Reset forceListView when workout ends so next mobile workout starts in carousel mode
+  useEffect(() => {
+    if (!activeWorkout) setForceListView(false);
+  }, [activeWorkout]);
+
   // If there's an active workout, show it
   if (activeWorkout) {
     if (isMobile && !forceListView) {

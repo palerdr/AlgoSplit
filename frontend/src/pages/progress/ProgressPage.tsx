@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { TrendingUp, Calendar, Search, Activity, BarChart3, Flame } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, Spinner } from '@/components/ui';
@@ -9,12 +9,13 @@ import { calculateEffectiveReps, formatDate } from '@/lib/utils';
 import { searchExercises } from '@/data/exercises';
 import { useSettingsStore, formatWeightWithUnit, convertWeight } from '@/stores/settingsStore';
 import { MuscleChart, AnalysisSummary, SuggestionsList } from '@/components/analysis';
-import { EffectiveRepsHeatmap } from './EffectiveRepsHeatmap';
-import { AggregateHeatmap } from './AggregateHeatmap';
+import { ExerciseListPanel } from '@/components/progress/ExerciseListPanel';
+import { ExerciseProgressChart } from '@/components/progress/ExerciseProgressChart';
 
 type ProgressTab = 'analytics' | 'exercise';
 
-const DAY_OPTIONS = [7, 14, 30] as const;
+const ANALYTICS_DAY_OPTIONS = [7, 14, 30] as const;
+const EXERCISE_DAY_OPTIONS = [30, 90, 180, 365] as const;
 
 export function ProgressPage() {
   const units = useSettingsStore((s) => s.units);
@@ -23,7 +24,7 @@ export function ProgressPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [analysisDays, setAnalysisDays] = useState<number>(7);
-  const exerciseSectionRef = useRef<HTMLDivElement>(null);
+  const [exerciseDays, setExerciseDays] = useState<number>(90);
 
   const { data: customExercises } = useQuery({
     queryKey: customExerciseKeys.list(),
@@ -41,9 +42,19 @@ export function ProgressPage() {
     queryFn: () => analyzeWorkouts(analysisDays),
   });
 
-  // Build heatmap data for selected exercise
+  // Filter workouts by exerciseDays for the exercise tab
+  const filteredWorkoutsData = useMemo(() => {
+    if (!workoutsData?.workouts) return workoutsData;
+    const cutoff = Date.now() - exerciseDays * 24 * 60 * 60 * 1000;
+    const filtered = workoutsData.workouts.filter(
+      (w) => new Date(w.completed_at).getTime() >= cutoff
+    );
+    return { workouts: filtered, total: filtered.length };
+  }, [workoutsData, exerciseDays]);
+
+  // Build heatmap data for selected exercise (filtered by exerciseDays)
   const heatmapData = useMemo(() => {
-    if (!workoutsData?.workouts) return [];
+    if (!filteredWorkoutsData?.workouts) return [];
 
     const points: Array<{
       date: string;
@@ -55,12 +66,10 @@ export function ProgressPage() {
       isRecent: boolean;
     }> = [];
 
-    // Sort workouts by date descending to determine recency
-    const sorted = [...workoutsData.workouts].sort(
+    const sorted = [...filteredWorkoutsData.workouts].sort(
       (a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime()
     );
 
-    // Find indices of workouts containing this exercise to determine "recent" (last 3 sessions)
     const sessionIndices: number[] = [];
     sorted.forEach((workout, idx) => {
       if (workout.exercises.some((ex) => ex.exercise_name.toLowerCase() === selectedExercise.toLowerCase())) {
@@ -97,20 +106,15 @@ export function ProgressPage() {
     });
 
     return points;
-  }, [workoutsData, selectedExercise]);
+  }, [filteredWorkoutsData, selectedExercise]);
 
   // Calculate PRs for exercise tab
   const prs = useMemo(() => {
     if (heatmapData.length === 0) return null;
 
-    // Peak stimulus: highest effective reps value
     const peakStimulus = Math.max(...heatmapData.map((d) => d.effectiveReps));
-
-    // Max weight
     const maxWeight = Math.max(...heatmapData.map((d) => d.weight));
     const displayMaxWeight = units === 'metric' ? convertWeight(maxWeight, 'imperial', 'metric') : maxWeight;
-
-    // Session count
     const uniqueDates = new Set(heatmapData.map((d) => d.date));
 
     return { peakStimulus, maxWeight: displayMaxWeight, sessions: uniqueDates.size };
@@ -132,22 +136,18 @@ export function ProgressPage() {
     if (searchQuery.length < 2) return [];
     const lowerQuery = searchQuery.toLowerCase();
 
-    // Built-in exercises
     const builtIn = searchExercises(searchQuery, 10).map((e) => ({ name: e.name, isCustom: false }));
 
-    // Custom exercises matching query
     const custom = (customExercises?.exercises || [])
       .filter((ce) => ce.exercise_name.toLowerCase().includes(lowerQuery))
       .slice(0, 5)
       .map((ce) => ({ name: ce.exercise_name, isCustom: true }));
 
-    // History exercises matching query
     const historyMatches = Array.from(exercisesInHistory)
       .filter((name) => name.toLowerCase().includes(lowerQuery))
       .slice(0, 5)
       .map((name) => ({ name, isCustom: false }));
 
-    // Merge: custom first, then history, then built-in — deduplicate by lowercase name
     const seen = new Set<string>();
     const merged: Array<{ name: string; isCustom: boolean }> = [];
     for (const ex of [...custom, ...historyMatches, ...builtIn]) {
@@ -203,7 +203,7 @@ export function ProgressPage() {
               <h2 className="text-lg font-semibold text-foreground">Training Analytics</h2>
             </div>
             <div className="flex gap-1 bg-steel rounded-lg p-1">
-              {DAY_OPTIONS.map((d) => (
+              {ANALYTICS_DAY_OPTIONS.map((d) => (
                 <button
                   key={d}
                   onClick={() => setAnalysisDays(d)}
@@ -266,126 +266,168 @@ export function ProgressPage() {
       {/* ============================================ */}
       {activeTab === 'exercise' && (
         <div className="space-y-4">
-          {/* Aggregate Heatmap */}
-          {workoutsData && workoutsData.workouts.length > 0 && (
-            <AggregateHeatmap
-              workoutsData={workoutsData}
-              onSelectExercise={(name) => {
-                setSelectedExercise(name);
-                setShowSearch(false);
-                setSearchQuery('');
-                requestAnimationFrame(() => {
-                  exerciseSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                });
-              }}
-            />
-          )}
-
-          {/* Exercise selector header */}
-          <div ref={exerciseSectionRef} className="flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-blue-400" />
-            <h2 className="text-lg font-semibold text-foreground">Exercise Progress</h2>
+          {/* Header with date range filter */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-crimson" />
+              <h2 className="text-lg font-semibold text-foreground">Exercise Progress</h2>
+            </div>
+            <div className="flex gap-1 bg-steel rounded-lg p-1">
+              {EXERCISE_DAY_OPTIONS.map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setExerciseDays(d)}
+                  className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
+                    exerciseDays === d
+                      ? 'bg-crimson text-white'
+                      : 'text-muted hover:text-foreground'
+                  }`}
+                >
+                  {d >= 365 ? 'All' : `${d}d`}
+                </button>
+              ))}
+            </div>
           </div>
-
-          {/* Exercise Selector */}
-          <Card>
-            <CardContent className="pt-4">
-              <div className="flex flex-col sm:flex-row gap-4">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
-                  <input
-                    type="text"
-                    value={showSearch ? searchQuery : selectedExercise}
-                    onChange={(e) => {
-                      setSearchQuery(e.target.value);
-                      setShowSearch(true);
-                    }}
-                    onFocus={() => setShowSearch(true)}
-                    placeholder="Search exercises..."
-                    className="w-full bg-charcoal border border-white/10 rounded-md pl-10 pr-3 py-2 text-foreground placeholder:text-muted focus:outline-none focus:border-crimson/50"
-                  />
-                  {showSearch && searchResults.length > 0 && (
-                    <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-charcoal border border-white/10 rounded-md shadow-lg overflow-hidden max-h-64 overflow-y-auto">
-                      {searchResults.map((result) => (
-                        <button
-                          key={result.name}
-                          onClick={() => {
-                            setSelectedExercise(result.name);
-                            setShowSearch(false);
-                            setSearchQuery('');
-                          }}
-                          className="w-full px-3 py-2 text-left text-sm text-secondary hover:bg-steel hover:text-foreground transition-colors flex items-center justify-between"
-                        >
-                          <span>{result.name}</span>
-                          <span className="flex items-center gap-2">
-                            {result.isCustom && (
-                              <span className="text-xs text-blue-400">Custom</span>
-                            )}
-                            {exercisesInHistory.has(result.name) && (
-                              <span className="text-xs text-crimson">Has data</span>
-                            )}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
 
           {isLoading ? (
             <div className="flex justify-center py-12">
               <Spinner />
             </div>
-          ) : heatmapData.length === 0 ? (
+          ) : !filteredWorkoutsData || filteredWorkoutsData.workouts.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center">
                 <TrendingUp className="w-12 h-12 mx-auto mb-3 text-muted" />
-                <h3 className="font-medium text-foreground mb-2">No Data for {selectedExercise}</h3>
+                <h3 className="font-medium text-foreground mb-2">No Workout Data</h3>
                 <p className="text-sm text-muted max-w-sm mx-auto">
-                  Start logging workouts with this exercise to see your progress over time.
+                  Log some workouts to see your exercise progress here.
                 </p>
               </CardContent>
             </Card>
           ) : (
-            <>
-              {/* PR Cards */}
-              {prs && (
-                <div className="grid grid-cols-3 gap-4">
-                  <Card>
-                    <CardContent className="pt-4 text-center">
-                      <Flame className="w-6 h-6 mx-auto mb-2 text-crimson" />
-                      <p className="text-2xl font-bold text-foreground">
-                        {prs.peakStimulus}
-                      </p>
-                      <p className="text-xs text-muted">Peak Stimulus</p>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardContent className="pt-4 text-center">
-                      <TrendingUp className="w-6 h-6 mx-auto mb-2 text-blue-400" />
-                      <p className="text-2xl font-bold text-foreground">
-                        {formatWeightWithUnit(prs.maxWeight, units)}
-                      </p>
-                      <p className="text-xs text-muted">Max Weight</p>
-                    </CardContent>
-                  </Card>
-                  <Card>
-                    <CardContent className="pt-4 text-center">
-                      <Calendar className="w-6 h-6 mx-auto mb-2 text-green-400" />
-                      <p className="text-2xl font-bold text-foreground">
-                        {prs.sessions}
-                      </p>
-                      <p className="text-xs text-muted">Sessions</p>
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
+            <div className="flex flex-col md:flex-row gap-4">
+              {/* Left panel: Exercise list */}
+              <div className="md:w-56 shrink-0">
+                <Card>
+                  <CardContent className="p-2 max-h-[500px] overflow-y-auto">
+                    <ExerciseListPanel
+                      workoutsData={filteredWorkoutsData}
+                      selectedExercise={selectedExercise}
+                      onSelectExercise={(name) => {
+                        setSelectedExercise(name);
+                        setShowSearch(false);
+                        setSearchQuery('');
+                      }}
+                      days={exerciseDays}
+                    />
+                  </CardContent>
+                </Card>
+              </div>
 
-              {/* Effective Reps Heatmap */}
-              <EffectiveRepsHeatmap data={heatmapData} />
-            </>
+              {/* Right panel: Chart + PRs + search */}
+              <div className="flex-1 min-w-0 space-y-4">
+                {heatmapData.length === 0 ? (
+                  <Card>
+                    <CardContent className="py-12 text-center">
+                      <TrendingUp className="w-12 h-12 mx-auto mb-3 text-muted" />
+                      <h3 className="font-medium text-foreground mb-2">No Data for {selectedExercise}</h3>
+                      <p className="text-sm text-muted max-w-sm mx-auto">
+                        Start logging workouts with this exercise to see your progress over time.
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <>
+                    {/* PR Cards */}
+                    {prs && (
+                      <div className="grid grid-cols-3 gap-4">
+                        <Card>
+                          <CardContent className="pt-4 text-center">
+                            <Flame className="w-6 h-6 mx-auto mb-2 text-crimson" />
+                            <p className="text-2xl font-bold text-foreground">
+                              {prs.peakStimulus}
+                            </p>
+                            <p className="text-xs text-muted">Peak Stimulus</p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="pt-4 text-center">
+                            <TrendingUp className="w-6 h-6 mx-auto mb-2 text-blue-400" />
+                            <p className="text-2xl font-bold text-foreground">
+                              {formatWeightWithUnit(prs.maxWeight, units)}
+                            </p>
+                            <p className="text-xs text-muted">Max Weight</p>
+                          </CardContent>
+                        </Card>
+                        <Card>
+                          <CardContent className="pt-4 text-center">
+                            <Calendar className="w-6 h-6 mx-auto mb-2 text-green-400" />
+                            <p className="text-2xl font-bold text-foreground">
+                              {prs.sessions}
+                            </p>
+                            <p className="text-xs text-muted">Sessions</p>
+                          </CardContent>
+                        </Card>
+                      </div>
+                    )}
+
+                    {/* Scatter Chart */}
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>{selectedExercise}</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <ExerciseProgressChart data={heatmapData} />
+                      </CardContent>
+                    </Card>
+                  </>
+                )}
+
+                {/* Search box */}
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
+                      <input
+                        type="text"
+                        value={showSearch ? searchQuery : selectedExercise}
+                        onChange={(e) => {
+                          setSearchQuery(e.target.value);
+                          setShowSearch(true);
+                        }}
+                        onFocus={() => setShowSearch(true)}
+                        placeholder="Search exercises..."
+                        className="w-full bg-charcoal border border-white/10 rounded-md pl-10 pr-3 py-2 text-foreground placeholder:text-muted focus:outline-none focus:border-crimson/50"
+                      />
+                      {showSearch && searchResults.length > 0 && (
+                        <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-charcoal border border-white/10 rounded-md shadow-lg overflow-hidden max-h-64 overflow-y-auto">
+                          {searchResults.map((result) => (
+                            <button
+                              key={result.name}
+                              onClick={() => {
+                                setSelectedExercise(result.name);
+                                setShowSearch(false);
+                                setSearchQuery('');
+                              }}
+                              className="w-full px-3 py-2 text-left text-sm text-secondary hover:bg-steel hover:text-foreground transition-colors flex items-center justify-between"
+                            >
+                              <span>{result.name}</span>
+                              <span className="flex items-center gap-2">
+                                {result.isCustom && (
+                                  <span className="text-xs text-blue-400">Custom</span>
+                                )}
+                                {exercisesInHistory.has(result.name) && (
+                                  <span className="text-xs text-crimson">Has data</span>
+                                )}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           )}
         </div>
       )}
