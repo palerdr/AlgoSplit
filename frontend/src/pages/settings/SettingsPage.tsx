@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { User, Ruler, Timer, Database, Info, ExternalLink } from 'lucide-react';
+import { User, Ruler, Timer, Database, Info, ExternalLink, BarChart3 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, Button } from '@/components/ui';
 import { useAuth } from '@/features/auth';
-import { useSettingsStore } from '@/stores/settingsStore';
+import { useSettingsStore, type Dataset } from '@/stores/settingsStore';
 import { cn } from '@/lib/utils';
 
 function SettingsSection({
@@ -53,7 +53,13 @@ function ToggleButton({
 
 export function SettingsPage() {
   const { user, logout } = useAuth();
-  const { units, setUnits, defaultRestDuration, setDefaultRestDuration } = useSettingsStore();
+  const {
+    units, setUnits,
+    defaultRestDuration, setDefaultRestDuration,
+    stimulusDuration, setStimulusDuration,
+    maintenanceVolume, setMaintenanceVolume,
+    dataset, setDataset,
+  } = useSettingsStore();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const restOptions = [30, 60, 90, 120, 180, 300];
@@ -131,6 +137,63 @@ export function SettingsPage() {
           </div>
           <p className="text-xs text-muted">
             Default rest timer duration when starting a new set.
+          </p>
+        </div>
+      </SettingsSection>
+
+      {/* Analysis Defaults */}
+      <SettingsSection icon={BarChart3} title="Analysis Defaults">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-muted mb-2">Dataset</label>
+            <div className="flex flex-wrap gap-2">
+              {([
+                { value: 'schoenfeld', label: 'Schoenfeld (Recommended)' },
+                { value: 'pelland', label: 'Pelland' },
+                { value: 'average', label: 'Average' },
+              ] as const).map((opt) => (
+                <ToggleButton
+                  key={opt.value}
+                  active={dataset === opt.value}
+                  onClick={() => setDataset(opt.value as Dataset)}
+                >
+                  {opt.label}
+                </ToggleButton>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm text-muted mb-2">Stimulus Duration (hours)</label>
+            <input
+              type="number"
+              min={24}
+              max={96}
+              value={stimulusDuration}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (!isNaN(v) && v >= 24 && v <= 96) setStimulusDuration(v);
+              }}
+              className="w-24 bg-charcoal border border-white/10 rounded-md px-3 py-2 text-foreground focus:outline-none focus:border-crimson/50"
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-muted mb-2">Maintenance Volume (sets/week)</label>
+            <input
+              type="number"
+              min={1}
+              max={9}
+              value={maintenanceVolume}
+              onChange={(e) => {
+                const v = parseInt(e.target.value, 10);
+                if (!isNaN(v) && v >= 1 && v <= 9) setMaintenanceVolume(v);
+              }}
+              className="w-24 bg-charcoal border border-white/10 rounded-md px-3 py-2 text-foreground focus:outline-none focus:border-crimson/50"
+            />
+          </div>
+          <p className="text-xs text-muted">
+            These settings control how your logged workouts are analyzed in the Progress tab.
+            They determine the fatigue curve, stimulus window, and maintenance threshold used
+            when calculating net weekly stimulus from your actual training data.
           </p>
         </div>
       </SettingsSection>

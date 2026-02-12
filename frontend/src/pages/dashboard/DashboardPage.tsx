@@ -8,6 +8,7 @@ import { getSplits, splitKeys } from '@/api/splits.api';
 import { analyzeWorkouts, analysisKeys } from '@/api/analysis.api';
 import { getTodaySessions, getProgramSessionExercises, programKeys } from '@/api/programs.api';
 import { useWorkoutStore } from '@/features/workout/workoutStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { formatDate, getRelativeTime } from '@/lib/utils';
 import { MuscleChart, CompactSummary, SuggestionsSummary } from '@/components/analysis';
 import type { TodaySessionItem } from '@/types/api.types';
@@ -26,6 +27,9 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { activeWorkout, startWorkoutFromSession, getWorkoutData, cancelWorkout } = useWorkoutStore();
+  const stimulusDuration = useSettingsStore((s) => s.stimulusDuration);
+  const maintenanceVolume = useSettingsStore((s) => s.maintenanceVolume);
+  const dataset = useSettingsStore((s) => s.dataset);
   const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
   const autoSaveAttempted = useRef(false);
 
@@ -138,8 +142,8 @@ export function DashboardPage() {
 
   // Analyze stimulus from actual workout history (last 30 days)
   const { data: analysisData, isLoading: analysisLoading } = useQuery({
-    queryKey: analysisKeys.workouts(30),
-    queryFn: () => analyzeWorkouts(30),
+    queryKey: analysisKeys.workouts(30, stimulusDuration, maintenanceVolume, dataset),
+    queryFn: () => analyzeWorkouts(30, stimulusDuration, maintenanceVolume, dataset),
     enabled: (stats?.total_workouts ?? 0) > 0,
   });
 

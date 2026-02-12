@@ -14,7 +14,8 @@ export const analysisKeys = {
   exercise: (text: string) => [...analysisKeys.all, 'exercise', text] as const,
   regions: () => [...analysisKeys.all, 'regions'] as const,
   patterns: () => [...analysisKeys.all, 'patterns'] as const,
-  workouts: (days: number) => [...analysisKeys.all, 'workouts', days] as const,
+  workouts: (days: number, stimulusDuration: number, maintenanceVolume: number, dataset: string) =>
+    [...analysisKeys.all, 'workouts', days, stimulusDuration, maintenanceVolume, dataset] as const,
 };
 
 export async function analyzeSplit(data: SplitRequest): Promise<AnalysisResponse> {
@@ -39,7 +40,18 @@ export async function getPatterns(): Promise<PatternsResponse> {
   return response.data;
 }
 
-export async function analyzeWorkouts(days: number): Promise<AnalysisResponse> {
-  const response = await apiClient.post<AnalysisResponse>(`/api/analyze-workouts?days=${days}`);
+export async function analyzeWorkouts(
+  days: number,
+  stimulusDuration: number = 48,
+  maintenanceVolume: number = 3,
+  dataset: string = 'schoenfeld',
+): Promise<AnalysisResponse> {
+  const params = new URLSearchParams({
+    days: String(days),
+    stimulus_duration: String(stimulusDuration),
+    maintenance_volume: String(maintenanceVolume),
+    dataset,
+  });
+  const response = await apiClient.post<AnalysisResponse>(`/api/analyze-workouts?${params}`);
   return response.data;
 }

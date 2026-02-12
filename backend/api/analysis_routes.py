@@ -86,7 +86,7 @@ async def analyze_workouts(
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
     stimulus_duration: int = Query(48, ge=24, le=96, description="Stimulus duration in hours"),
     maintenance_volume: int = Query(3, ge=1, le=9, description="Maintenance volume sets"),
-    dataset: str = Query("pelland", description="Fatigue curve dataset"),
+    dataset: str = Query("schoenfeld", description="Fatigue curve dataset"),
     current_user: AuthUser = Depends(get_current_user),
 ):
     """

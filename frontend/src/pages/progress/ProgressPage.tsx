@@ -19,6 +19,9 @@ const EXERCISE_DAY_OPTIONS = [30, 90, 180, 365] as const;
 
 export function ProgressPage() {
   const units = useSettingsStore((s) => s.units);
+  const stimulusDuration = useSettingsStore((s) => s.stimulusDuration);
+  const maintenanceVolume = useSettingsStore((s) => s.maintenanceVolume);
+  const dataset = useSettingsStore((s) => s.dataset);
   const [activeTab, setActiveTab] = useState<ProgressTab>('analytics');
   const [selectedExercise, setSelectedExercise] = useState('Bench Press');
   const [searchQuery, setSearchQuery] = useState('');
@@ -38,8 +41,8 @@ export function ProgressPage() {
   });
 
   const { data: analysisData, isLoading: isAnalysisLoading } = useQuery({
-    queryKey: analysisKeys.workouts(analysisDays),
-    queryFn: () => analyzeWorkouts(analysisDays),
+    queryKey: analysisKeys.workouts(analysisDays, stimulusDuration, maintenanceVolume, dataset),
+    queryFn: () => analyzeWorkouts(analysisDays, stimulusDuration, maintenanceVolume, dataset),
   });
 
   // Filter workouts by exerciseDays for the exercise tab
