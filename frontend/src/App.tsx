@@ -10,7 +10,7 @@ import { LoginPage, SignupPage } from '@/pages';
 // Core pages - eagerly loaded (most frequently accessed)
 import { DashboardPage } from '@/pages';
 
-// Retry dynamic imports once on failure (stale chunks after deploy), then reload
+// Retry dynamic import once silently; if still fails, let ErrorBoundary handle it
 function lazyRetry<T extends { [key: string]: unknown }>(
   factory: () => Promise<T>,
   name: keyof T,
@@ -18,17 +18,19 @@ function lazyRetry<T extends { [key: string]: unknown }>(
   return lazy(() =>
     factory()
       .then(m => ({ default: m[name] as React.ComponentType }))
-      .catch(() => {
-        // Chunk probably stale after deploy — reload once
-        const key = 'chunk-retry';
-        if (!sessionStorage.getItem(key)) {
-          sessionStorage.setItem(key, '1');
-          window.location.reload();
-        }
-        sessionStorage.removeItem(key);
-        return factory().then(m => ({ default: m[name] as React.ComponentType }));
-      }),
+      .catch(() =>
+        // One silent retry — chunk may have been mid-deploy
+        factory().then(m => ({ default: m[name] as React.ComponentType }))
+      ),
   );
+}
+
+function isChunkError(error: Error): boolean {
+  const msg = error.message.toLowerCase();
+  return msg.includes('failed to fetch dynamically imported module')
+    || msg.includes('loading chunk')
+    || msg.includes('loading css chunk')
+    || msg.includes('dynamically imported module');
 }
 
 // Lazy-loaded pages for better initial load performance
@@ -78,25 +80,41 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 
   render() {
     if (this.state.error) {
+      const chunkError = isChunkError(this.state.error);
+
       return (
         <div className="min-h-screen bg-iron flex items-center justify-center p-8">
-          <div className="max-w-lg w-full bg-charcoal border border-white/10 rounded-lg p-6 space-y-4">
-            <h2 className="text-lg font-bold text-foreground">Something went wrong</h2>
-            <pre className="text-sm text-red-400 bg-steel/50 rounded p-3 overflow-auto max-h-48 whitespace-pre-wrap">
-              {this.state.error.message}
-            </pre>
-            <div className="flex gap-2">
+          <div className="max-w-lg w-full bg-charcoal border border-white/10 rounded-lg p-6 space-y-4 text-center">
+            {chunkError ? (
+              <>
+                <p className="text-3xl">🏋️</p>
+                <h2 className="text-lg font-bold text-foreground">
+                  New version available
+                </h2>
+                <p className="text-sm text-secondary">
+                  We just shipped an update. Reload to grab the latest version.
+                </p>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-bold text-foreground">Something went wrong</h2>
+                <pre className="text-sm text-red-400 bg-steel/50 rounded p-3 overflow-auto max-h-48 whitespace-pre-wrap text-left">
+                  {this.state.error.message}
+                </pre>
+              </>
+            )}
+            <div className="flex gap-2 justify-center">
               <button
-                onClick={() => { this.setState({ error: null }); window.location.href = '/dashboard'; }}
+                onClick={() => window.location.reload()}
                 className="px-4 py-2 bg-crimson text-white rounded-md text-sm hover:bg-crimson/80"
               >
-                Go to Dashboard
+                {chunkError ? 'Reload' : 'Try Again'}
               </button>
               <button
-                onClick={() => this.setState({ error: null })}
+                onClick={() => { this.setState({ error: null }); window.location.href = '/dashboard'; }}
                 className="px-4 py-2 bg-steel text-foreground rounded-md text-sm hover:bg-steel/80"
               >
-                Try Again
+                Go to Dashboard
               </button>
             </div>
           </div>
