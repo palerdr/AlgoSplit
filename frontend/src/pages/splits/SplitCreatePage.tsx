@@ -432,8 +432,8 @@ function AdvancedSettings({
               onChange={(e) => onDatasetChange(e.target.value as typeof dataset)}
               className="w-full bg-charcoal border border-white/10 rounded px-3 py-2 text-sm text-foreground focus:outline-none focus:border-crimson/50"
             >
-              <option value="pelland">Pelland (Recommended)</option>
-              <option value="schoenfeld">Schoenfeld</option>
+              <option value="pelland">Pelland</option>
+              <option value="schoenfeld">Schoenfeld (Recommended)</option>
               <option value="average">Average</option>
             </select>
           </div>
