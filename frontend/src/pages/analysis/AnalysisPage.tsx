@@ -55,6 +55,7 @@ export function AnalysisPage() {
 
   const [showLoadSplitDropdown, setShowLoadSplitDropdown] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [resultsView, setResultsView] = useState<'chart' | 'breakdown'>('chart');
 
   const queryClient = useQueryClient();
 
@@ -387,7 +388,31 @@ export function AnalysisPage() {
               <>
                 <Card>
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold text-foreground">Analysis Results</h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold text-foreground">Analysis Results</h3>
+                      <div className="flex gap-0.5 bg-steel rounded-lg p-0.5">
+                        <button
+                          onClick={() => setResultsView('chart')}
+                          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                            resultsView === 'chart'
+                              ? 'bg-crimson text-white'
+                              : 'text-muted hover:text-foreground'
+                          }`}
+                        >
+                          Chart
+                        </button>
+                        <button
+                          onClick={() => setResultsView('breakdown')}
+                          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+                            resultsView === 'breakdown'
+                              ? 'bg-crimson text-white'
+                              : 'text-muted hover:text-foreground'
+                          }`}
+                        >
+                          Breakdown
+                        </button>
+                      </div>
+                    </div>
                     <Button
                       variant="secondary"
                       size="sm"
@@ -410,19 +435,18 @@ export function AnalysisPage() {
                     <span>Maint: <span className="text-foreground">{lastResults.maintenance_volume} sets</span></span>
                     <span>Data: <span className="text-foreground">{lastResults.dataset}</span></span>
                   </div>
-                  <AnalysisSummary summary={lastResults.summary} muscles={lastResults.muscles} />
-                </Card>
-
-                <Card>
-                  <h3 className="font-semibold text-foreground mb-4">Muscle Stimulus</h3>
-                  <div className="overflow-x-auto -mx-4 px-4">
-                    <MuscleChart muscles={lastResults.muscles} height={400} showAll={false} />
-                  </div>
-                </Card>
-
-                <Card>
-                  <h3 className="font-semibold text-foreground mb-4">Suggestions</h3>
-                  <SuggestionsList suggestions={lastResults.suggestions} maxItems={5} />
+                  {resultsView === 'chart' ? (
+                    <div className="overflow-x-auto -mx-4 px-4">
+                      <MuscleChart muscles={lastResults.muscles} height={400} truncate={false} />
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <AnalysisSummary summary={lastResults.summary} muscles={lastResults.muscles} />
+                      {lastResults.suggestions.length > 0 && (
+                        <SuggestionsList suggestions={lastResults.suggestions} maxItems={5} />
+                      )}
+                    </div>
+                  )}
                 </Card>
 
                 {lastResults.session_breakdowns && lastResults.session_breakdowns.length > 0 && (
