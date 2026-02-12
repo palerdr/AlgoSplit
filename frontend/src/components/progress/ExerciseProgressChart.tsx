@@ -30,23 +30,22 @@ interface ChartPoint extends HeatmapPoint {
   progressionRatio: number;
 }
 
-// Viridis-inspired 6-stop color scale for progression ratio 1.0–6.0
-const VIRIDIS_STOPS: Array<{ value: number; r: number; g: number; b: number }> = [
-  { value: 1.0, r: 68,  g: 1,   b: 84  }, // #440154 - dark violet
-  { value: 2.0, r: 59,  g: 82,  b: 139 }, // #3b528b - deep blue
-  { value: 3.0, r: 33,  g: 145, b: 140 }, // #21918c - teal
-  { value: 4.0, r: 94,  g: 201, b: 98  }, // #5ec962 - green
-  { value: 5.0, r: 181, g: 222, b: 43  }, // #b5de2b - lime
-  { value: 6.0, r: 253, g: 231, b: 37  }, // #fde725 - bright yellow
+// Progression color scale: 1.0–5.0 (clamped), high-contrast warm→cool
+const PROGRESSION_STOPS: Array<{ value: number; r: number; g: number; b: number }> = [
+  { value: 1.0, r: 239, g: 68,  b: 68  }, // #ef4444 - red (at capacity)
+  { value: 2.0, r: 234, g: 179, b: 8   }, // #eab308 - yellow
+  { value: 3.0, r: 34,  g: 197, b: 94  }, // #22c55e - green
+  { value: 4.0, r: 6,   g: 182, b: 212 }, // #06b6d4 - cyan
+  { value: 5.0, r: 99,  g: 102, b: 241 }, // #6366f1 - indigo (strong reserve)
 ];
 
 function getProgressionColor(ratio: number): string {
-  const clamped = Math.min(6, Math.max(1, ratio));
+  const clamped = Math.min(5, Math.max(1, ratio));
 
   // Find surrounding stops
-  for (let i = 0; i < VIRIDIS_STOPS.length - 1; i++) {
-    const lo = VIRIDIS_STOPS[i];
-    const hi = VIRIDIS_STOPS[i + 1];
+  for (let i = 0; i < PROGRESSION_STOPS.length - 1; i++) {
+    const lo = PROGRESSION_STOPS[i];
+    const hi = PROGRESSION_STOPS[i + 1];
     if (clamped >= lo.value && clamped <= hi.value) {
       const t = (clamped - lo.value) / (hi.value - lo.value);
       const r = Math.round(lo.r + t * (hi.r - lo.r));
@@ -57,7 +56,7 @@ function getProgressionColor(ratio: number): string {
   }
 
   // Fallback: at max
-  const last = VIRIDIS_STOPS[VIRIDIS_STOPS.length - 1];
+  const last = PROGRESSION_STOPS[PROGRESSION_STOPS.length - 1];
   return `rgb(${last.r}, ${last.g}, ${last.b})`;
 }
 
@@ -88,12 +87,12 @@ function ChartTooltip({
         </div>
         <div className="flex justify-between gap-4">
           <span className="text-secondary">RIR:</span>
-          <span className="text-foreground">{point.rir !== null ? point.rir : 'N/A'}</span>
+          <span className="text-foreground">{point.rir ?? 0}</span>
         </div>
         <div className="flex justify-between gap-4">
-          <span className="text-secondary">Reps:ER:</span>
+          <span className="text-secondary">Reps/ER:</span>
           <span className="font-medium" style={{ color: getProgressionColor(point.progressionRatio) }}>
-            {point.reps}:{point.effectiveReps} ({ratioDisplay}x)
+            {point.reps}/{point.effectiveReps} ({ratioDisplay}x)
           </span>
         </div>
       </div>
@@ -172,7 +171,7 @@ export function ExerciseProgressChart({ data }: ExerciseProgressChartProps) {
         </ResponsiveContainer>
       </div>
 
-      {/* Viridis gradient legend */}
+      {/* Progression gradient legend */}
       <div className="mt-4 text-xs text-secondary">
         <div className="flex items-center gap-2">
           <span className="font-medium shrink-0">Progression:</span>
@@ -180,10 +179,10 @@ export function ExerciseProgressChart({ data }: ExerciseProgressChartProps) {
           <div
             className="flex-1 h-3 rounded-full"
             style={{
-              background: `linear-gradient(to right, #440154, #3b528b, #21918c, #5ec962, #b5de2b, #fde725)`,
+              background: `linear-gradient(to right, #ef4444, #eab308, #22c55e, #06b6d4, #6366f1)`,
             }}
           />
-          <span className="shrink-0">6.0+</span>
+          <span className="shrink-0">5.0+</span>
         </div>
         <div className="flex justify-between mt-1 px-16">
           <span>At capacity</span>
