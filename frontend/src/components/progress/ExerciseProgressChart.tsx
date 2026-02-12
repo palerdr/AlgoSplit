@@ -27,26 +27,27 @@ interface ExerciseProgressChartProps {
 interface ChartPoint extends HeatmapPoint {
   timestamp: number;
   displayWeight: number;
-  displayRIR: number;
+  reserve: number; // reps × RIR (raw)
 }
 
-// RIR color scale: 0–4 (clamped), high-contrast warm→cool
-const RIR_STOPS: Array<{ value: number; r: number; g: number; b: number }> = [
-  { value: 0, r: 239, g: 68,  b: 68  }, // #ef4444 - red (failure)
+// Reserve color scale: 0–4 (normalized), high-contrast warm→cool
+const RESERVE_STOPS: Array<{ value: number; r: number; g: number; b: number }> = [
+  { value: 0, r: 239, g: 68,  b: 68  }, // #ef4444 - red (at failure)
   { value: 1, r: 234, g: 179, b: 8   }, // #eab308 - yellow
   { value: 2, r: 34,  g: 197, b: 94  }, // #22c55e - green
   { value: 3, r: 6,   g: 182, b: 212 }, // #06b6d4 - cyan
   { value: 4, r: 99,  g: 102, b: 241 }, // #6366f1 - indigo (strong reserve)
 ];
 
-function getRIRColor(rir: number): string {
-  const clamped = Math.min(4, Math.max(0, rir));
+function getReserveColor(reserve: number): string {
+  // Normalize: raw reps×RIR (0–40+) → 0–4 scale
+  const normalized = Math.min(4, Math.max(0, reserve / 10));
 
-  for (let i = 0; i < RIR_STOPS.length - 1; i++) {
-    const lo = RIR_STOPS[i];
-    const hi = RIR_STOPS[i + 1];
-    if (clamped >= lo.value && clamped <= hi.value) {
-      const t = (clamped - lo.value) / (hi.value - lo.value);
+  for (let i = 0; i < RESERVE_STOPS.length - 1; i++) {
+    const lo = RESERVE_STOPS[i];
+    const hi = RESERVE_STOPS[i + 1];
+    if (normalized >= lo.value && normalized <= hi.value) {
+      const t = (normalized - lo.value) / (hi.value - lo.value);
       const r = Math.round(lo.r + t * (hi.r - lo.r));
       const g = Math.round(lo.g + t * (hi.g - lo.g));
       const b = Math.round(lo.b + t * (hi.b - lo.b));
@@ -54,7 +55,7 @@ function getRIRColor(rir: number): string {
     }
   }
 
-  const last = RIR_STOPS[RIR_STOPS.length - 1];
+  const last = RESERVE_STOPS[RESERVE_STOPS.length - 1];
   return `rgb(${last.r}, ${last.g}, ${last.b})`;
 }
 
@@ -83,8 +84,12 @@ function ChartTooltip({
         </div>
         <div className="flex justify-between gap-4">
           <span className="text-secondary">RIR:</span>
-          <span className="font-medium" style={{ color: getRIRColor(point.displayRIR) }}>
-            {point.displayRIR}
+          <span className="text-foreground">{point.rir ?? 0}</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span className="text-secondary">Reserve:</span>
+          <span className="font-medium" style={{ color: getReserveColor(point.reserve) }}>
+            {point.reserve}
           </span>
         </div>
       </div>
@@ -101,11 +106,12 @@ export function ExerciseProgressChart({ data }: ExerciseProgressChartProps) {
         units === 'metric'
           ? convertWeight(point.weight, 'imperial', 'metric')
           : point.weight;
+      const rir = point.rir ?? 0;
       return {
         ...point,
         timestamp: new Date(point.date).getTime(),
         displayWeight,
-        displayRIR: point.rir ?? 0,
+        reserve: point.reps * rir,
       };
     });
   }, [data, units]);
@@ -152,7 +158,7 @@ export function ExerciseProgressChart({ data }: ExerciseProgressChartProps) {
               {displayData.map((point, index) => (
                 <Cell
                   key={index}
-                  fill={getRIRColor(point.displayRIR)}
+                  fill={getReserveColor(point.reserve)}
                   fillOpacity={point.isRecent ? 1 : 0.4}
                   r={6}
                 />
@@ -162,10 +168,10 @@ export function ExerciseProgressChart({ data }: ExerciseProgressChartProps) {
         </ResponsiveContainer>
       </div>
 
-      {/* RIR gradient legend */}
+      {/* Reserve gradient legend */}
       <div className="mt-4 text-xs text-secondary">
         <div className="flex items-center gap-2">
-          <span className="font-medium shrink-0">RIR:</span>
+          <span className="font-medium shrink-0">Reserve:</span>
           <span className="shrink-0">0</span>
           <div
             className="flex-1 h-3 rounded-full"
@@ -173,7 +179,7 @@ export function ExerciseProgressChart({ data }: ExerciseProgressChartProps) {
               background: `linear-gradient(to right, #ef4444, #eab308, #22c55e, #06b6d4, #6366f1)`,
             }}
           />
-          <span className="shrink-0">4+</span>
+          <span className="shrink-0">40+</span>
         </div>
         <div className="flex justify-between mt-1 px-8">
           <span>At failure</span>
