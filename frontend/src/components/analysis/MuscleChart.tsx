@@ -20,6 +20,8 @@ interface MuscleChartProps {
   showAll?: boolean;
   /** Color bars proportionally to the max value instead of fixed thresholds */
   proportionalColors?: boolean;
+  /** When false, always show all muscles without truncation (default true) */
+  truncate?: boolean;
 }
 
 const stimulusColors = [
@@ -89,7 +91,7 @@ function MuscleTooltip({ active, payload }: CustomTooltipProps) {
   );
 }
 
-export function MuscleChart({ muscles, height = 600, showAll = true, proportionalColors = false }: MuscleChartProps) {
+export function MuscleChart({ muscles, height = 600, showAll = true, proportionalColors = false, truncate = true }: MuscleChartProps) {
   const [showAllMuscles, setShowAllMuscles] = useState(false);
 
   const allMuscles = useMemo(() => {
@@ -102,7 +104,7 @@ export function MuscleChart({ muscles, height = 600, showAll = true, proportiona
     [allMuscles]
   );
 
-  const canTruncate = allMuscles.length > INITIAL_VISIBLE;
+  const canTruncate = truncate && allMuscles.length > INITIAL_VISIBLE;
   const displayMuscles = canTruncate && !showAllMuscles
     ? allMuscles.slice(0, INITIAL_VISIBLE)
     : allMuscles;

@@ -13,6 +13,7 @@ import { ExerciseListPanel } from '@/components/progress/ExerciseListPanel';
 import { ExerciseProgressChart } from '@/components/progress/ExerciseProgressChart';
 
 type ProgressTab = 'analytics' | 'exercise';
+type AnalyticsView = 'chart' | 'breakdown';
 
 const ANALYTICS_DAY_OPTIONS = [7, 14, 30] as const;
 const EXERCISE_DAY_OPTIONS = [30, 90, 180, 365] as const;
@@ -20,6 +21,7 @@ const EXERCISE_DAY_OPTIONS = [30, 90, 180, 365] as const;
 export function ProgressPage() {
   const units = useSettingsStore((s) => s.units);
   const [activeTab, setActiveTab] = useState<ProgressTab>('analytics');
+  const [analyticsView, setAnalyticsView] = useState<AnalyticsView>('chart');
   const [selectedExercise, setSelectedExercise] = useState('Bench Press');
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
@@ -235,28 +237,48 @@ export function ProgressPage() {
             </Card>
           ) : (
             <div className="space-y-4">
-              <AnalysisSummary summary={analysisData.summary} muscles={analysisData.muscles} />
               <Card>
                 <CardHeader>
-                  <CardTitle>Muscle Stimulus ({analysisDays}-Day Window)</CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>Muscle Stimulus ({analysisDays}-Day Window)</CardTitle>
+                    <div className="flex gap-1 bg-steel rounded-lg p-0.5">
+                      <button
+                        onClick={() => setAnalyticsView('chart')}
+                        className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                          analyticsView === 'chart'
+                            ? 'bg-crimson text-white'
+                            : 'text-muted hover:text-foreground'
+                        }`}
+                      >
+                        Chart
+                      </button>
+                      <button
+                        onClick={() => setAnalyticsView('breakdown')}
+                        className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                          analyticsView === 'breakdown'
+                            ? 'bg-crimson text-white'
+                            : 'text-muted hover:text-foreground'
+                        }`}
+                      >
+                        Breakdown
+                      </button>
+                    </div>
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <MuscleChart muscles={analysisData.muscles} height={400} proportionalColors />
+                  {analyticsView === 'chart' ? (
+                    <MuscleChart muscles={analysisData.muscles} height={400} proportionalColors truncate={false} />
+                  ) : (
+                    <div className="space-y-4">
+                      <AnalysisSummary summary={analysisData.summary} muscles={analysisData.muscles} />
+                      {analysisData.suggestions.length > 0 && (
+                        <SuggestionsList suggestions={analysisData.suggestions} maxItems={5} />
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
-          )}
-
-          {/* Suggestions */}
-          {analysisData && analysisData.suggestions.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Optimization Suggestions</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <SuggestionsList suggestions={analysisData.suggestions} maxItems={5} />
-              </CardContent>
-            </Card>
           )}
         </div>
       )}
