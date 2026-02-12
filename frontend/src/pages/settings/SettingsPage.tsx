@@ -40,7 +40,7 @@ function ToggleButton({
     <button
       onClick={onClick}
       className={cn(
-        'px-4 py-2 rounded-md text-sm font-medium transition-colors',
+        'px-4 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer',
         active
           ? 'bg-crimson text-white'
           : 'bg-steel text-secondary hover:text-foreground'

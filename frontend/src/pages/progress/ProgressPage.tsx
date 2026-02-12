@@ -41,6 +41,7 @@ export function ProgressPage() {
   const { data: workoutsData, isLoading } = useQuery({
     queryKey: workoutKeys.list({ limit: 100 }),
     queryFn: () => getWorkouts({ limit: 100 }),
+    staleTime: 60_000,
   });
 
   const { data: analysisData, isLoading: isAnalysisLoading } = useQuery({
