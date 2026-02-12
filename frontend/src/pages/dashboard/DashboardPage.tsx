@@ -9,6 +9,7 @@ import { analyzeWorkouts, analysisKeys } from '@/api/analysis.api';
 import { getTodaySessions, getProgramSessionExercises, programKeys } from '@/api/programs.api';
 import { useWorkoutStore } from '@/features/workout/workoutStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { formatDate, getRelativeTime } from '@/lib/utils';
 import { MuscleChart, CompactSummary, SuggestionsSummary } from '@/components/analysis';
 import type { TodaySessionItem } from '@/types/api.types';
@@ -27,11 +28,11 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { activeWorkout, startWorkoutFromSession, getWorkoutData, cancelWorkout } = useWorkoutStore();
-  const { stimulusDuration, maintenanceVolume, dataset } = useSettingsStore((s) => ({
+  const { stimulusDuration, maintenanceVolume, dataset } = useSettingsStore(useShallow((s) => ({
     stimulusDuration: s.stimulusDuration,
     maintenanceVolume: s.maintenanceVolume,
     dataset: s.dataset,
-  }));
+  })));
   const [loadingSessionId, setLoadingSessionId] = useState<string | null>(null);
   const autoSaveAttempted = useRef(false);
 

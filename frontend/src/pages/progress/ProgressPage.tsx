@@ -8,6 +8,7 @@ import { listCustomExercises, customExerciseKeys } from '@/api/customExercises.a
 import { calculateEffectiveReps, formatDate } from '@/lib/utils';
 import { searchExercises } from '@/data/exercises';
 import { useSettingsStore, formatWeightWithUnit, convertWeight } from '@/stores/settingsStore';
+import { useShallow } from 'zustand/react/shallow';
 import { MuscleChart, AnalysisSummary, SuggestionsList } from '@/components/analysis';
 import { ExerciseListPanel } from '@/components/progress/ExerciseListPanel';
 import { ExerciseProgressChart } from '@/components/progress/ExerciseProgressChart';
@@ -18,12 +19,12 @@ const ANALYTICS_DAY_OPTIONS = [7, 14, 30] as const;
 const EXERCISE_DAY_OPTIONS = [30, 90, 180, 365] as const;
 
 export function ProgressPage() {
-  const { units, stimulusDuration, maintenanceVolume, dataset } = useSettingsStore((s) => ({
+  const { units, stimulusDuration, maintenanceVolume, dataset } = useSettingsStore(useShallow((s) => ({
     units: s.units,
     stimulusDuration: s.stimulusDuration,
     maintenanceVolume: s.maintenanceVolume,
     dataset: s.dataset,
-  }));
+  })));
   const [activeTab, setActiveTab] = useState<ProgressTab>('analytics');
   const [selectedExercise, setSelectedExercise] = useState('Bench Press');
   const [searchQuery, setSearchQuery] = useState('');
