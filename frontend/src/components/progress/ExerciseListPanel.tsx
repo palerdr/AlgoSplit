@@ -76,8 +76,9 @@ export function ExerciseListPanel({
   if (exercises.length === 0) return null;
 
   return (
-    <div className="space-y-2">
-      <div className="space-y-0.5">
+    <div className="flex flex-col h-full max-h-[500px]">
+      {/* Scrollable exercise list */}
+      <div className="flex-1 overflow-y-auto space-y-0.5 min-h-0">
         {exercises.map((ex) => {
           const isSelected = ex.name.toLowerCase() === selectedExercise.toLowerCase();
           return (
@@ -106,8 +107,8 @@ export function ExerciseListPanel({
         })}
       </div>
 
-      {/* ER color legend */}
-      <div className="flex items-center justify-center gap-1.5 pt-2 border-t border-white/5">
+      {/* ER color legend - fixed at bottom */}
+      <div className="flex items-center justify-center gap-1.5 pt-2 border-t border-white/5 mt-2 shrink-0">
         <span className="text-[10px] text-muted mr-0.5">ER</span>
         {[0, 1, 2, 3, 4, 5].map((n) => (
           <div key={n} className="flex flex-col items-center gap-0.5">

@@ -58,124 +58,114 @@ export function SetRow({
   };
 
   return (
-    <div
-      className={cn(
-        'flex items-center gap-2 py-2 px-3 rounded-md transition-colors',
-        data.completed ? 'bg-crimson/5' : 'hover:bg-steel/50'
-      )}
-    >
-      {/* Set number or L/R label */}
-      <div className="w-8 text-center">
-        {sideLabel ? (
-          <span
-            className={cn(
-              'text-sm font-mono font-medium',
-              data.completed ? 'text-crimson' : 'text-secondary'
-            )}
-          >
-            {sideLabel === 'L' ? `${setIndex + 1}L` : 'R'}
-          </span>
-        ) : (
-          <span
-            className={cn(
-              'text-sm font-mono font-medium',
-              data.completed ? 'text-crimson' : 'text-secondary'
-            )}
-          >
-            {setIndex + 1}
-          </span>
-        )}
-      </div>
-
-      {/* Previous set reference */}
-      <div className="w-20 text-center">
-        {previousSet ? (
-          <span className="text-xs text-secondary font-mono">
-            {previousSet.weight}x{previousSet.reps}
-            {previousSet.rir != null && <span className="text-faint"> @{previousSet.rir}</span>}
-          </span>
-        ) : (
-          <span className="text-xs text-faint">-</span>
-        )}
-      </div>
-
-      {/* Weight input */}
-      <div className="flex-1">
-        <input
-          type="number"
-          inputMode="decimal"
-          value={data.weight || ''}
-          onChange={handleWeightChange}
-          placeholder={previousSet?.weight.toString() || '0'}
-          className={cn(
-            'w-full h-9 px-2 bg-steel border border-white/8 rounded-sm text-center font-mono text-foreground tabular-nums',
-            'focus:outline-none focus:border-crimson',
-            'placeholder:text-faint'
-          )}
-        />
-        <p className="text-xs text-secondary text-center mt-0.5">lbs</p>
-      </div>
-
-      {/* Reps input */}
-      <div className="flex-1">
-        <input
-          type="number"
-          inputMode="numeric"
-          value={data.reps || ''}
-          onChange={handleRepsChange}
-          placeholder={previousSet?.reps.toString() || '0'}
-          className={cn(
-            'w-full h-9 px-2 bg-steel border border-white/8 rounded-sm text-center font-mono text-foreground tabular-nums',
-            'focus:outline-none focus:border-crimson',
-            'placeholder:text-faint'
-          )}
-        />
-        <p className="text-xs text-secondary text-center mt-0.5">reps</p>
-      </div>
-
-      {/* RIR input */}
-      <div className="w-14">
-        <input
-          type="number"
-          inputMode="numeric"
-          value={data.rir ?? ''}
-          onChange={handleRirChange}
-          placeholder={previousSet?.rir != null ? previousSet.rir.toString() : '-'}
-          className={cn(
-            'w-full h-9 px-2 bg-steel border border-white/8 rounded-sm text-center font-mono text-foreground tabular-nums',
-            'focus:outline-none focus:border-crimson',
-            'placeholder:text-faint'
-          )}
-        />
-        <p className="text-xs text-secondary text-center mt-0.5">RIR</p>
-      </div>
-
-      {/* Complete toggle button */}
-      <button
-        onClick={handleToggleComplete}
-        disabled={!data.completed && data.reps === 0}
+    <div className="flex justify-center px-2">
+      <div
         className={cn(
-          'w-9 h-9 flex items-center justify-center rounded-sm transition-colors',
-          data.completed
-            ? 'bg-crimson text-foreground hover:bg-crimson/80'
-            : data.reps > 0
-            ? 'bg-steel text-muted hover:bg-crimson hover:text-foreground'
-            : 'bg-steel text-faint cursor-not-allowed'
+          'flex items-center gap-2 py-2.5 px-3 rounded-lg transition-colors bg-steel/30 max-w-md w-full',
+          data.completed ? 'ring-1 ring-crimson/20' : ''
         )}
-        title={data.completed ? 'Click to edit' : 'Mark as complete'}
       >
-        <Check size={18} />
-      </button>
+        {/* Set number or L/R label */}
+        <div className="w-8 text-center flex-shrink-0">
+          {sideLabel ? (
+            <span
+              className={cn(
+                'text-sm font-mono font-medium',
+                data.completed ? 'text-crimson' : 'text-secondary'
+              )}
+            >
+              {sideLabel === 'L' ? `${setIndex + 1}L` : 'R'}
+            </span>
+          ) : (
+            <span
+              className={cn(
+                'text-sm font-mono font-medium',
+                data.completed ? 'text-crimson' : 'text-secondary'
+              )}
+            >
+              {setIndex + 1}
+            </span>
+          )}
+        </div>
 
-      {/* Remove button - always visible if canRemove */}
-      {canRemove && (
+        {/* Weight input */}
+        <div className="flex-1">
+          <input
+            type="number"
+            inputMode="decimal"
+            value={data.weight || ''}
+            onChange={handleWeightChange}
+            placeholder={previousSet?.weight.toString() || '0'}
+            className={cn(
+              'w-full h-9 px-2 bg-steel border border-white/8 rounded-sm text-center font-mono text-foreground tabular-nums',
+              'focus:outline-none focus:border-crimson',
+              'placeholder:text-faint'
+            )}
+          />
+          <p className="text-xs text-secondary text-center mt-0.5">lbs</p>
+        </div>
+
+        {/* Reps input */}
+        <div className="flex-1">
+          <input
+            type="number"
+            inputMode="numeric"
+            value={data.reps || ''}
+            onChange={handleRepsChange}
+            placeholder={previousSet?.reps.toString() || '0'}
+            className={cn(
+              'w-full h-9 px-2 bg-steel border border-white/8 rounded-sm text-center font-mono text-foreground tabular-nums',
+              'focus:outline-none focus:border-crimson',
+              'placeholder:text-faint'
+            )}
+          />
+          <p className="text-xs text-secondary text-center mt-0.5">reps</p>
+        </div>
+
+        {/* RIR input with label above */}
+        <div className="w-14 flex-shrink-0">
+          <p className="text-[10px] text-secondary text-center mb-0.5 uppercase tracking-wide">RIR</p>
+          <input
+            type="number"
+            inputMode="numeric"
+            value={data.rir ?? ''}
+            onChange={handleRirChange}
+            placeholder={previousSet?.rir != null ? previousSet.rir.toString() : '-'}
+            className={cn(
+              'w-full h-9 px-2 bg-steel border border-white/8 rounded-sm text-center font-mono text-foreground tabular-nums',
+              'focus:outline-none focus:border-crimson',
+              'placeholder:text-faint'
+            )}
+          />
+        </div>
+
+        {/* Complete toggle button */}
         <button
-          onClick={onRemove}
-          className="w-9 h-9 flex items-center justify-center text-muted hover:text-error transition-colors"
+          onClick={handleToggleComplete}
+          disabled={!data.completed && data.reps === 0}
+          className={cn(
+            'w-9 h-9 flex items-center justify-center rounded-sm transition-colors flex-shrink-0',
+            data.completed
+              ? 'bg-crimson text-foreground hover:bg-crimson/80'
+              : data.reps > 0
+              ? 'bg-steel text-muted hover:bg-crimson hover:text-foreground'
+              : 'bg-steel text-faint cursor-not-allowed'
+          )}
+          title={data.completed ? 'Click to edit' : 'Mark as complete'}
         >
-          <Trash2 size={16} />
+          <Check size={18} />
         </button>
-      )}
+
+        {/* Remove button - always visible if canRemove */}
+        {canRemove && (
+          <button
+            onClick={onRemove}
+            className="w-9 h-9 flex items-center justify-center text-muted hover:text-error transition-colors flex-shrink-0"
+          >
+            <Trash2 size={16} />
+          </button>
+        )}
+      </div>
     </div>
   );
 }

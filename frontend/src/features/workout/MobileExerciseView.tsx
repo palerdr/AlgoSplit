@@ -64,14 +64,15 @@ export function MobileExerciseView({
       </div>
 
       {/* Column headers */}
-      <div className="flex items-center gap-2 py-2 px-3 text-xs text-secondary font-medium">
-        <div className="w-8 text-center">Set</div>
-        <div className="w-20 text-center">Prev</div>
-        <div className="flex-1 text-center">Weight</div>
-        <div className="flex-1 text-center">Reps</div>
-        <div className="w-14 text-center">RIR</div>
-        <div className="w-9" />
-        <div className="w-9" />
+      <div className="flex justify-center px-2">
+        <div className="flex items-center gap-2 py-2 px-3 text-xs text-secondary font-medium max-w-md w-full">
+          <div className="w-8 text-center flex-shrink-0">Set</div>
+          <div className="flex-1 text-center">Weight</div>
+          <div className="flex-1 text-center">Reps</div>
+          <div className="w-14 flex-shrink-0" />
+          <div className="w-9 flex-shrink-0" />
+          <div className="w-9 flex-shrink-0" />
+        </div>
       </div>
 
       {/* Set rows */}

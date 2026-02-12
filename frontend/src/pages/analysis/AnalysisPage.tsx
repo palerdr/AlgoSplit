@@ -440,18 +440,19 @@ export function AnalysisPage() {
                       <MuscleChart muscles={lastResults.muscles} height={400} truncate={false} />
                     </div>
                   ) : (
-                    <div className="space-y-4">
-                      <AnalysisSummary summary={lastResults.summary} muscles={lastResults.muscles} />
-                      {lastResults.suggestions.length > 0 && (
-                        <SuggestionsList suggestions={lastResults.suggestions} maxItems={5} />
-                      )}
-                    </div>
+                    <AnalysisSummary summary={lastResults.summary} muscles={lastResults.muscles} />
                   )}
                 </Card>
 
                 {lastResults.session_breakdowns && lastResults.session_breakdowns.length > 0 && (
                   <Card>
                     <StimulusBreakdown sessionBreakdowns={lastResults.session_breakdowns} />
+                  </Card>
+                )}
+
+                {lastResults.suggestions.length > 0 && (
+                  <Card>
+                    <SuggestionsList suggestions={lastResults.suggestions} maxItems={5} />
                   </Card>
                 )}
               </>

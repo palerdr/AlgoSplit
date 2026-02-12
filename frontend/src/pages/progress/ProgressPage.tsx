@@ -308,7 +308,7 @@ export function ProgressPage() {
               {/* Left panel: Exercise list */}
               <div className="md:w-56 shrink-0">
                 <Card>
-                  <CardContent className="p-2 max-h-[500px] overflow-y-auto">
+                  <CardContent className="p-2">
                     <ExerciseListPanel
                       workoutsData={filteredWorkoutsData}
                       selectedExercise={selectedExercise}
