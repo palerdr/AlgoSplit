@@ -317,7 +317,6 @@ export function ProgressPage() {
                         setShowSearch(false);
                         setSearchQuery('');
                       }}
-                      days={exerciseDays}
                     />
                   </CardContent>
                 </Card>

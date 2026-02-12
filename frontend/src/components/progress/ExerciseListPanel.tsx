@@ -21,37 +21,28 @@ interface ExerciseListPanelProps {
   workoutsData: WorkoutHistoryResponse;
   selectedExercise: string;
   onSelectExercise: (name: string) => void;
-  days: number;
 }
 
 interface ExerciseEntry {
   name: string;
   lastDate: string;
-  recentSessions: number[]; // avg ER per session, last 5
+  latestER: number; // avg ER of most recent session
 }
 
 export function ExerciseListPanel({
   workoutsData,
   selectedExercise,
   onSelectExercise,
-  days,
 }: ExerciseListPanelProps) {
   const exercises = useMemo(() => {
     if (!workoutsData?.workouts) return [];
-
-    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
-
-    // Filter workouts within date range
-    const filtered = workoutsData.workouts.filter(
-      (w) => new Date(w.completed_at).getTime() >= cutoff
-    );
 
     // Build per-exercise session data
     // Map: exerciseName -> array of { date, avgER }
     const exerciseMap = new Map<string, { date: string; avgER: number }[]>();
 
     // Sort oldest first so sessions are in chronological order
-    const sorted = [...filtered].sort(
+    const sorted = [...workoutsData.workouts].sort(
       (a, b) => new Date(a.completed_at).getTime() - new Date(b.completed_at).getTime()
     );
 
@@ -74,49 +65,60 @@ export function ExerciseListPanel({
     const entries: ExerciseEntry[] = [];
     for (const [name, sessions] of exerciseMap) {
       const lastDate = sessions[sessions.length - 1].date;
-      const recentSessions = sessions.slice(-5).map((s) => s.avgER);
-      entries.push({ name, lastDate, recentSessions });
+      const latestER = sessions[sessions.length - 1].avgER;
+      entries.push({ name, lastDate, latestER });
     }
 
     entries.sort((a, b) => new Date(b.lastDate).getTime() - new Date(a.lastDate).getTime());
     return entries;
-  }, [workoutsData, days]);
+  }, [workoutsData]);
 
   if (exercises.length === 0) return null;
 
   return (
-    <div className="space-y-0.5">
-      {exercises.map((ex) => {
-        const isSelected = ex.name.toLowerCase() === selectedExercise.toLowerCase();
-        return (
-          <button
-            key={ex.name}
-            onClick={() => onSelectExercise(ex.name)}
-            className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-md text-left transition-colors ${
-              isSelected
-                ? 'bg-crimson/10 border border-crimson/30'
-                : 'hover:bg-steel border border-transparent'
-            }`}
-          >
-            <span
-              className={`text-sm truncate ${isSelected ? 'text-crimson font-medium' : 'text-secondary'}`}
-              style={{ maxWidth: '9rem' }}
-              title={ex.name}
+    <div className="space-y-2">
+      <div className="space-y-0.5">
+        {exercises.map((ex) => {
+          const isSelected = ex.name.toLowerCase() === selectedExercise.toLowerCase();
+          return (
+            <button
+              key={ex.name}
+              onClick={() => onSelectExercise(ex.name)}
+              className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-md text-left transition-colors ${
+                isSelected
+                  ? 'bg-crimson/10 border border-crimson/30'
+                  : 'hover:bg-steel border border-transparent'
+              }`}
             >
-              {ex.name}
-            </span>
-            <div className="flex gap-0.5 shrink-0">
-              {ex.recentSessions.map((er, i) => (
-                <div
-                  key={i}
-                  className="w-3 h-3 rounded-sm"
-                  style={{ backgroundColor: getERColor(er) }}
-                />
-              ))}
-            </div>
-          </button>
-        );
-      })}
+              <span
+                className={`text-sm truncate ${isSelected ? 'text-crimson font-medium' : 'text-secondary'}`}
+                style={{ maxWidth: '9rem' }}
+                title={ex.name}
+              >
+                {ex.name}
+              </span>
+              <div
+                className="w-3 h-3 rounded-sm shrink-0"
+                style={{ backgroundColor: getERColor(ex.latestER) }}
+              />
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ER color legend */}
+      <div className="flex items-center justify-center gap-1.5 pt-2 border-t border-white/5">
+        <span className="text-[10px] text-muted mr-0.5">ER</span>
+        {[0, 1, 2, 3, 4, 5].map((n) => (
+          <div key={n} className="flex flex-col items-center gap-0.5">
+            <div
+              className="w-2.5 h-2.5 rounded-sm"
+              style={{ backgroundColor: getERColor(n) }}
+            />
+            <span className="text-[9px] text-muted">{n}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
