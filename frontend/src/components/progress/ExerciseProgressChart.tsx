@@ -27,7 +27,7 @@ interface ExerciseProgressChartProps {
 interface ChartPoint extends HeatmapPoint {
   timestamp: number;
   displayWeight: number;
-  reserve: number; // reps × RIR (raw)
+  reserve: number; // (reps × RIR) / weight, normalized to 0–4
 }
 
 // Reserve color scale: 0–4 (normalized), high-contrast warm→cool
@@ -40,8 +40,7 @@ const RESERVE_STOPS: Array<{ value: number; r: number; g: number; b: number }> =
 ];
 
 function getReserveColor(reserve: number): string {
-  // Normalize: raw reps×RIR (0–40+) → 0–4 scale
-  const normalized = Math.min(4, Math.max(0, reserve / 10));
+  const normalized = Math.min(4, Math.max(0, reserve));
 
   for (let i = 0; i < RESERVE_STOPS.length - 1; i++) {
     const lo = RESERVE_STOPS[i];
@@ -89,7 +88,7 @@ function ChartTooltip({
         <div className="flex justify-between gap-4">
           <span className="text-secondary">Reserve:</span>
           <span className="font-medium" style={{ color: getReserveColor(point.reserve) }}>
-            {point.reserve}
+            {point.reserve.toFixed(1)}
           </span>
         </div>
       </div>
@@ -107,11 +106,15 @@ export function ExerciseProgressChart({ data }: ExerciseProgressChartProps) {
           ? convertWeight(point.weight, 'imperial', 'metric')
           : point.weight;
       const rir = point.rir ?? 0;
+      // (reps × RIR) / weight, scaled ×15 to map typical training into 0–4
+      const reserve = point.weight > 0
+        ? (point.reps * rir) / point.weight * 15
+        : 0;
       return {
         ...point,
         timestamp: new Date(point.date).getTime(),
         displayWeight,
-        reserve: point.reps * rir,
+        reserve,
       };
     });
   }, [data, units]);
@@ -179,7 +182,7 @@ export function ExerciseProgressChart({ data }: ExerciseProgressChartProps) {
               background: `linear-gradient(to right, #ef4444, #eab308, #22c55e, #06b6d4, #6366f1)`,
             }}
           />
-          <span className="shrink-0">40+</span>
+          <span className="shrink-0">4+</span>
         </div>
         <div className="flex justify-between mt-1 px-8">
           <span>At failure</span>
