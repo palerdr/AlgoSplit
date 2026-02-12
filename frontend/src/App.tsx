@@ -10,25 +10,46 @@ import { LoginPage, SignupPage } from '@/pages';
 // Core pages - eagerly loaded (most frequently accessed)
 import { DashboardPage } from '@/pages';
 
+// Retry dynamic imports once on failure (stale chunks after deploy), then reload
+function lazyRetry<T extends { [key: string]: unknown }>(
+  factory: () => Promise<T>,
+  name: keyof T,
+) {
+  return lazy(() =>
+    factory()
+      .then(m => ({ default: m[name] as React.ComponentType }))
+      .catch(() => {
+        // Chunk probably stale after deploy — reload once
+        const key = 'chunk-retry';
+        if (!sessionStorage.getItem(key)) {
+          sessionStorage.setItem(key, '1');
+          window.location.reload();
+        }
+        sessionStorage.removeItem(key);
+        return factory().then(m => ({ default: m[name] as React.ComponentType }));
+      }),
+  );
+}
+
 // Lazy-loaded pages for better initial load performance
-const WorkoutPage = lazy(() => import('@/pages/workout/WorkoutPage').then(m => ({ default: m.WorkoutPage })));
-const HistoryPage = lazy(() => import('@/pages/history/HistoryPage').then(m => ({ default: m.HistoryPage })));
-const WorkoutDetailPage = lazy(() => import('@/pages/history/WorkoutDetailPage').then(m => ({ default: m.WorkoutDetailPage })));
-const AnalysisPage = lazy(() => import('@/pages/analysis/AnalysisPage').then(m => ({ default: m.AnalysisPage })));
-const SplitsPage = lazy(() => import('@/pages/splits/SplitsPage').then(m => ({ default: m.SplitsPage })));
-const SplitDetailPage = lazy(() => import('@/pages/splits/SplitDetailPage').then(m => ({ default: m.SplitDetailPage })));
-const SplitCreatePage = lazy(() => import('@/pages/splits/SplitCreatePage').then(m => ({ default: m.SplitCreatePage })));
-const SplitEditPage = lazy(() => import('@/pages/splits/SplitEditPage').then(m => ({ default: m.SplitEditPage })));
-const ComparePage = lazy(() => import('@/pages/compare/ComparePage').then(m => ({ default: m.ComparePage })));
-const ProgramsPage = lazy(() => import('@/pages/programs/ProgramsPage').then(m => ({ default: m.ProgramsPage })));
-const ProgramCreatePage = lazy(() => import('@/pages/programs/ProgramCreatePage').then(m => ({ default: m.ProgramCreatePage })));
-const ProgramDetailPage = lazy(() => import('@/pages/programs/ProgramDetailPage').then(m => ({ default: m.ProgramDetailPage })));
-const ExercisesPage = lazy(() => import('@/pages/exercises/ExercisesPage').then(m => ({ default: m.ExercisesPage })));
-const ProgressPage = lazy(() => import('@/pages/progress/ProgressPage').then(m => ({ default: m.ProgressPage })));
-const BodyweightPage = lazy(() => import('@/pages/bodyweight/BodyweightPage').then(m => ({ default: m.BodyweightPage })));
-const SettingsPage = lazy(() => import('@/pages/settings/SettingsPage').then(m => ({ default: m.SettingsPage })));
-const ToolsPage = lazy(() => import('@/pages/tools/ToolsPage').then(m => ({ default: m.ToolsPage })));
-const LandingPage = lazy(() => import('@/pages/landing/LandingPage').then(m => ({ default: m.LandingPage })));
+const WorkoutPage = lazyRetry(() => import('@/pages/workout/WorkoutPage'), 'WorkoutPage');
+const HistoryPage = lazyRetry(() => import('@/pages/history/HistoryPage'), 'HistoryPage');
+const WorkoutDetailPage = lazyRetry(() => import('@/pages/history/WorkoutDetailPage'), 'WorkoutDetailPage');
+const AnalysisPage = lazyRetry(() => import('@/pages/analysis/AnalysisPage'), 'AnalysisPage');
+const SplitsPage = lazyRetry(() => import('@/pages/splits/SplitsPage'), 'SplitsPage');
+const SplitDetailPage = lazyRetry(() => import('@/pages/splits/SplitDetailPage'), 'SplitDetailPage');
+const SplitCreatePage = lazyRetry(() => import('@/pages/splits/SplitCreatePage'), 'SplitCreatePage');
+const SplitEditPage = lazyRetry(() => import('@/pages/splits/SplitEditPage'), 'SplitEditPage');
+const ComparePage = lazyRetry(() => import('@/pages/compare/ComparePage'), 'ComparePage');
+const ProgramsPage = lazyRetry(() => import('@/pages/programs/ProgramsPage'), 'ProgramsPage');
+const ProgramCreatePage = lazyRetry(() => import('@/pages/programs/ProgramCreatePage'), 'ProgramCreatePage');
+const ProgramDetailPage = lazyRetry(() => import('@/pages/programs/ProgramDetailPage'), 'ProgramDetailPage');
+const ExercisesPage = lazyRetry(() => import('@/pages/exercises/ExercisesPage'), 'ExercisesPage');
+const ProgressPage = lazyRetry(() => import('@/pages/progress/ProgressPage'), 'ProgressPage');
+const BodyweightPage = lazyRetry(() => import('@/pages/bodyweight/BodyweightPage'), 'BodyweightPage');
+const SettingsPage = lazyRetry(() => import('@/pages/settings/SettingsPage'), 'SettingsPage');
+const ToolsPage = lazyRetry(() => import('@/pages/tools/ToolsPage'), 'ToolsPage');
+const LandingPage = lazyRetry(() => import('@/pages/landing/LandingPage'), 'LandingPage');
 
 const queryClient = new QueryClient({
   defaultOptions: {

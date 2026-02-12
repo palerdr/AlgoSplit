@@ -105,7 +105,10 @@ export function ExerciseProgressChart({ data }: ExerciseProgressChartProps) {
         units === 'metric'
           ? convertWeight(point.weight, 'imperial', 'metric')
           : point.weight;
-      const progressionRatio = point.reps / Math.max(point.effectiveReps, 1);
+      // When ER = 0 (RIR >= 5), we can't gauge proximity to failure — cap at 5.0
+      const progressionRatio = point.effectiveReps > 0
+        ? point.reps / point.effectiveReps
+        : 5.0;
       return {
         ...point,
         timestamp: new Date(point.date).getTime(),
