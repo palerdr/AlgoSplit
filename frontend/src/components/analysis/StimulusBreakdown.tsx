@@ -621,7 +621,7 @@ function ViewToggle({
 export function StimulusBreakdown({ sessionBreakdowns }: { sessionBreakdowns: SessionBreakdown[] }) {
   const [viewMode, setViewMode] = useState<'exercise' | 'muscle'>('exercise');
   const [expandKey, setExpandKey] = useState(0); // bump to force re-mount with new default
-  const [allExpanded, setAllExpanded] = useState(false);
+  const [allExpanded, setAllExpanded] = useState(true);
 
   if (!sessionBreakdowns || sessionBreakdowns.length === 0) {
     return null;
