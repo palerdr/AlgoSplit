@@ -6,8 +6,12 @@ import {
   type ReactNode,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import * as authApi from '@/api/auth.api';
 import type { UserInfo } from '@/types/api.types';
+import { useAnalysisStore } from '@/stores/analysisStore';
+import { useCompareStore } from '@/stores/compareStore';
+import { useSplitCreateStore } from '@/stores/splitCreateStore';
 
 interface AuthState {
   user: UserInfo | null;
@@ -30,6 +34,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading: true,
   });
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const clearUserData = () => {
+    useAnalysisStore.getState().reset();
+    useCompareStore.getState().reset();
+    useSplitCreateStore.getState().reset();
+    queryClient.clear();
+  };
 
   // Check for existing session on mount
   useEffect(() => {
@@ -56,12 +68,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
+    clearUserData();
     const response = await authApi.login({ email, password });
     setState({ user: response.user, isAuthenticated: true, isLoading: false });
     navigate('/dashboard');
   };
 
   const signup = async (email: string, password: string) => {
+    clearUserData();
     const response = await authApi.signup({ email, password });
     setState({ user: response.user, isAuthenticated: true, isLoading: false });
     navigate('/dashboard');
@@ -73,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Ignore errors - logout anyway
     } finally {
+      clearUserData();
       setState({ user: null, isAuthenticated: false, isLoading: false });
       navigate('/login');
     }
