@@ -78,9 +78,10 @@ export function MobileExerciseView({
                     setIndex={pairIndex}
                     data={lSet}
                     sideLabel="L"
+                    variant="node"
                     previousSet={
-                      previousExerciseData && previousExerciseData.reps[lIndex] != null
-                        ? { reps: previousExerciseData.reps[lIndex], weight: previousExerciseData.weight[lIndex], rir: previousExerciseData.rir?.[lIndex] }
+                      previousExerciseData && previousExerciseData.reps[pairIndex] != null
+                        ? { reps: previousExerciseData.reps[pairIndex], weight: previousExerciseData.weight[pairIndex], rir: previousExerciseData.rir?.[pairIndex] }
                         : undefined
                     }
                     onUpdate={(data) => updateSet(exercise.id, lIndex, data)}
@@ -92,9 +93,10 @@ export function MobileExerciseView({
                     setIndex={pairIndex}
                     data={rSet}
                     sideLabel="R"
+                    variant="node"
                     previousSet={
-                      previousExerciseData && previousExerciseData.reps[rIndex] != null
-                        ? { reps: previousExerciseData.reps[rIndex], weight: previousExerciseData.weight[rIndex], rir: previousExerciseData.rir?.[rIndex] }
+                      previousExerciseData && previousExerciseData.reps[pairIndex] != null
+                        ? { reps: previousExerciseData.reps[pairIndex], weight: previousExerciseData.weight[pairIndex], rir: previousExerciseData.rir?.[pairIndex] }
                         : undefined
                     }
                     onUpdate={(data) => updateSet(exercise.id, rIndex, data)}
@@ -110,6 +112,7 @@ export function MobileExerciseView({
                 key={index}
                 setIndex={index}
                 data={set}
+                variant="node"
                 previousSet={
                   previousExerciseData && previousExerciseData.reps[index] != null
                     ? { reps: previousExerciseData.reps[index], weight: previousExerciseData.weight[index], rir: previousExerciseData.rir?.[index] }

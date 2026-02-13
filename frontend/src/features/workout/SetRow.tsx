@@ -7,6 +7,7 @@ interface SetRowProps {
   data: SetData;
   previousSet?: { reps: number; weight: number; rir?: number | null };
   sideLabel?: 'L' | 'R';
+  variant?: 'row' | 'node';
   onUpdate: (data: Partial<SetData>) => void;
   onComplete: () => void;
   onRemove: () => void;
@@ -18,11 +19,13 @@ export function SetRow({
   data,
   previousSet,
   sideLabel,
+  variant = 'row',
   onUpdate,
   onComplete,
   onRemove,
   canRemove,
 }: SetRowProps) {
+  const isNode = variant === 'node';
   const handleRepsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = parseInt(e.target.value, 10);
     if (!isNaN(value) && value >= 0 && value <= 999) {
@@ -57,18 +60,24 @@ export function SetRow({
     }
   };
 
+  const label = (text: string) =>
+    isNode ? (
+      <p className="text-[10px] text-secondary text-center mb-0.5 uppercase tracking-wide">{text}</p>
+    ) : null;
+
   return (
-    <div className="flex justify-center px-2">
+    <div className={cn('flex justify-center', isNode ? 'px-2' : 'px-1')}>
       <div
         className={cn(
-          'flex items-end gap-2 py-2.5 px-3 rounded-lg transition-colors bg-steel/30 w-fit',
+          'flex gap-2 py-2.5 px-3 rounded-lg transition-colors bg-steel/30',
+          isNode ? 'items-end w-fit' : 'items-center w-full',
           data.completed ? 'ring-1 ring-crimson/20' : ''
         )}
       >
-        {/* Set number with label */}
+        {/* Set number */}
         <div className="w-8 flex-shrink-0">
-          <p className="text-[10px] text-secondary text-center mb-0.5 uppercase tracking-wide">Set</p>
-          <div className="h-9 flex items-center justify-center">
+          {label('Set')}
+          <div className={cn('flex items-center justify-center', isNode && 'h-9')}>
             {sideLabel ? (
               <span
                 className={cn(
@@ -92,8 +101,8 @@ export function SetRow({
         </div>
 
         {/* Weight input */}
-        <div className="w-20 flex-shrink-0">
-          <p className="text-[10px] text-secondary text-center mb-0.5 uppercase tracking-wide">Weight</p>
+        <div className={cn(isNode ? 'w-20 flex-shrink-0' : 'flex-1')}>
+          {label('Weight')}
           <input
             type="number"
             inputMode="decimal"
@@ -109,8 +118,8 @@ export function SetRow({
         </div>
 
         {/* Reps input */}
-        <div className="w-20 flex-shrink-0">
-          <p className="text-[10px] text-secondary text-center mb-0.5 uppercase tracking-wide">Reps</p>
+        <div className={cn(isNode ? 'w-20 flex-shrink-0' : 'flex-1')}>
+          {label('Reps')}
           <input
             type="number"
             inputMode="numeric"
@@ -125,9 +134,9 @@ export function SetRow({
           />
         </div>
 
-        {/* RIR input with label above */}
+        {/* RIR input */}
         <div className="w-14 flex-shrink-0">
-          <p className="text-[10px] text-secondary text-center mb-0.5 uppercase tracking-wide">RIR</p>
+          {label('RIR')}
           <input
             type="number"
             inputMode="numeric"

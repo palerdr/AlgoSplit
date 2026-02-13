@@ -145,11 +145,11 @@ export function ExerciseCard({
                         data={lSet}
                         sideLabel="L"
                         previousSet={
-                          previousExerciseData && previousExerciseData.reps[lIndex] != null
+                          previousExerciseData && previousExerciseData.reps[pairIndex] != null
                             ? {
-                                reps: previousExerciseData.reps[lIndex],
-                                weight: previousExerciseData.weight[lIndex],
-                                rir: previousExerciseData.rir?.[lIndex],
+                                reps: previousExerciseData.reps[pairIndex],
+                                weight: previousExerciseData.weight[pairIndex],
+                                rir: previousExerciseData.rir?.[pairIndex],
                               }
                             : undefined
                         }
@@ -163,11 +163,11 @@ export function ExerciseCard({
                         data={rSet}
                         sideLabel="R"
                         previousSet={
-                          previousExerciseData && previousExerciseData.reps[rIndex] != null
+                          previousExerciseData && previousExerciseData.reps[pairIndex] != null
                             ? {
-                                reps: previousExerciseData.reps[rIndex],
-                                weight: previousExerciseData.weight[rIndex],
-                                rir: previousExerciseData.rir?.[rIndex],
+                                reps: previousExerciseData.reps[pairIndex],
+                                weight: previousExerciseData.weight[pairIndex],
+                                rir: previousExerciseData.rir?.[pairIndex],
                               }
                             : undefined
                         }
