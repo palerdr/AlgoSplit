@@ -61,35 +61,39 @@ export function SetRow({
     <div className="flex justify-center px-2">
       <div
         className={cn(
-          'flex items-center gap-2 py-2.5 px-3 rounded-lg transition-colors bg-steel/30 max-w-md w-full',
+          'flex items-end gap-2 py-2.5 px-3 rounded-lg transition-colors bg-steel/30 w-fit',
           data.completed ? 'ring-1 ring-crimson/20' : ''
         )}
       >
-        {/* Set number or L/R label */}
-        <div className="w-8 text-center flex-shrink-0">
-          {sideLabel ? (
-            <span
-              className={cn(
-                'text-sm font-mono font-medium',
-                data.completed ? 'text-crimson' : 'text-secondary'
-              )}
-            >
-              {sideLabel === 'L' ? `${setIndex + 1}L` : 'R'}
-            </span>
-          ) : (
-            <span
-              className={cn(
-                'text-sm font-mono font-medium',
-                data.completed ? 'text-crimson' : 'text-secondary'
-              )}
-            >
-              {setIndex + 1}
-            </span>
-          )}
+        {/* Set number with label */}
+        <div className="w-8 flex-shrink-0">
+          <p className="text-[10px] text-secondary text-center mb-0.5 uppercase tracking-wide">Set</p>
+          <div className="h-9 flex items-center justify-center">
+            {sideLabel ? (
+              <span
+                className={cn(
+                  'text-sm font-mono font-medium',
+                  data.completed ? 'text-crimson' : 'text-secondary'
+                )}
+              >
+                {sideLabel === 'L' ? `${setIndex + 1}L` : 'R'}
+              </span>
+            ) : (
+              <span
+                className={cn(
+                  'text-sm font-mono font-medium',
+                  data.completed ? 'text-crimson' : 'text-secondary'
+                )}
+              >
+                {setIndex + 1}
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Weight input */}
-        <div className="flex-1">
+        <div className="w-20 flex-shrink-0">
+          <p className="text-[10px] text-secondary text-center mb-0.5 uppercase tracking-wide">Weight</p>
           <input
             type="number"
             inputMode="decimal"
@@ -102,11 +106,11 @@ export function SetRow({
               'placeholder:text-faint'
             )}
           />
-          <p className="text-xs text-secondary text-center mt-0.5">lbs</p>
         </div>
 
         {/* Reps input */}
-        <div className="flex-1">
+        <div className="w-20 flex-shrink-0">
+          <p className="text-[10px] text-secondary text-center mb-0.5 uppercase tracking-wide">Reps</p>
           <input
             type="number"
             inputMode="numeric"
@@ -119,7 +123,6 @@ export function SetRow({
               'placeholder:text-faint'
             )}
           />
-          <p className="text-xs text-secondary text-center mt-0.5">reps</p>
         </div>
 
         {/* RIR input with label above */}
