@@ -3,6 +3,7 @@ FastAPI dependencies for authentication and authorization
 """
 
 import os
+import logging
 import secrets
 import httpx
 from typing import Optional, Tuple
@@ -19,6 +20,8 @@ from api.security import (
     CSRF_HEADER_NAME,
     CSRF_PROTECTED_METHODS,
 )
+
+logger = logging.getLogger("splitai.auth")
 
 # Load environment variables
 load_dotenv()
@@ -143,9 +146,13 @@ def _extract_token(
     if token:
         return token, True
 
+    logger.warning(
+        "No auth token found: bearer=%s cookie=%s method=%s path=%s",
+        bool(credentials), bool(token), request.method, request.url.path,
+    )
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Not authenticated",
+        detail="Not authenticated (no auth cookie or bearer token found)",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
@@ -156,14 +163,22 @@ def _validate_csrf(request: Request):
     csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME)
     csrf_header = request.headers.get(CSRF_HEADER_NAME)
     if not csrf_cookie or not csrf_header:
+        logger.warning(
+            "CSRF validation failed: cookie_present=%s header_present=%s method=%s path=%s",
+            bool(csrf_cookie), bool(csrf_header), request.method, request.url.path,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="CSRF token required",
+            detail=f"CSRF token required (cookie={'present' if csrf_cookie else 'missing'}, header={'present' if csrf_header else 'missing'})",
         )
     if not secrets.compare_digest(csrf_cookie, csrf_header):
+        logger.warning(
+            "CSRF validation failed: mismatch method=%s path=%s",
+            request.method, request.url.path,
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid CSRF token",
+            detail="Invalid CSRF token (cookie and header do not match)",
         )
 
 
@@ -206,10 +221,11 @@ async def get_current_user(
 
         return AuthUser(user_id=user_id, email=email, access_token=token)
 
-    except JWTError:
+    except JWTError as e:
+        logger.warning("JWT validation failed: %s method=%s path=%s", str(e), request.method, request.url.path)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
+            detail=f"Could not validate credentials: {type(e).__name__}",
             headers={"WWW-Authenticate": "Bearer"},
         )
 

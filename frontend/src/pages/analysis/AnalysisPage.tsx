@@ -78,12 +78,20 @@ export function AnalysisPage() {
 
   const saveMutation = useMutation({
     mutationFn: (data: SplitRequest) => {
+      const action = loadedSplitId ? 'replace' : 'create';
+      console.log(`[SplitAI:Save] Attempting ${action} split`, {
+        loadedSplitId,
+        name: data.name,
+        sessionCount: data.sessions.length,
+        exerciseCount: data.sessions.reduce((s, ses) => s + ses.exercises.length, 0),
+      });
       if (loadedSplitId) {
         return replaceSplit(loadedSplitId, data);
       }
       return createSplit(data);
     },
     onSuccess: (data) => {
+      console.log('[SplitAI:Save] Succeeded, id:', data.id);
       // Track the new split ID so subsequent saves update in place
       if (!loadedSplitId && data.id) {
         setLoadedSplitId(data.id);
@@ -93,12 +101,23 @@ export function AnalysisPage() {
       setTimeout(() => setSaveSuccess(false), 2000);
     },
     onError: (error: any) => {
-      console.error('Save failed:', error);
+      const status = error?.response?.status;
       const detail = error?.response?.data?.detail;
+      console.error('[SplitAI:Save] FAILED', {
+        status,
+        detail,
+        message: error?.message,
+        code: error?.code,
+      });
       if (detail && typeof detail === 'object' && detail.unrecognized_exercises) {
         alert(`Cannot save split - unrecognized exercises:\n\n${detail.unrecognized_exercises.join('\n')}\n\nCheck spelling or try different exercise names.`);
+      } else if (status === 403) {
+        const msg = typeof detail === 'string' ? detail : 'CSRF validation failed';
+        alert(`Save failed: session expired or cookies blocked (${msg}). Try logging out and back in.`);
+      } else if (status === 401) {
+        alert('Save failed: not authenticated. Please log in again.');
       } else {
-        alert(`Failed to save split: ${error.message}`);
+        alert(`Failed to save split: ${typeof detail === 'string' ? detail : error.message}`);
       }
     },
   });

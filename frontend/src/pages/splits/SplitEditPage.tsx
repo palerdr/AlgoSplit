@@ -62,8 +62,17 @@ export function SplitEditPage() {
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const saveMutation = useMutation({
-    mutationFn: (data: SplitRequest) => replaceSplit(id!, data),
+    mutationFn: (data: SplitRequest) => {
+      console.log('[SplitAI:Save] Attempting replace split', {
+        id,
+        name: data.name,
+        sessionCount: data.sessions.length,
+        exerciseCount: data.sessions.reduce((s, ses) => s + ses.exercises.length, 0),
+      });
+      return replaceSplit(id!, data);
+    },
     onSuccess: (data) => {
+      console.log('[SplitAI:Save] Replace succeeded, id:', data.id);
       queryClient.invalidateQueries({ queryKey: splitKeys.lists() });
       queryClient.invalidateQueries({ queryKey: splitKeys.detail(id!) });
       queryClient.invalidateQueries({ queryKey: splitKeys.analysis(id!) });
@@ -73,9 +82,24 @@ export function SplitEditPage() {
       }, 800);
     },
     onError: (error: any) => {
-      console.error('Save failed:', error);
-      const detail = error?.response?.data?.detail || error?.message || 'Unknown error';
-      alert(`Failed to save split: ${detail}`);
+      const status = error?.response?.status;
+      const detail = error?.response?.data?.detail;
+      console.error('[SplitAI:Save] Replace FAILED', {
+        status,
+        detail,
+        message: error?.message,
+        code: error?.code,
+      });
+      const msg = typeof detail === 'string' ? detail
+        : typeof detail === 'object' && detail?.message ? detail.message
+        : error?.message || 'Unknown error';
+      if (status === 403) {
+        alert(`Save failed: session expired or cookies blocked (${msg}). Try logging out and back in.`);
+      } else if (status === 401) {
+        alert('Save failed: not authenticated. Please log in again.');
+      } else {
+        alert(`Failed to save split: ${msg}`);
+      }
     },
   });
 

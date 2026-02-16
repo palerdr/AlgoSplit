@@ -39,8 +39,16 @@ export function SplitCreatePage() {
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const createMutation = useMutation({
-    mutationFn: createSplit,
+    mutationFn: (data: Parameters<typeof createSplit>[0]) => {
+      console.log('[SplitAI:Save] Attempting create split', {
+        name: data.name,
+        sessionCount: data.sessions.length,
+        exerciseCount: data.sessions.reduce((s, ses) => s + ses.exercises.length, 0),
+      });
+      return createSplit(data);
+    },
     onSuccess: (data) => {
+      console.log('[SplitAI:Save] Create succeeded, id:', data.id);
       queryClient.invalidateQueries({ queryKey: splitKeys.lists() });
       setSaveSuccess(true);
       setTimeout(() => {
@@ -49,9 +57,24 @@ export function SplitCreatePage() {
       }, 800);
     },
     onError: (error: any) => {
-      console.error('Save failed:', error);
-      const detail = error?.response?.data?.detail || error?.message || 'Unknown error';
-      alert(`Failed to save split: ${detail}`);
+      const status = error?.response?.status;
+      const detail = error?.response?.data?.detail;
+      console.error('[SplitAI:Save] Create FAILED', {
+        status,
+        detail,
+        message: error?.message,
+        code: error?.code,
+      });
+      const msg = typeof detail === 'string' ? detail
+        : typeof detail === 'object' && detail?.message ? detail.message
+        : error?.message || 'Unknown error';
+      if (status === 403) {
+        alert(`Save failed: session expired or cookies blocked (${msg}). Try logging out and back in.`);
+      } else if (status === 401) {
+        alert('Save failed: not authenticated. Please log in again.');
+      } else {
+        alert(`Failed to save split: ${msg}`);
+      }
     },
   });
 

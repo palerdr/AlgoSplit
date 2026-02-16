@@ -3,9 +3,12 @@ Split management routes
 Handles CRUD operations for training splits
 """
 
+import logging
 from typing import List
 from fastapi import APIRouter, HTTPException, Depends, status
 from db.supabase import get_supabase_client_with_token
+
+logger = logging.getLogger("splitai.splits")
 from schemas.splits import (
     SplitCreate,
     SplitUpdate,
@@ -364,6 +367,7 @@ async def create_split(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("Failed to create split for user %s", current_user.id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create split: {str(e)}",
@@ -682,6 +686,7 @@ async def replace_split(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("Failed to replace split %s for user %s", split_id, current_user.id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to replace split: {str(e)}",
