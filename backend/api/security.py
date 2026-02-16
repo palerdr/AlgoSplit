@@ -30,10 +30,10 @@ AUTH_COOKIE_PATH = os.getenv("AUTH_COOKIE_PATH", "/")
 AUTH_COOKIE_DOMAIN: Optional[str] = os.getenv("AUTH_COOKIE_DOMAIN")
 AUTH_COOKIE_SAMESITE = os.getenv(
     "AUTH_COOKIE_SAMESITE",
-    "none" if AUTH_COOKIE_SECURE else "lax",
+    "lax",  # Lax is correct: Vercel rewrites make API calls same-origin
 ).strip().lower()
 if AUTH_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
-    AUTH_COOKIE_SAMESITE = "none" if AUTH_COOKIE_SECURE else "lax"
+    AUTH_COOKIE_SAMESITE = "lax"
 
 AUTH_EXPOSE_ACCESS_TOKEN = _env_bool("AUTH_EXPOSE_ACCESS_TOKEN", False)
 
