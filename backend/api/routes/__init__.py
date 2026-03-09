@@ -1,5 +1,5 @@
 """
-API routes for Split.AI
+API routes for AlgoSplit
 """
 
 from .auth import router as auth_router

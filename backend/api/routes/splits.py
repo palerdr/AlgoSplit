@@ -4,11 +4,12 @@ Handles CRUD operations for training splits
 """
 
 import logging
+from time import perf_counter
 from typing import List
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 from db.supabase import get_supabase_client_with_token
 
-logger = logging.getLogger("splitai.splits")
+logger = logging.getLogger("algosplit.splits")
 from schemas.splits import (
     SplitCreate,
     SplitUpdate,
@@ -16,6 +17,8 @@ from schemas.splits import (
     SplitListResponse,
     SessionResponse,
     ExerciseResponse,
+    ExerciseBatchUpdateRequest,
+    ExerciseBatchUpdateResponse,
 )
 from schemas.auth import ErrorResponse
 from api.dependencies import get_current_user, AuthUser
@@ -44,10 +47,8 @@ def validate_exercises(exercises: List[dict]) -> List[str]:
         result = move_match(name)
         # move_match returns a Movement object if recognized, None otherwise
         if result is None:
-            print(f"[DEBUG] Unrecognized exercise: '{name}'")
+            logger.debug("Unrecognized exercise: %s", name)
             unrecognized.append(name)
-        else:
-            print(f"[DEBUG] Exercise '{name}' -> pattern '{result.name}'")
     return unrecognized
 
 
@@ -186,6 +187,30 @@ def sync_linked_templates(supabase, split_id: str, new_sessions: List[dict]) -> 
             )
 
     return stats
+
+
+def _sync_linked_templates_background(
+    access_token: str,
+    split_id: str,
+    new_sessions: List[dict],
+) -> None:
+    """
+    Run template synchronization out-of-band so split saves can return quickly.
+    """
+    try:
+        supabase = get_supabase_client_with_token(access_token)
+        sync_stats = sync_linked_templates(supabase, split_id, new_sessions)
+        if sync_stats["errors"]:
+            logger.warning("Template sync had errors for split %s: %s", split_id, sync_stats["errors"])
+        if sync_stats["templates_updated"] > 0:
+            logger.info(
+                "Synced %s template(s), detached %s completed session(s) for split %s",
+                sync_stats["templates_updated"],
+                sync_stats["sessions_detached"],
+                split_id,
+            )
+    except Exception:
+        logger.exception("Template sync failed for split %s", split_id)
 
 
 def build_split_response(split_data: dict, sessions_data: List[dict]) -> SplitResponse:
@@ -567,6 +592,7 @@ async def update_split(
 async def replace_split(
     split_id: str,
     split: SplitCreate,
+    background_tasks: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
 ):
     """
@@ -578,15 +604,8 @@ async def replace_split(
     3. Create new sessions and exercises from the request
     """
     try:
+        t0 = perf_counter()
         supabase = get_supabase_client_with_token(current_user.access_token)
-
-        # Verify split exists and belongs to user
-        existing = supabase.table("splits").select("id").eq("id", split_id).execute()
-        if not existing.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Split not found",
-            )
 
         # Validate all exercises
         all_exercises = []
@@ -601,6 +620,7 @@ async def replace_split(
                 detail=f"Unrecognized exercises: {', '.join(unrecognized)}. "
                        f"Use /api/parse-exercise to check exercise names.",
             )
+        t_prep = perf_counter()
 
         # Update split metadata (always include cycle_length so null can clear old values)
         split_update_data = {
@@ -610,10 +630,18 @@ async def replace_split(
             "maintenance_volume": split.maintenance_volume,
             "dataset": split.dataset,
         }
-        supabase.table("splits").update(split_update_data).eq("id", split_id).execute()
+        update_result = supabase.table("splits").update(split_update_data).eq("id", split_id).execute()
+        t_update = perf_counter()
+        if not update_result.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Split not found",
+            )
+        split_record = update_result.data[0]
 
         # Delete existing sessions (exercises cascade delete)
         supabase.table("sessions").delete().eq("split_id", split_id).execute()
+        t_delete = perf_counter()
 
         # Batch insert all sessions at once
         session_rows = [
@@ -621,6 +649,7 @@ async def replace_split(
             for s in split.sessions
         ]
         sessions_result = supabase.table("sessions").insert(session_rows).execute()
+        t_insert_sessions = perf_counter()
 
         if not sessions_result.data:
             raise HTTPException(
@@ -643,6 +672,7 @@ async def replace_split(
                 })
 
         exercises_result = supabase.table("exercises").insert(exercise_rows).execute() if exercise_rows else None
+        t_insert_exercises = perf_counter()
 
         # Map exercises back to sessions
         exercise_map = {}
@@ -659,29 +689,34 @@ async def replace_split(
             sd["exercises"] = exercise_map.get(session_record["id"], [])
             sessions_data.append(sd)
 
-        # Cascade exercise changes to linked session templates
-        try:
-            sessions_with_exercises = [
-                {
-                    "id": sessions_result.data[idx]["id"],
-                    "name": sessions_result.data[idx]["name"],
-                    "exercises": exercise_map.get(sessions_result.data[idx]["id"], []),
-                }
-                for idx in range(len(sessions_result.data))
-            ]
-            sync_stats = sync_linked_templates(supabase, split_id, sessions_with_exercises)
-            if sync_stats["errors"]:
-                print(f"[WARN] Template sync had errors: {sync_stats['errors']}")
-            if sync_stats["templates_updated"] > 0:
-                print(f"[INFO] Synced {sync_stats['templates_updated']} template(s), "
-                      f"detached {sync_stats['sessions_detached']} completed session(s)")
-        except Exception as sync_err:
-            # Sync failure should NOT fail the split save
-            print(f"[WARN] Template sync failed (non-fatal): {str(sync_err)}")
+        # Cascade exercise changes to linked session templates out-of-band.
+        # Sync failure should NOT fail split save.
+        sessions_with_exercises = [
+            {
+                "id": sessions_result.data[idx]["id"],
+                "name": sessions_result.data[idx]["name"],
+                "exercises": exercise_map.get(sessions_result.data[idx]["id"], []),
+            }
+            for idx in range(len(sessions_result.data))
+        ]
+        background_tasks.add_task(
+            _sync_linked_templates_background,
+            current_user.access_token,
+            split_id,
+            sessions_with_exercises,
+        )
 
-        # Get updated split record
-        split_result = supabase.table("splits").select("*").eq("id", split_id).execute()
-        return build_split_response(split_result.data[0], sessions_data)
+        logger.info(
+            "replace_split timings split_id=%s validate+prep=%.1fms update=%.1fms delete_sessions=%.1fms insert_sessions=%.1fms insert_exercises=%.1fms total=%.1fms",
+            split_id,
+            (t_prep - t0) * 1000,
+            (t_update - t_prep) * 1000,
+            (t_delete - t_update) * 1000,
+            (t_insert_sessions - t_delete) * 1000,
+            (t_insert_exercises - t_insert_sessions) * 1000,
+            (t_insert_exercises - t0) * 1000,
+        )
+        return build_split_response(split_record, sessions_data)
 
     except HTTPException:
         raise
@@ -690,6 +725,104 @@ async def replace_split(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to replace split: {str(e)}",
+        )
+
+
+@router.put(
+    "/{split_id}/exercises/batch",
+    response_model=ExerciseBatchUpdateResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid data or unrecognized exercises"},
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+        404: {"model": ErrorResponse, "description": "No exercises updated"},
+    },
+    summary="Batch update exercises in a split",
+    description="Update sets/unilateral/resistance_profile/name for one or more existing exercises.",
+)
+async def batch_update_exercises(
+    split_id: str,
+    request: ExerciseBatchUpdateRequest,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """
+    Fast path for inline exercise edits.
+
+    Notes:
+    - Uses a single upsert call for all rows.
+    - Relies on RLS to ensure user can only update owned rows.
+    - `split_id` is kept in route for API consistency and cache scoping.
+    """
+    try:
+        t0 = perf_counter()
+        _ = split_id
+        supabase = get_supabase_client_with_token(current_user.access_token)
+
+        unrecognized = []
+        rows = []
+        for update in request.updates:
+            row = {"id": update.id}
+
+            if update.name is not None:
+                movement = move_match(update.name)
+                if movement is None:
+                    unrecognized.append(update.name)
+                else:
+                    row["exercise_name"] = update.name
+
+            if update.sets is not None:
+                row["sets"] = update.sets
+            if update.unilateral is not None:
+                row["unilateral"] = update.unilateral
+            if "resistance_profile" in update.model_fields_set:
+                row["resistance_profile"] = update.resistance_profile
+
+            rows.append(row)
+
+        if unrecognized:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "message": "Some exercises could not be recognized",
+                    "unrecognized_exercises": unrecognized,
+                    "hint": "Check spelling or use /api/parse-exercise to verify exercise names",
+                },
+            )
+        t_prep = perf_counter()
+
+        # Update each exercise individually (upsert triggers INSERT path which RLS blocks)
+        all_updated = []
+        for row in rows:
+            exercise_id = row.pop("id")
+            if not row:
+                continue
+            res = supabase.table("exercises").update(row).eq("id", exercise_id).execute()
+            all_updated.extend(res.data or [])
+        result_data = all_updated
+        t_upsert = perf_counter()
+        updated_count = len(result_data)
+        if updated_count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No exercises were updated",
+            )
+
+        logger.info(
+            "batch_update_exercises timings split_id=%s rows=%s validate+prep=%.1fms update=%.1fms total=%.1fms",
+            split_id,
+            updated_count,
+            (t_prep - t0) * 1000,
+            (t_upsert - t_prep) * 1000,
+            (t_upsert - t0) * 1000,
+        )
+        return ExerciseBatchUpdateResponse(updated=updated_count)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed batch exercise update for user %s", current_user.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to batch update exercises: {str(e)}",
         )
 
 

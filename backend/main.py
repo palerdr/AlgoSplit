@@ -17,14 +17,14 @@ from db.supabase import get_supabase_client
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Split.AI API",
+    title="AlgoSplit API",
     description="Workout split analysis and optimization API based on exercise science research",
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
 
-logger = logging.getLogger("splitai.api")
+logger = logging.getLogger("algosplit.api")
 
 
 @app.exception_handler(HTTPException)
@@ -120,6 +120,7 @@ allowed_origins = [
     "http://localhost:3000",
     "http://localhost:5173",
     "http://localhost:8000",
+    "http://localhost:8081",
 ]
 if frontend_url not in allowed_origins:
     allowed_origins.append(frontend_url)
@@ -138,7 +139,7 @@ app.add_middleware(
 def read_root():
     """Root endpoint with API information"""
     return {
-        "name": "Split.AI API",
+        "name": "AlgoSplit API",
         "version": "2.0.0",
         "description": "Workout split analysis and optimization with user authentication and database persistence",
         "endpoints": {
@@ -226,7 +227,7 @@ def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
-        "service": "Split.AI API",
+        "service": "AlgoSplit API",
         "version": "1.0.0"
     }
 

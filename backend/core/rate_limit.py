@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 
 from fastapi import Request
 
-logger = logging.getLogger("splitai.rate_limit")
+logger = logging.getLogger("algosplit.rate_limit")
 
 try:
     import redis.asyncio as redis
@@ -91,7 +91,7 @@ class InMemoryRateLimitBackend:
 
 
 class RedisRateLimitBackend:
-    def __init__(self, redis_url: str, key_prefix: str = "splitai:ratelimit"):
+    def __init__(self, redis_url: str, key_prefix: str = "algosplit:ratelimit"):
         if redis is None:
             raise RuntimeError("redis package is not installed")
         self._redis = redis.from_url(redis_url, decode_responses=True)

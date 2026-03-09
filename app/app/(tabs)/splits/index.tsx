@@ -1,0 +1,214 @@
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useSplitsList, useDeleteSplit } from '../../../src/hooks/useSplits';
+import { Spinner, Card, Button } from '../../../src/components/ui';
+import { colors, typography, spacing, borders } from '../../../src/theme';
+import type { SplitResponse } from '../../../src/types/api.types';
+
+export default function SplitsScreen() {
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { data, isLoading, error } = useSplitsList();
+  const deleteMutation = useDeleteSplit();
+
+  const splits = data?.splits ?? [];
+
+  const handleDelete = (split: SplitResponse) => {
+    Alert.alert(
+      'Delete Split',
+      `Delete "${split.name}"? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => deleteMutation.mutate(split.id),
+        },
+      ],
+    );
+  };
+
+  const renderSplit = ({ item }: { item: SplitResponse }) => (
+    <TouchableOpacity
+      activeOpacity={0.7}
+      onPress={() => router.push(`/(tabs)/splits/${item.id}`)}
+      onLongPress={() => handleDelete(item)}
+    >
+      <Card style={styles.splitCard}>
+        <View style={styles.splitCardHeader}>
+          <Text style={styles.splitName}>{item.name}</Text>
+          <TouchableOpacity onPress={() => handleDelete(item)} hitSlop={8}>
+            <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.splitMeta}>
+          <Text style={styles.metaText}>
+            {item.sessions.length} session{item.sessions.length !== 1 ? 's' : ''}
+          </Text>
+          <Text style={styles.metaDot}>&middot;</Text>
+          <Text style={styles.metaText}>{item.dataset}</Text>
+          <Text style={styles.metaDot}>&middot;</Text>
+          <Text style={styles.metaText}>
+            {new Date(item.updated_at).toLocaleDateString()}
+          </Text>
+        </View>
+      </Card>
+    </TouchableOpacity>
+  );
+
+  if (isLoading) return <Spinner fullScreen />;
+
+  return (
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Splits</Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.compareBtn}
+            onPress={() => router.push('/(tabs)/splits/compare')}
+          >
+            <Ionicons name="git-compare-outline" size={16} color={colors.text} />
+            <Text style={styles.compareBtnText}>Compare</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.addBtn}
+            onPress={() => router.push('/(tabs)/splits/create')}
+          >
+            <Ionicons name="add" size={22} color={colors.bg} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {error ? (
+        <View style={styles.centered}>
+          <Text style={styles.errorText}>Failed to load splits</Text>
+        </View>
+      ) : splits.length === 0 ? (
+        <View style={styles.centered}>
+          <Ionicons name="barbell-outline" size={48} color={colors.textMuted} />
+          <Text style={styles.emptyTitle}>No Splits Yet</Text>
+          <Text style={styles.emptySubtitle}>Create your first training split to get started</Text>
+          <Button
+            title="Create Split"
+            onPress={() => router.push('/(tabs)/splits/create')}
+            style={styles.createBtn}
+          />
+        </View>
+      ) : (
+        <FlatList
+          data={splits}
+          keyExtractor={(item) => item.id}
+          renderItem={renderSplit}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.bg,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  title: {
+    ...typography.h2,
+    color: colors.text,
+  },
+  compareBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 36,
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    backgroundColor: colors.surface,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+  },
+  compareBtnText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  addBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.green,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  list: {
+    paddingHorizontal: 20,
+    paddingBottom: 120,
+  },
+  splitCard: {
+    marginBottom: 12,
+  },
+  splitCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  splitName: {
+    color: colors.text,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  splitMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  metaText: {
+    color: colors.textSecondary,
+    fontSize: 13,
+  },
+  metaDot: {
+    color: colors.textMuted,
+    fontSize: 13,
+  },
+  centered: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
+  },
+  emptyTitle: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: '700',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  createBtn: {
+    paddingHorizontal: 32,
+  },
+  errorText: {
+    color: colors.red,
+    fontSize: 14,
+  },
+});

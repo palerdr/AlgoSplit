@@ -11,6 +11,8 @@ from schemas.workouts import (
     WorkoutLogCreate,
     WorkoutLogResponse,
     WorkoutHistoryResponse,
+    WorkoutSummaryListResponse,
+    WorkoutSummaryResponse,
     WorkoutStatsResponse,
     WorkoutExerciseResponse,
 )
@@ -61,6 +63,28 @@ def build_workout_response(workout_data: dict, exercises_data: list) -> WorkoutL
         duration_minutes=workout_data.get("duration_minutes"),
         notes=workout_data.get("notes"),
         exercises=exercises,
+        created_at=workout_data["created_at"],
+    )
+
+
+def build_workout_summary_response(
+    workout_data: dict, exercises_data: list
+) -> WorkoutSummaryResponse:
+    """
+    Build a compact history-list response from database records.
+    """
+    ordered_exercises = sorted(exercises_data, key=lambda ex: ex["order_index"])
+    return WorkoutSummaryResponse(
+        id=workout_data["id"],
+        user_id=workout_data["user_id"],
+        session_id=workout_data.get("session_id"),
+        split_id=workout_data.get("split_id"),
+        session_name=workout_data["session_name"],
+        completed_at=workout_data["completed_at"],
+        duration_minutes=workout_data.get("duration_minutes"),
+        exercise_count=len(ordered_exercises),
+        total_sets=sum(ex["sets_completed"] for ex in ordered_exercises),
+        exercise_names=[ex["exercise_name"] for ex in ordered_exercises],
         created_at=workout_data["created_at"],
     )
 
@@ -279,6 +303,84 @@ async def get_workout_history(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to fetch workout history: {str(e)}",
+        )
+
+
+@router.get(
+    "/summaries",
+    response_model=WorkoutSummaryListResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+    },
+    summary="Get workout history summaries",
+    description="Get compact workout history cards for the authenticated user",
+)
+async def get_workout_history_summaries(
+    current_user: AuthUser = Depends(get_current_user),
+    limit: int = Query(50, ge=1, le=500, description="Number of workouts to return"),
+    offset: int = Query(0, ge=0, description="Number of workouts to skip"),
+    days: Optional[int] = Query(None, ge=1, description="Filter to last N days"),
+):
+    """
+    Get compact workout history rows.
+
+    Returns only fields needed for history cards.
+    Full exercise payload remains available from GET /api/workouts/{workout_id}.
+    """
+    try:
+        supabase = get_supabase_client_with_token(current_user.access_token)
+
+        query = supabase.table("workout_logs").select("*").eq(
+            "user_id", current_user.id
+        )
+
+        cutoff_date = None
+        if days:
+            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            query = query.gte("completed_at", cutoff_date.isoformat())
+
+        result = query.order("completed_at", desc=True).range(
+            offset, offset + limit - 1
+        ).execute()
+
+        if not result.data:
+            return WorkoutSummaryListResponse(workouts=[], total=0)
+
+        workout_ids = [w["id"] for w in result.data]
+        exercises_result = supabase.table("workout_exercises").select(
+            "workout_log_id, exercise_name, sets_completed, order_index"
+        ).in_(
+            "workout_log_id", workout_ids
+        ).order("order_index").execute()
+
+        exercises_by_workout: dict[str, list] = {}
+        for ex in (exercises_result.data or []):
+            wid = ex["workout_log_id"]
+            if wid not in exercises_by_workout:
+                exercises_by_workout[wid] = []
+            exercises_by_workout[wid].append(ex)
+
+        workouts = [
+            build_workout_summary_response(
+                workout_data, exercises_by_workout.get(workout_data["id"], [])
+            )
+            for workout_data in result.data
+        ]
+
+        count_query = supabase.table("workout_logs").select(
+            "id", count="exact"
+        ).eq("user_id", current_user.id)
+        if cutoff_date:
+            count_query = count_query.gte("completed_at", cutoff_date.isoformat())
+        count_result = count_query.execute()
+        total = count_result.count if count_result.count else len(workouts)
+
+        return WorkoutSummaryListResponse(workouts=workouts, total=total)
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch workout history summaries: {str(e)}",
         )
 
 

@@ -173,6 +173,29 @@ class WorkoutHistoryResponse(BaseModel):
     }
 
 
+class WorkoutSummaryResponse(BaseModel):
+    """Compact workout summary for history lists"""
+
+    id: str = Field(..., description="Workout log ID")
+    user_id: str = Field(..., description="User who performed workout")
+    session_id: Optional[str] = Field(None, description="Reference to planned session")
+    split_id: Optional[str] = Field(None, description="Reference to split")
+    session_name: str = Field(..., description="Session name")
+    completed_at: datetime = Field(..., description="When workout was completed")
+    duration_minutes: Optional[int] = Field(None, description="Duration in minutes")
+    exercise_count: int = Field(..., description="Number of exercises logged")
+    total_sets: int = Field(..., description="Total sets completed")
+    exercise_names: List[str] = Field(default=[], description="Exercise names in workout order")
+    created_at: datetime = Field(..., description="Log creation timestamp")
+
+
+class WorkoutSummaryListResponse(BaseModel):
+    """Compact list of workout summaries"""
+
+    workouts: List[WorkoutSummaryResponse] = Field(..., description="Workout summaries")
+    total: int = Field(..., description="Total number of workouts")
+
+
 # ============================================================================
 # Workout Stats Schemas
 # ============================================================================

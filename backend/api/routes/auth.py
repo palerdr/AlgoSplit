@@ -6,7 +6,7 @@ Handles user signup, login, and user info retrieval
 import logging
 from fastapi import APIRouter, HTTPException, Depends, status, Response
 
-logger = logging.getLogger("splitai.auth")
+logger = logging.getLogger("algosplit.auth")
 from db.supabase import get_supabase_client, get_supabase_client_with_token
 from schemas.auth import (
     SignUpRequest,

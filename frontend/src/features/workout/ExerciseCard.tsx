@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronUp, Plus, Trash2, GripVertical, RefreshCw, RotateCcw } from 'lucide-react';
+import { ChevronDown, ChevronUp, Plus, GripVertical, MoreVertical } from 'lucide-react';
 import { Card, ConfirmDialog } from '@/components/ui';
 import { SetRow } from './SetRow';
+import { MobileExerciseMenu } from './MobileExerciseMenu';
 import { ExercisePicker } from './ExercisePicker';
 import { type WorkoutExercise, useWorkoutStore } from './workoutStore';
 import { replaceExerciseInSplit, splitKeys } from '@/api/splits.api';
@@ -14,6 +15,7 @@ interface ExerciseCardProps {
   previousExerciseData?: { reps: number[]; weight: number[]; rir?: (number | null)[] };
   splitId?: string;
   dragHandleProps?: Record<string, unknown>;
+  onViewStats?: () => void;
 }
 
 export function ExerciseCard({
@@ -21,9 +23,11 @@ export function ExerciseCard({
   previousExerciseData,
   splitId,
   dragHandleProps,
+  onViewStats,
 }: ExerciseCardProps) {
   const [isExpanded, setIsExpanded] = useState(true);
   const [showNotes, setShowNotes] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   const [showReplacePicker, setShowReplacePicker] = useState(false);
   const [showReplaceConfirm, setShowReplaceConfirm] = useState<{ newName: string } | null>(null);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -111,6 +115,23 @@ export function ExerciseCard({
           ) : (
             <ChevronDown size={20} className="text-muted" />
           )}
+          <div className="relative">
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
+              className="p-1.5 text-muted hover:text-foreground transition-colors"
+            >
+              <MoreVertical size={18} />
+            </button>
+            <MobileExerciseMenu
+              isOpen={showMenu}
+              onClose={() => setShowMenu(false)}
+              onReplace={() => setShowReplacePicker(true)}
+              onViewStats={() => onViewStats?.()}
+              onReset={() => setShowResetConfirm(true)}
+              onRemove={() => removeExercise(exercise.id)}
+              showReplace={!!splitId}
+            />
+          </div>
         </div>
       </div>
 
@@ -224,32 +245,6 @@ export function ExerciseCard({
             </button>
 
             <div className="flex-1" />
-
-            {splitId && (
-              <button
-                onClick={() => setShowReplacePicker(true)}
-                className="p-1.5 text-muted hover:text-foreground transition-colors"
-                title="Replace in program"
-              >
-                <RefreshCw size={16} />
-              </button>
-            )}
-
-            <button
-              onClick={() => setShowResetConfirm(true)}
-              className="p-1.5 text-muted hover:text-foreground transition-colors"
-              title="Reset history"
-            >
-              <RotateCcw size={16} />
-            </button>
-
-            <button
-              onClick={() => removeExercise(exercise.id)}
-              className="p-1.5 text-muted hover:text-error transition-colors"
-              title="Remove exercise"
-            >
-              <Trash2 size={16} />
-            </button>
           </div>
 
           {/* Notes field */}

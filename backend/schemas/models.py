@@ -1,5 +1,5 @@
 """
-Pydantic models for Split.AI API
+Pydantic models for AlgoSplit API
 
 Defines request/response schemas for the 29-region granular muscle model.
 """

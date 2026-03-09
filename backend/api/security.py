@@ -19,8 +19,8 @@ def _env_bool(name: str, default: bool) -> bool:
 _app_env = os.getenv("APP_ENV", os.getenv("ENV", "development")).strip().lower()
 _is_production = _app_env in {"prod", "production"}
 
-AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "splitai_access_token")
-CSRF_COOKIE_NAME = os.getenv("CSRF_COOKIE_NAME", "splitai_csrf_token")
+AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "algosplit_access_token")
+CSRF_COOKIE_NAME = os.getenv("CSRF_COOKIE_NAME", "algosplit_csrf_token")
 CSRF_HEADER_NAME = os.getenv("CSRF_HEADER_NAME", "X-CSRF-Token")
 CSRF_PROTECTED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -35,7 +35,9 @@ AUTH_COOKIE_SAMESITE = os.getenv(
 if AUTH_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
     AUTH_COOKIE_SAMESITE = "lax"
 
-AUTH_EXPOSE_ACCESS_TOKEN = _env_bool("AUTH_EXPOSE_ACCESS_TOKEN", False)
+# Default True so native clients (iOS/Android) can receive the token via JSON.
+# For web-only deployments set AUTH_EXPOSE_ACCESS_TOKEN=false in env.
+AUTH_EXPOSE_ACCESS_TOKEN = _env_bool("AUTH_EXPOSE_ACCESS_TOKEN", True)
 
 
 def _cookie_common() -> dict:

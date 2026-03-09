@@ -1,5 +1,5 @@
 """
-Main Classes for Split.AI Stimulus Engine
+Main Classes for AlgoSplit Stimulus Engine
 
 Core classes for simulating workout splits and calculating net weekly stimulus
 using a granular 29-region anatomical muscle model.
@@ -353,7 +353,8 @@ class MuscleRegion:
         axial_fatigue: float,
         dataset: str,
         current_session_time: float,
-        consecutive_day_penalty: float = 1.0
+        consecutive_day_penalty: float = 1.0,
+        collect_breakdown: bool = True,
     ) -> float:
         """
         Apply tiered stimulus with all modifiers.
@@ -424,16 +425,19 @@ class MuscleRegion:
         final_stimulus = global_mult * local_mult * consecutive_mult * stimulus_amount
         self.stimulus += final_stimulus
 
-        # Store breakdown for external inspection
-        self._last_breakdown = {
-            'recovery_multiplier': recovery_ratio,
-            'bilateral_multiplier': bilateral_mod,
-            'local_multiplier': local_mult,
-            'global_multiplier': global_mult,
-            'consecutive_day_multiplier': consecutive_mult,
-            'tier_beta': beta,
-            'final_stimulus': final_stimulus,
-        }
+        # Store breakdown only when requested.
+        if collect_breakdown:
+            self._last_breakdown = {
+                'recovery_multiplier': recovery_ratio,
+                'bilateral_multiplier': bilateral_mod,
+                'local_multiplier': local_mult,
+                'global_multiplier': global_mult,
+                'consecutive_day_multiplier': consecutive_mult,
+                'tier_beta': beta,
+                'final_stimulus': final_stimulus,
+            }
+        else:
+            self._last_breakdown = None
 
         # Track primary sets (only prime movers count)
         if tier == StimulusTier.PRIME or tier == "prime":
@@ -543,7 +547,8 @@ class Session:
         stimulus_duration: int,
         dataset: str,
         fatigue_state: Optional[GlobalFatigueState] = None,
-        consecutive_day_penalty: float = 1.0
+        consecutive_day_penalty: float = 1.0,
+        collect_breakdowns: bool = True,
     ) -> Optional[Dict[str, Any]]:
         """
         Execute session with granular muscle regions and tiered stimulus.
@@ -598,11 +603,12 @@ class Session:
             if pattern_name is None:
                 continue
 
-            # Save pre-leverage weights for breakdown comparison
-            pre_leverage_targets = {
-                tier: dict(targets)
-                for tier, targets in tiered_targets.items()
-            }
+            # Save pre-leverage weights for breakdown comparison only when needed.
+            pre_leverage_targets = (
+                {tier: dict(targets) for tier, targets in tiered_targets.items()}
+                if collect_breakdowns
+                else {}
+            )
 
             # Redistribute weights based on leverage matching
             # Lost stimulus from poor-leverage muscles flows to better-leverage muscles
@@ -611,16 +617,18 @@ class Session:
             )
 
             # Build per-exercise breakdown
-            exercise_bd: Dict[str, Any] = {
-                'name': exercise_name,
-                'pattern': pattern_name,
-                'sets': sets,
-                'resistance_profile': resistance_profile,
-                'is_bilateral': is_bilateral,
-                'is_unilateral': is_unilateral,
-                'axial_load': axial_load,
-                'muscle_contributions': {},
-            }
+            exercise_bd: Optional[Dict[str, Any]] = None
+            if collect_breakdowns:
+                exercise_bd = {
+                    'name': exercise_name,
+                    'pattern': pattern_name,
+                    'sets': sets,
+                    'resistance_profile': resistance_profile,
+                    'is_bilateral': is_bilateral,
+                    'is_unilateral': is_unilateral,
+                    'axial_load': axial_load,
+                    'muscle_contributions': {},
+                }
 
             # Update axial fatigue before processing sets
             if axial_load > 0:
@@ -661,14 +669,15 @@ class Session:
                             axial_fatigue=fatigue_state.axial_fatigue,
                             dataset=dataset,
                             current_session_time=self.time,
-                            consecutive_day_penalty=consecutive_day_penalty
+                            consecutive_day_penalty=consecutive_day_penalty,
+                            collect_breakdown=collect_breakdowns,
                         )
 
                         session_stats['stimulus_by_muscle'][muscle_id] += stimulus
                         session_stats['muscles_trained'].add(muscle_id)
 
                         # Collect breakdown data
-                        if muscle._last_breakdown is not None:
+                        if collect_breakdowns and exercise_bd is not None and muscle._last_breakdown is not None:
                             bd = muscle._last_breakdown.copy()
                             bd['set_number'] = set_num + 1
                             bd['weight'] = weight
@@ -687,9 +696,13 @@ class Session:
                             mc['sets'].append(bd)
                             mc['total_stimulus'] += bd['final_stimulus']
 
-            # Update last trained time for prime movers only
-            # Frequency tracks direct/prime training, not secondary stimulus
-            for muscle_id in tiered_targets.get('prime', {}).keys():
+            # Any muscle that received stimulus should update recency/frequency
+            # tracking so indirect work does not bypass recovery or atrophy.
+            stimulated_muscles = set()
+            for tier in ['prime', 'secondary', 'tertiary', 'quaternary']:
+                stimulated_muscles.update(tiered_targets.get(tier, {}).keys())
+
+            for muscle_id in stimulated_muscles:
                 muscle = muscles.get(muscle_id)
                 if muscle:
                     muscle.last_trained_time = self.time
@@ -707,7 +720,8 @@ class Session:
                 'tiered_targets': tiered_targets
             })
 
-            exercise_breakdowns.append(exercise_bd)
+            if collect_breakdowns and exercise_bd is not None:
+                exercise_breakdowns.append(exercise_bd)
 
         session_stats['total_sets'] = global_sets
         session_stats['muscles_trained'] = list(session_stats['muscles_trained'])
@@ -715,7 +729,7 @@ class Session:
         session_stats['axial_fatigue'] = fatigue_state.axial_fatigue
         session_stats['bilateral_compounds'] = fatigue_state.bilateral_compounds
         session_stats['bilateral_compound_sets'] = fatigue_state.bilateral_compound_sets
-        session_stats['exercise_breakdowns'] = exercise_breakdowns
+        session_stats['exercise_breakdowns'] = exercise_breakdowns if collect_breakdowns else []
         session_stats['final_cns_multiplier'] = calculate_cns_fatigue(
             global_sets, axial_fatigue=fatigue_state.axial_fatigue
         )
@@ -879,7 +893,7 @@ class Split:
                 axial_fatigue_contributor=data.axial_fatigue_contributor
             )
 
-    def simulate_split(self) -> None:
+    def simulate_split(self, collect_breakdowns: bool = True) -> None:
         """
         Execute all phases of atrophy and stimulus for the workout split.
         Handles arbitrary cycle lengths by normalizing across weeks.
@@ -959,7 +973,8 @@ class Split:
                 fatigue_state.reset()
                 stats = session.execute(
                     self.muscles, self.stimulus_duration, self.dataset, fatigue_state,
-                    consecutive_day_penalty=consecutive_penalty
+                    consecutive_day_penalty=consecutive_penalty,
+                    collect_breakdowns=collect_breakdowns,
                 )
 
                 if stats:

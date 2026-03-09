@@ -73,7 +73,7 @@ async def analyze_split(request: SplitRequest):
             dataset=request.dataset,
             cycle_length=request.cycle_length
         )
-        split.simulate_split()
+        split.simulate_split(collect_breakdowns=request.include_breakdowns)
 
         return _build_response(split, request)
 
@@ -110,24 +110,7 @@ async def analyze_workouts(
         )
 
         if not workouts_result.data:
-            # Return empty response
-            return AnalysisResponse(
-                split_name="Logged Workouts",
-                cycle_length=days,
-                stimulus_duration=stimulus_duration,
-                maintenance_volume=maintenance_volume,
-                dataset=dataset,
-                muscles=[],
-                group_summaries=[],
-                suggestions=[],
-                summary=SummaryStats(
-                    total_sets=0,
-                    muscles_trained=0,
-                    total_muscles=29,
-                    avg_net_stimulus=0.0,
-                    avg_sets_per_muscle=0.0,
-                ),
-            )
+            return _empty_workout_analysis(days, stimulus_duration, maintenance_volume, dataset)
 
         # Get all exercises for these workouts
         workout_ids = [w["id"] for w in workouts_result.data]
@@ -139,116 +122,131 @@ async def analyze_workouts(
             .execute()
         )
 
-        # Group exercises by workout_log_id
-        exercises_by_workout = defaultdict(list)
-        for ex in (exercises_result.data or []):
-            exercises_by_workout[ex["workout_log_id"]].append(ex)
-
-        # Build Split days from logged workouts
-        # Map day numbers relative to the oldest workout's date
-        oldest_date = datetime.fromisoformat(
-            workouts_result.data[0]["completed_at"].replace("Z", "+00:00")
-        ).date()
-
-        split_days = []
-        sessions_for_request = []
-
-        for workout in workouts_result.data:
-            workout_date = datetime.fromisoformat(
-                workout["completed_at"].replace("Z", "+00:00")
-            ).date()
-            day_number = (workout_date - oldest_date).days + 1
-
-            # Build exercise dict: {exercise_name: sets_completed}
-            exercises_dict = {}
-            exercise_inputs = []
-            for ex in exercises_by_workout.get(workout["id"], []):
-                exercises_dict[ex["exercise_name"]] = ex["sets_completed"]
-                exercise_inputs.append(ExerciseInput(
-                    name=ex["exercise_name"],
-                    sets=ex["sets_completed"],
-                ))
-
-            session_name = workout.get("session_name", f"Day {day_number}")
-            split_days.append((session_name, day_number, exercises_dict))
-            sessions_for_request.append(SessionInput(
-                name=session_name,
-                day=min(day_number, 14),  # Clamp for schema validation
-                exercises=exercise_inputs if exercise_inputs else [ExerciseInput(name="Rest", sets=1)],
-            ))
-
-        if not split_days:
-            return AnalysisResponse(
-                split_name="Logged Workouts",
-                cycle_length=days,
-                stimulus_duration=stimulus_duration,
-                maintenance_volume=maintenance_volume,
-                dataset=dataset,
-                muscles=[],
-                group_summaries=[],
-                suggestions=[],
-                summary=SummaryStats(
-                    total_sets=0,
-                    muscles_trained=0,
-                    total_muscles=29,
-                    avg_net_stimulus=0.0,
-                    avg_sets_per_muscle=0.0,
-                ),
-            )
-
-        # Compute actual training span: earliest workout to latest workout
-        # This avoids penalizing users for empty days before their first log
-        newest_date = datetime.fromisoformat(
-            workouts_result.data[-1]["completed_at"].replace("Z", "+00:00")
-        ).date()
-        actual_span = (newest_date - oldest_date).days + 1  # inclusive
-        # Use at least 7 days so a single session isn't treated as a 1-day cycle
-        effective_cycle = max(actual_span, 7)
-
-        # Create and simulate split
-        split = Split(
-            name="Logged Workouts",
-            days=split_days,
+        return _build_workout_analysis(
+            workouts_result.data,
+            exercises_result.data or [],
+            days=days,
             stimulus_duration=stimulus_duration,
             maintenance_volume=maintenance_volume,
             dataset=dataset,
-            cycle_length=effective_cycle,
         )
-        split.simulate_split()
-
-        # When we don't have a full week of data, the weekly atrophy model
-        # over-projects decay. Scale atrophy based on how much of the
-        # atrophy window has actually elapsed.
-        actual_hours = actual_span * 24
-        atrophy_window = 168 - stimulus_duration  # hours where atrophy can occur in a full week
-        if actual_hours <= stimulus_duration:
-            # Still within stimulus window — no atrophy has started yet
-            for muscle in split.muscles.values():
-                muscle.atrophy = 0
-        elif actual_span < 7:
-            # Partial week: only a fraction of the atrophy period has elapsed
-            elapsed_atrophy_hours = actual_hours - stimulus_duration
-            atrophy_scale = elapsed_atrophy_hours / atrophy_window if atrophy_window > 0 else 0
-            for muscle in split.muscles.values():
-                muscle.atrophy *= atrophy_scale
-
-        # Build a synthetic SplitRequest for _build_response
-        synthetic_request = SplitRequest(
-            name="Logged Workouts",
-            sessions=sessions_for_request,
-            cycle_length=min(effective_cycle, 14),  # Schema max is 14
-            stimulus_duration=stimulus_duration,
-            maintenance_volume=maintenance_volume,
-            dataset=dataset,
-            include_breakdowns=False,
-        )
-
-        return _build_response(split, synthetic_request)
 
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error analyzing workouts: {str(e)}")
+
+
+def _empty_workout_analysis(
+    days: int,
+    stimulus_duration: int,
+    maintenance_volume: int,
+    dataset: str,
+) -> AnalysisResponse:
+    """Return zeroed AnalysisResponse for an empty workout window."""
+    return AnalysisResponse(
+        split_name="Logged Workouts",
+        cycle_length=days,
+        stimulus_duration=stimulus_duration,
+        maintenance_volume=maintenance_volume,
+        dataset=dataset,
+        muscles=[],
+        group_summaries=[],
+        suggestions=[],
+        summary=SummaryStats(
+            total_sets=0,
+            muscles_trained=0,
+            total_muscles=29,
+            avg_net_stimulus=0.0,
+            avg_sets_per_muscle=0.0,
+        ),
+    )
+
+
+def _build_workout_analysis(
+    workouts_data: list,
+    exercises_data: list,
+    days: int = 7,
+    stimulus_duration: int = 48,
+    maintenance_volume: int = 3,
+    dataset: str = "schoenfeld",
+    now: Optional[datetime] = None,
+) -> AnalysisResponse:
+    """Pure transform: workout + exercise rows → AnalysisResponse.
+
+    Anchors day numbering to the rolling window [now - days + 1 .. now]
+    so that stimulus correctly decays based on how many days ago each
+    session was performed.
+    """
+    if now is None:
+        now = datetime.utcnow()
+
+    if not workouts_data:
+        return _empty_workout_analysis(days, stimulus_duration, maintenance_volume, dataset)
+
+    window_start_date = (now - timedelta(days=days - 1)).date()
+
+    # Group exercises by workout_log_id
+    exercises_by_workout: dict = defaultdict(list)
+    for ex in exercises_data:
+        exercises_by_workout[ex["workout_log_id"]].append(ex)
+
+    split_days = []
+    sessions_for_request = []
+
+    for workout in workouts_data:
+        workout_date = datetime.fromisoformat(
+            workout["completed_at"].replace("Z", "+00:00")
+        ).date()
+        day_number = max(1, (workout_date - window_start_date).days + 1)
+
+        # Accumulate sets for duplicate exercise names within the same workout
+        exercises_dict: dict = {}
+        for ex in exercises_by_workout.get(workout["id"], []):
+            name = ex["exercise_name"]
+            exercises_dict[name] = exercises_dict.get(name, 0) + ex["sets_completed"]
+
+        exercise_inputs = [
+            ExerciseInput(name=name, sets=sets)
+            for name, sets in exercises_dict.items()
+        ]
+
+        session_name = workout.get("session_name", f"Day {day_number}")
+        split_days.append((session_name, day_number, exercises_dict))
+        sessions_for_request.append(SessionInput(
+            name=session_name,
+            day=min(day_number, 14),
+            exercises=exercise_inputs if exercise_inputs else [ExerciseInput(name="Rest", sets=1)],
+        ))
+
+    if not split_days:
+        return _empty_workout_analysis(days, stimulus_duration, maintenance_volume, dataset)
+
+    # Always use the full rolling window as the cycle length so the
+    # engine correctly models atrophy for the gap between sessions and now.
+    effective_cycle = days
+
+    split = Split(
+        name="Logged Workouts",
+        days=split_days,
+        stimulus_duration=stimulus_duration,
+        maintenance_volume=maintenance_volume,
+        dataset=dataset,
+        cycle_length=effective_cycle,
+    )
+    split.simulate_split(collect_breakdowns=False)
+
+    synthetic_request = SplitRequest(
+        name="Logged Workouts",
+        sessions=sessions_for_request,
+        cycle_length=min(effective_cycle, 14),
+        stimulus_duration=stimulus_duration,
+        maintenance_volume=maintenance_volume,
+        dataset=dataset,
+        include_breakdowns=False,
+    )
+
+    return _build_response(split, synthetic_request)
 
 
 def _build_response(split: Split, request: SplitRequest) -> AnalysisResponse:

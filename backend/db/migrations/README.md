@@ -1,6 +1,6 @@
 # Database Migrations
 
-This directory contains SQL migration files for setting up the Split.AI database schema in Supabase.
+This directory contains SQL migration files for setting up the AlgoSplit database schema in Supabase.
 
 ## Quick Start
 

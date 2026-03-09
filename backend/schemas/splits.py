@@ -4,7 +4,7 @@ Pydantic schemas for split management (database operations)
 
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ============================================================================
@@ -188,6 +188,42 @@ class SplitUpdate(BaseModel):
             ]
         }
     }
+
+
+class ExerciseBatchUpdateItem(BaseModel):
+    """Patch fields for a single exercise row."""
+
+    id: str = Field(..., description="Exercise ID")
+    name: Optional[str] = Field(None, min_length=1, description="Exercise name")
+    sets: Optional[int] = Field(None, gt=0, description="Number of sets")
+    unilateral: Optional[bool] = Field(None, description="Whether performed unilaterally")
+    resistance_profile: Optional[str] = Field(
+        default=None,
+        pattern="^(ascending|mid|descending)$",
+        description="Resistance profile override",
+    )
+
+    @model_validator(mode="after")
+    def _validate_has_updatable_fields(self):
+        has_name = self.name is not None
+        has_sets = self.sets is not None
+        has_unilateral = self.unilateral is not None
+        has_resistance = "resistance_profile" in self.model_fields_set
+        if not (has_name or has_sets or has_unilateral or has_resistance):
+            raise ValueError("At least one field must be provided for update")
+        return self
+
+
+class ExerciseBatchUpdateRequest(BaseModel):
+    """Batch patch payload for exercise rows in a split."""
+
+    updates: List[ExerciseBatchUpdateItem] = Field(..., min_items=1)
+
+
+class ExerciseBatchUpdateResponse(BaseModel):
+    """Result for batch exercise updates."""
+
+    updated: int = Field(..., description="Number of exercise rows updated")
 
 
 class SplitResponse(BaseModel):

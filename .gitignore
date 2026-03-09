@@ -39,6 +39,7 @@ build/
 
 # Node (for frontend)
 node_modules/
+coverage/
 .next/
 out/
 .turbo/

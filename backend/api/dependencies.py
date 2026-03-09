@@ -21,7 +21,7 @@ from api.security import (
     CSRF_PROTECTED_METHODS,
 )
 
-logger = logging.getLogger("splitai.auth")
+logger = logging.getLogger("algosplit.auth")
 
 # Load environment variables
 load_dotenv()

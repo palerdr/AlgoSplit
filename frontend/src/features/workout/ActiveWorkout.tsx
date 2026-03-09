@@ -32,10 +32,12 @@ function SortableExerciseCard({
   exercise,
   previousExerciseData,
   splitId,
+  onViewStats,
 }: {
   exercise: WorkoutExercise;
   previousExerciseData?: { reps: number[]; weight: number[]; rir?: (number | null)[] };
   splitId?: string;
+  onViewStats?: () => void;
 }) {
   const {
     attributes,
@@ -60,6 +62,7 @@ function SortableExerciseCard({
         previousExerciseData={previousExerciseData}
         splitId={splitId}
         dragHandleProps={{ ...attributes, ...listeners }}
+        onViewStats={onViewStats}
       />
     </div>
   );
@@ -262,6 +265,7 @@ export function ActiveWorkout() {
                     exercise={exercise}
                     previousExerciseData={activeWorkout.previousData?.[exercise.name]}
                     splitId={activeWorkout.splitId}
+                    onViewStats={() => navigate('/progress')}
                   />
                 ))}
               </SortableContext>

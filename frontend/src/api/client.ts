@@ -1,8 +1,8 @@
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
-const CSRF_COOKIE_NAME = import.meta.env.VITE_CSRF_COOKIE_NAME || 'splitai_csrf_token';
-const AUTH_COOKIE_NAME = 'splitai_access_token';
+const CSRF_COOKIE_NAME = import.meta.env.VITE_CSRF_COOKIE_NAME || 'algosplit_csrf_token';
+const AUTH_COOKIE_NAME = 'algosplit_access_token';
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -40,7 +40,7 @@ apiClient.interceptors.request.use(
       if (csrfToken) {
         config.headers['X-CSRF-Token'] = csrfToken;
       } else {
-        console.warn('[SplitAI] No CSRF cookie found for', method, config.url, getAuthDiagnostics());
+        console.warn('[AlgoSplit] No CSRF cookie found for', method, config.url, getAuthDiagnostics());
       }
     }
     return config;
@@ -55,7 +55,7 @@ apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     if (error.response?.status === 401) {
-      console.warn('[SplitAI] 401 Unauthorized:', error.config?.method?.toUpperCase(), error.config?.url, getAuthDiagnostics());
+      console.warn('[AlgoSplit] 401 Unauthorized:', error.config?.method?.toUpperCase(), error.config?.url, getAuthDiagnostics());
       // Dispatch custom event so AuthProvider can update state
       window.dispatchEvent(new CustomEvent('auth:logout'));
     }

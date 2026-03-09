@@ -11,19 +11,21 @@ interface VolumeHeatmapProps {
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-function getIntensityClass(sets: number): string {
-  if (sets === 0) return 'bg-steel/30';
-  if (sets <= 4) return 'bg-emerald-900/50';
-  if (sets <= 8) return 'bg-emerald-700/60';
-  if (sets <= 12) return 'bg-amber-700/50';
-  if (sets <= 16) return 'bg-amber-500/60';
+function getIntensityClass(sets: number, maxSets: number): string {
+  if (sets === 0 || maxSets === 0) return 'bg-steel/30';
+  const ratio = sets / maxSets;
+  if (ratio <= 0.2) return 'bg-emerald-900/50';
+  if (ratio <= 0.4) return 'bg-emerald-700/60';
+  if (ratio <= 0.6) return 'bg-amber-700/50';
+  if (ratio <= 0.8) return 'bg-amber-500/60';
   return 'bg-red-600/60';
 }
 
-function getIntensityLabel(sets: number): string {
-  if (sets === 0) return 'Rest';
-  if (sets <= 8) return 'Light';
-  if (sets <= 16) return 'Moderate';
+function getIntensityLabel(sets: number, maxSets: number): string {
+  if (sets === 0 || maxSets === 0) return 'Rest';
+  const ratio = sets / maxSets;
+  if (ratio <= 0.33) return 'Light';
+  if (ratio <= 0.66) return 'Moderate';
   return 'Heavy';
 }
 
@@ -63,7 +65,10 @@ export function VolumeHeatmap({ sessions, startDate, endDate }: VolumeHeatmapPro
       grid.push(weekCells);
     }
 
-    return { grid, totalWeeks };
+    // Compute max sets across all non-zero days for dynamic scaling
+    const maxSets = Object.values(setsByDate).reduce((max, v) => Math.max(max, v), 0);
+
+    return { grid, totalWeeks, maxSets };
   }, [sessions, startDate, endDate]);
 
   if (!sessions.length) {
@@ -98,9 +103,9 @@ export function VolumeHeatmap({ sessions, startDate, endDate }: VolumeHeatmapPro
                   key={`${wIdx}-${dIdx}`}
                   className={cn(
                     'w-4 h-4 rounded-sm transition-colors',
-                    cell.sets === -1 ? 'bg-transparent' : getIntensityClass(cell.sets)
+                    cell.sets === -1 ? 'bg-transparent' : getIntensityClass(cell.sets, heatmapData.maxSets)
                   )}
-                  title={cell.sets >= 0 ? `${cell.formatted}: ${cell.sets} sets (${getIntensityLabel(cell.sets)})` : ''}
+                  title={cell.sets >= 0 ? `${cell.formatted}: ${cell.sets} sets (${getIntensityLabel(cell.sets, heatmapData.maxSets)})` : ''}
                 />
               ))}
             </div>
@@ -112,12 +117,12 @@ export function VolumeHeatmap({ sessions, startDate, endDate }: VolumeHeatmapPro
       <div className="flex items-center gap-3 text-[10px] text-muted">
         <span>Less</span>
         <div className="flex gap-0.5">
-          <div className="w-3 h-3 rounded-sm bg-steel/30" title="0 sets" />
-          <div className="w-3 h-3 rounded-sm bg-emerald-900/50" title="1-4 sets" />
-          <div className="w-3 h-3 rounded-sm bg-emerald-700/60" title="5-8 sets" />
-          <div className="w-3 h-3 rounded-sm bg-amber-700/50" title="9-12 sets" />
-          <div className="w-3 h-3 rounded-sm bg-amber-500/60" title="13-16 sets" />
-          <div className="w-3 h-3 rounded-sm bg-red-600/60" title="17+ sets" />
+          <div className="w-3 h-3 rounded-sm bg-steel/30" title="Rest" />
+          <div className="w-3 h-3 rounded-sm bg-emerald-900/50" title="Light" />
+          <div className="w-3 h-3 rounded-sm bg-emerald-700/60" title="Light-Moderate" />
+          <div className="w-3 h-3 rounded-sm bg-amber-700/50" title="Moderate" />
+          <div className="w-3 h-3 rounded-sm bg-amber-500/60" title="Moderate-Heavy" />
+          <div className="w-3 h-3 rounded-sm bg-red-600/60" title="Heavy" />
         </div>
         <span>More</span>
       </div>

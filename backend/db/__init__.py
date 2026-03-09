@@ -1,5 +1,5 @@
 """
-Database layer for Split.AI
+Database layer for AlgoSplit
 Handles Supabase connection and database operations
 """
 
