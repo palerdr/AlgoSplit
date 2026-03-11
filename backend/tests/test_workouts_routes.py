@@ -60,3 +60,87 @@ def test_get_workout_history_summaries_returns_compact_rows(client, fake_supabas
     assert earlier["exercise_count"] == 2
     assert earlier["total_sets"] == 5
     assert earlier["exercise_names"] == ["Bench Press", "Incline Press"]
+
+
+def test_log_workout_rejects_out_of_range_rir(client, fake_supabase, monkeypatch):
+    monkeypatch.setattr(
+        workouts_routes,
+        "get_supabase_client_with_token",
+        lambda _token: fake_supabase,
+    )
+
+    response = client.post(
+        "/api/workouts",
+        json={
+            "session_name": "Push Day",
+            "exercises": [
+                {
+                    "exercise_name": "Bench Press",
+                    "sets_completed": 1,
+                    "reps": [8],
+                    "weight": [185],
+                    "rir": [99],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "rir" in response.text
+
+
+def test_log_workout_rejects_all_zero_reps(client, fake_supabase, monkeypatch):
+    monkeypatch.setattr(
+        workouts_routes,
+        "get_supabase_client_with_token",
+        lambda _token: fake_supabase,
+    )
+
+    response = client.post(
+        "/api/workouts",
+        json={
+            "session_name": "Push Day",
+            "exercises": [
+                {
+                    "exercise_name": "Bench Press",
+                    "sets_completed": 3,
+                    "reps": [0, 0, 0],
+                    "weight": [185, 185, 185],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Workout must include at least one set with reps greater than 0"
+
+
+def test_log_workout_marks_dropped_session_id_in_response(client, fake_supabase, monkeypatch, caplog):
+    monkeypatch.setattr(
+        workouts_routes,
+        "get_supabase_client_with_token",
+        lambda _token: fake_supabase,
+    )
+
+    with caplog.at_level("WARNING"):
+        response = client.post(
+            "/api/workouts",
+            json={
+                "session_id": "missing-session",
+                "session_name": "Push Day",
+                "exercises": [
+                    {
+                        "exercise_name": "Bench Press",
+                        "sets_completed": 1,
+                        "reps": [8],
+                        "weight": [185],
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["session_id"] is None
+    assert body["session_id_dropped"] is True
+    assert "Dropping stale workout session_id" in caplog.text

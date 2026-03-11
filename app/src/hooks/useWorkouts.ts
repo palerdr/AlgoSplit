@@ -63,6 +63,7 @@ export function useLogWorkout() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: workoutKeys.lists() });
       qc.invalidateQueries({ queryKey: workoutKeys.stats() });
+      qc.invalidateQueries({ queryKey: [...workoutKeys.all, 'recent-stimulus'] });
     },
   });
 }
@@ -74,6 +75,7 @@ export function useDeleteWorkout() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: workoutKeys.lists() });
       qc.invalidateQueries({ queryKey: workoutKeys.stats() });
+      qc.invalidateQueries({ queryKey: [...workoutKeys.all, 'recent-stimulus'] });
     },
   });
 }
@@ -108,10 +110,36 @@ export function usePreviousWorkoutData(sessionName: string | undefined) {
   });
 }
 
-export function useRecentStimulus(days = 7) {
+export function useRecentStimulus(
+  days = 7,
+  endDate?: string,
+  timezoneOffsetMinutes?: number,
+  params?: {
+    stimulusDuration?: number;
+    maintenanceVolume?: number;
+    dataset?: 'schoenfeld' | 'pelland' | 'average';
+  },
+) {
   return useQuery({
-    queryKey: [...workoutKeys.all, 'recent-stimulus', days],
-    queryFn: () => analyzeWorkouts({ days }),
+    queryKey: [
+      ...workoutKeys.all,
+      'recent-stimulus',
+      days,
+      endDate ?? 'today',
+      timezoneOffsetMinutes ?? 'local',
+      params?.stimulusDuration ?? 48,
+      params?.maintenanceVolume ?? 3,
+      params?.dataset ?? 'schoenfeld',
+    ],
+    queryFn: () =>
+      analyzeWorkouts({
+        days,
+        endDate,
+        timezoneOffsetMinutes,
+        stimulusDuration: params?.stimulusDuration,
+        maintenanceVolume: params?.maintenanceVolume,
+        dataset: params?.dataset,
+      }),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });

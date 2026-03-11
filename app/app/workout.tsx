@@ -51,6 +51,8 @@ export default function WorkoutScreen() {
 
   const exercises = activeWorkout?.exercises ?? [];
   const exerciseCount = exercises.length;
+  const sessionName = activeWorkout?.sessionName ?? 'Workout';
+  const startedAt = activeWorkout?.startedAt ?? new Date().toISOString();
   const dragStartX = useRef(0);
   const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.25;
 
@@ -129,6 +131,7 @@ export default function WorkoutScreen() {
     logWorkoutMutation.mutate(
       {
         session_name: data.sessionName,
+        completed_at: data.completedAt,
         exercises: data.exercises,
         duration_minutes: data.durationMinutes,
         session_id: data.sessionId,
@@ -146,19 +149,6 @@ export default function WorkoutScreen() {
     );
   };
 
-  if (!activeWorkout) {
-    return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyTitle}>No Active Workout</Text>
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={styles.goBackText}>Go Back</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
   // Build pages: one per exercise + summary
   const pageCount = exerciseCount + 1;
   const pageIndexes = useMemo(
@@ -171,11 +161,11 @@ export default function WorkoutScreen() {
 
     if (index === exerciseCount) {
       return (
-        <View style={[styles.pageWrapper, pageStyle]}>
-          <View style={styles.card}>
+        <View style={[styles.pageWrapper, styles.summaryPageWrapper, pageStyle]}>
+          <View style={[styles.card, styles.summaryCard]}>
             <WorkoutSummaryMobile
-              sessionName={activeWorkout.sessionName}
-              startedAt={activeWorkout.startedAt}
+              sessionName={sessionName}
+              startedAt={startedAt}
               exercises={exercises}
               onAddExercise={() => setShowPicker(true)}
             />
@@ -198,13 +188,26 @@ export default function WorkoutScreen() {
       </View>
     );
   }, [
-    activeWorkout?.sessionName,
-    activeWorkout?.startedAt,
     exerciseCount,
     exercises,
     pagerHeight,
     previousData,
+    sessionName,
+    startedAt,
   ]);
+
+  if (!activeWorkout) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyTitle}>No Active Workout</Text>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Text style={styles.goBackText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -301,6 +304,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
   },
+  summaryPageWrapper: {
+    alignItems: 'stretch',
+  },
   card: {
     width: '100%',
     maxWidth: 560,
@@ -312,6 +318,11 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     paddingHorizontal: 10,
     paddingVertical: 8,
+  },
+  summaryCard: {
+    flex: 1,
+    maxHeight: '100%',
+    paddingBottom: 0,
   },
   emptyContainer: {
     flex: 1,

@@ -1,9 +1,10 @@
-import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/hooks/useAuth';
 import { Card, Modal, Spinner } from '../../src/components/ui';
+import { useSettingsStore } from '../../src/stores/settingsStore';
 import { colors, borders, spacing, typography } from '../../src/theme';
 
 export default function SettingsScreen() {
@@ -11,6 +12,14 @@ export default function SettingsScreen() {
   const { user, logout, isLoading } = useAuth();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const weightUnit = useSettingsStore((s) => s.weightUnit);
+  const stimulusDuration = useSettingsStore((s) => s.stimulusDuration);
+  const maintenanceVolume = useSettingsStore((s) => s.maintenanceVolume);
+  const dataset = useSettingsStore((s) => s.dataset);
+  const setWeightUnit = useSettingsStore((s) => s.setWeightUnit);
+  const setStimulusDuration = useSettingsStore((s) => s.setStimulusDuration);
+  const setMaintenanceVolume = useSettingsStore((s) => s.setMaintenanceVolume);
+  const setDataset = useSettingsStore((s) => s.setDataset);
 
   const handleLogout = () => {
     setShowLogoutConfirm(true);
@@ -34,53 +43,149 @@ export default function SettingsScreen() {
         <Text style={styles.title}>Settings</Text>
         <Text style={styles.subtitle}>Account, units, and analysis defaults.</Text>
       </View>
-
-      <Card style={styles.card}>
-        <View style={styles.row}>
-          <View style={styles.iconWrap}>
-            <Ionicons name="person-outline" size={18} color={colors.green} />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        <Card style={styles.card}>
+          <View style={styles.row}>
+            <View style={styles.iconWrap}>
+              <Ionicons name="person-outline" size={18} color={colors.green} />
+            </View>
+            <View style={styles.meta}>
+              <Text style={styles.label}>Signed in as</Text>
+              <Text style={styles.value}>{user?.email ?? 'Unknown account'}</Text>
+            </View>
           </View>
-          <View style={styles.meta}>
-            <Text style={styles.label}>Signed in as</Text>
-            <Text style={styles.value}>{user?.email ?? 'Unknown account'}</Text>
-          </View>
-        </View>
-      </Card>
+        </Card>
 
-      <Card style={styles.card}>
-        <View style={styles.row}>
-          <View style={styles.meta}>
-            <Text style={styles.sectionTitle}>Units</Text>
-            <Text style={styles.sectionHint}>Global unit preferences will live here next.</Text>
+        <Card style={styles.card}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Weight Unit</Text>
+            <Text style={styles.sectionHint}>Affects how weights display throughout the app.</Text>
           </View>
-          <Text style={styles.comingSoon}>Soon</Text>
-        </View>
-      </Card>
-
-      <Card style={styles.card}>
-        <View style={styles.row}>
-          <View style={styles.meta}>
-            <Text style={styles.sectionTitle}>Analysis</Text>
-            <Text style={styles.sectionHint}>Default analysis settings will move here.</Text>
+          <View style={styles.segmented}>
+            {(['lb', 'kg'] as const).map((unit) => {
+              const active = unit === weightUnit;
+              return (
+                <TouchableOpacity
+                  key={unit}
+                  style={[styles.segment, active && styles.segmentActive]}
+                  onPress={() => setWeightUnit(unit)}
+                >
+                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                    {unit}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
-          <Text style={styles.comingSoon}>Soon</Text>
-        </View>
-      </Card>
+        </Card>
 
-      <TouchableOpacity
-        style={[styles.logoutButton, (isLoading || isLoggingOut) && styles.logoutButtonDisabled]}
-        onPress={handleLogout}
-        disabled={isLoading || isLoggingOut}
-      >
-        {isLoading || isLoggingOut ? (
-          <Spinner />
-        ) : (
-          <>
-            <Ionicons name="log-out-outline" size={18} color={colors.red} />
-            <Text style={styles.logoutText}>Log Out</Text>
-          </>
-        )}
-      </TouchableOpacity>
+        <Card style={styles.card}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Live Analysis Defaults</Text>
+            <Text style={styles.sectionHint}>These settings drive the dashboard’s live stimulus scoring.</Text>
+          </View>
+
+          <View style={styles.controlBlock}>
+            <View style={styles.controlHeader}>
+              <Text style={styles.controlTitle}>Stimulus Duration</Text>
+              <Text style={styles.controlValue}>{stimulusDuration}h</Text>
+            </View>
+            <View style={styles.stepperRow}>
+              <TouchableOpacity
+                style={styles.stepperButton}
+                onPress={() => setStimulusDuration(stimulusDuration - 12)}
+              >
+                <Text style={styles.stepperButtonText}>-12</Text>
+              </TouchableOpacity>
+              <View style={styles.stepperTrack}>
+                <View style={[styles.stepperFill, { width: `${((stimulusDuration - 24) / 72) * 100}%` }]} />
+              </View>
+              <TouchableOpacity
+                style={styles.stepperButton}
+                onPress={() => setStimulusDuration(stimulusDuration + 12)}
+              >
+                <Text style={styles.stepperButtonText}>+12</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.controlHint}>How long muscle protein synthesis stays elevated after training.</Text>
+          </View>
+
+          <View style={styles.controlBlock}>
+            <View style={styles.controlHeader}>
+              <Text style={styles.controlTitle}>Maintenance Volume</Text>
+              <Text style={styles.controlValue}>{maintenanceVolume} sets</Text>
+            </View>
+            <View style={styles.stepperRow}>
+              <TouchableOpacity
+                style={styles.stepperButton}
+                onPress={() => setMaintenanceVolume(maintenanceVolume - 1)}
+              >
+                <Text style={styles.stepperButtonText}>-</Text>
+              </TouchableOpacity>
+              <View style={styles.maintenanceTrack}>
+                {Array.from({ length: 9 }, (_, index) => {
+                  const active = index < maintenanceVolume;
+                  return (
+                    <View
+                      key={index}
+                      style={[styles.maintenanceBar, active && styles.maintenanceBarActive]}
+                    />
+                  );
+                })}
+              </View>
+              <TouchableOpacity
+                style={styles.stepperButton}
+                onPress={() => setMaintenanceVolume(maintenanceVolume + 1)}
+              >
+                <Text style={styles.stepperButtonText}>+</Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.controlHint}>Sets needed to avoid drifting into atrophy debt.</Text>
+          </View>
+
+          <View style={styles.controlBlock}>
+            <View style={styles.controlHeader}>
+              <Text style={styles.controlTitle}>Fatigue Curve</Text>
+            </View>
+            <View style={styles.segmented}>
+              {([
+                ['schoenfeld', 'Schoenfeld'],
+                ['pelland', 'Pelland'],
+                ['average', 'Average'],
+              ] as const).map(([value, label]) => {
+                const active = dataset === value;
+                return (
+                  <TouchableOpacity
+                    key={value}
+                    style={[styles.segment, active && styles.segmentActive]}
+                    onPress={() => setDataset(value)}
+                  >
+                    <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={styles.controlHint}>Chooses the diminishing-returns model used during analysis.</Text>
+          </View>
+        </Card>
+
+        <TouchableOpacity
+          style={[styles.logoutButton, (isLoading || isLoggingOut) && styles.logoutButtonDisabled]}
+          onPress={handleLogout}
+          disabled={isLoading || isLoggingOut}
+        >
+          {isLoading || isLoggingOut ? (
+            <Spinner />
+          ) : (
+            <>
+              <Ionicons name="log-out-outline" size={18} color={colors.red} />
+              <Text style={styles.logoutText}>Log Out</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </ScrollView>
 
       <Modal
         visible={showLogoutConfirm}
@@ -115,6 +220,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
     paddingHorizontal: 20,
   },
+  scrollContent: {
+    paddingBottom: spacing['2xl'],
+  },
   header: {
     paddingTop: 12,
     paddingBottom: 20,
@@ -136,6 +244,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
+  },
+  sectionHeader: {
+    marginBottom: 14,
   },
   iconWrap: {
     width: 36,
@@ -171,10 +282,102 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
-  comingSoon: {
-    color: colors.textMuted,
-    fontSize: 12,
+  segmented: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  segment: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: borders.radius.xl,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segmentActive: {
+    backgroundColor: colors.greenMuted,
+    borderColor: colors.green,
+  },
+  segmentText: {
+    color: colors.textSecondary,
+    fontSize: 13,
     fontWeight: '700',
+  },
+  segmentTextActive: {
+    color: colors.green,
+  },
+  controlBlock: {
+    marginBottom: 18,
+  },
+  controlHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  controlTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  controlValue: {
+    color: colors.green,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  controlHint: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 8,
+  },
+  stepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  stepperButton: {
+    width: 52,
+    minHeight: 40,
+    borderRadius: borders.radius.lg,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperButtonText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  stepperTrack: {
+    flex: 1,
+    height: 12,
+    borderRadius: 999,
+    overflow: 'hidden',
+    backgroundColor: colors.surfaceElevated,
+  },
+  stepperFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: colors.green,
+  },
+  maintenanceTrack: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 4,
+  },
+  maintenanceBar: {
+    flex: 1,
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: colors.surfaceElevated,
+  },
+  maintenanceBarActive: {
+    backgroundColor: colors.green,
   },
   logoutButton: {
     marginTop: spacing.lg,

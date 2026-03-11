@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { WorkoutExercise } from '../../stores/workoutStore';
 import { colors } from '../../theme';
@@ -20,7 +20,12 @@ export default function WorkoutSummaryMobile({
   const exercisesWithData = exercises.filter((ex) => ex.sets.some((s) => s.reps > 0));
 
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+    >
       <View style={styles.banner}>
         <Text style={styles.bannerTitle}>{sessionName}</Text>
         <View style={styles.bannerRow}>
@@ -62,14 +67,17 @@ export default function WorkoutSummaryMobile({
         <Ionicons name="add" size={16} color={colors.textSecondary} />
         <Text style={styles.addText}>Add Exercise</Text>
       </TouchableOpacity>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  content: {
     padding: 16,
+    paddingBottom: 24,
   },
   banner: {
     backgroundColor: 'rgba(74, 222, 128, 0.08)',

@@ -144,15 +144,17 @@ export function splineSegments(points: ChartPoint[]): SplineSegment[] {
     const p2 = points[i + 1];
     const p3 = points[Math.min(points.length - 1, i + 2)];
 
+    const minY = Math.min(p1.y, p2.y);
+    const maxY = Math.max(p1.y, p2.y);
     segments.push({
       start: p1,
       cp1: {
         x: p1.x + (p2.x - p0.x) * t,
-        y: p1.y + (p2.y - p0.y) * t,
+        y: Math.max(minY, Math.min(maxY, p1.y + (p2.y - p0.y) * t)),
       },
       cp2: {
         x: p2.x - (p3.x - p1.x) * t,
-        y: p2.y - (p3.y - p1.y) * t,
+        y: Math.max(minY, Math.min(maxY, p2.y - (p3.y - p1.y) * t)),
       },
       end: p2,
     });
@@ -191,13 +193,25 @@ export function computeTrend(
   points: SessionDataPoint[],
 ): 'up' | 'down' | 'flat' {
   if (points.length < 2) return 'flat';
+  if (points.length < 4) {
+    const first = points[0].capacityScore;
+    const last = points[points.length - 1].capacityScore;
+    if (first === 0) return 'flat';
+    const pctChange = (last - first) / first;
+    if (pctChange > 0.02) return 'up';
+    if (pctChange < -0.02) return 'down';
+    return 'flat';
+  }
+
   const n = Math.min(3, Math.floor(points.length / 2));
+  const recentWindow = points.slice(-n);
+  const previousWindow = points.slice(-2 * n, -n);
   const recentAvg =
-    points.slice(-n).reduce((s, p) => s + p.capacityScore, 0) / n;
-  const earlyAvg =
-    points.slice(0, n).reduce((s, p) => s + p.capacityScore, 0) / n;
-  if (earlyAvg === 0) return 'flat';
-  const pctChange = (recentAvg - earlyAvg) / earlyAvg;
+    recentWindow.reduce((s, p) => s + p.capacityScore, 0) / recentWindow.length;
+  const previousAvg =
+    previousWindow.reduce((s, p) => s + p.capacityScore, 0) / previousWindow.length;
+  if (previousAvg === 0) return 'flat';
+  const pctChange = (recentAvg - previousAvg) / previousAvg;
   if (pctChange > 0.02) return 'up';
   if (pctChange < -0.02) return 'down';
   return 'flat';

@@ -26,10 +26,10 @@ export default function ProgressSplineChart({ points }: Props) {
   const chartW = containerWidth - PAD.left - PAD.right;
   const chartH = CHART_HEIGHT - PAD.top - PAD.bottom;
 
-  // Y/X data ranges
-  const { yMin, yMax, xMin, xMax } = useMemo(() => {
+  // Y data range
+  const { yMin, yMax } = useMemo(() => {
     if (points.length === 0)
-      return { yMin: 0, yMax: 100, xMin: 0, xMax: 1 };
+      return { yMin: 0, yMax: 100 };
     const weights = points.map((p) => p.weight);
     const wMin = Math.min(...weights);
     const wMax = Math.max(...weights);
@@ -37,21 +37,19 @@ export default function ProgressSplineChart({ points }: Props) {
     return {
       yMin: Math.max(0, wMin - pad),
       yMax: wMax + pad,
-      xMin: points[0].date.getTime(),
-      xMax: points[points.length - 1].date.getTime(),
     };
   }, [points]);
 
   // Data → pixel coordinates
   const chartPoints = useMemo((): ChartPoint[] => {
     if (chartW <= 0 || chartH <= 0) return [];
-    const xRange = xMax - xMin || 1;
     const yRange = yMax - yMin || 1;
-    return points.map((p) => ({
-      x: PAD.left + ((p.date.getTime() - xMin) / xRange) * chartW,
+    const xStep = points.length > 1 ? chartW / (points.length - 1) : 0;
+    return points.map((p, index) => ({
+      x: PAD.left + index * xStep,
       y: PAD.top + (1 - (p.weight - yMin) / yRange) * chartH,
     }));
-  }, [points, chartW, chartH, xMin, xMax, yMin, yMax]);
+  }, [points, chartW, chartH, yMin, yMax]);
 
   const segments = useMemo(() => splineSegments(chartPoints), [chartPoints]);
 
@@ -69,32 +67,28 @@ export default function ProgressSplineChart({ points }: Props) {
     return lines;
   }, [yMin, yMax, chartH]);
 
-  // X-axis date labels (max 5, always include first and last)
+  // X-axis date labels: first and last only
   const xLabels = useMemo(() => {
     if (points.length === 0 || chartPoints.length === 0) return [];
     if (points.length === 1) {
       return [{
         x: chartPoints[0].x,
         label: points[0].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        anchor: 'middle' as const,
       }];
     }
-    const count = Math.min(5, points.length);
-    const step = Math.max(1, Math.floor((points.length - 1) / (count - 1)));
-    const labels: Array<{ x: number; label: string }> = [];
-    for (let i = 0; i < points.length; i += step) {
-      labels.push({
-        x: chartPoints[i].x,
-        label: points[i].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      });
-    }
-    const lastCp = chartPoints[chartPoints.length - 1];
-    if (labels[labels.length - 1].x !== lastCp.x) {
-      labels.push({
-        x: lastCp.x,
+    return [
+      {
+        x: chartPoints[0].x,
+        label: points[0].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+        anchor: 'start' as const,
+      },
+      {
+        x: chartPoints[chartPoints.length - 1].x,
         label: points[points.length - 1].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      });
-    }
-    return labels;
+        anchor: 'end' as const,
+      },
+    ];
   }, [points, chartPoints]);
 
   const handleDotPress = useCallback((index: number) => {
@@ -138,7 +132,7 @@ export default function ProgressSplineChart({ points }: Props) {
               y={CHART_HEIGHT - 4}
               fill={colors.textMuted}
               fontSize={10}
-              textAnchor="middle"
+              textAnchor={label.anchor}
             >
               {label.label}
             </SvgText>

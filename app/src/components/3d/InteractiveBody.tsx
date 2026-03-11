@@ -52,20 +52,29 @@ function InteractiveBody({
   width,
   height,
   stimulusLevels,
+  onRegionPress,
   onDragStart,
   onDragEnd,
 }: InteractiveBodyProps) {
   const [glError, setGlError] = useState(false);
+  const HORIZONTAL_DRAG_THRESHOLD = 5;
+  const TAP_THRESHOLD = 6;
+  const TWO_PI = Math.PI * 2;
 
-  // Rotation state — start at PI so the front faces the camera
-  const rotationRef = useRef(Math.PI);
+  // Rotation state — start at 0 so the transformed STL faces forward
+  const rotationRef = useRef(0);
   const velocityRef = useRef(0);
   const lastTouchXRef = useRef(0);
   const lastTimestampRef = useRef(0);
   const isDraggingRef = useRef(false);
+  const touchStartRef = useRef({ x: 0, y: 0 });
+  const touchMovedRef = useRef(false);
 
   // Three.js refs
   const groupRef = useRef<THREE.Group | null>(null);
+  const meshRef = useRef<THREE.Mesh | null>(null);
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const raycasterRef = useRef(new THREE.Raycaster());
   const bodyDataRef = useRef<ColoredBodyData | null>(null);
   const rafRef = useRef<number | null>(null);
 
@@ -73,28 +82,61 @@ function InteractiveBody({
   const stimulusRef = useRef(stimulusLevels);
   stimulusRef.current = stimulusLevels;
 
+  const normalizeRotation = useCallback((value: number) => {
+    if (!Number.isFinite(value)) return 0;
+    const normalized = value % TWO_PI;
+    return normalized < 0 ? normalized + TWO_PI : normalized;
+  }, [TWO_PI]);
+
+  const pickRegion = useCallback((touchX: number, touchY: number) => {
+    if (
+      !Number.isFinite(touchX) ||
+      !Number.isFinite(touchY) ||
+      !meshRef.current ||
+      !cameraRef.current ||
+      !bodyDataRef.current
+    ) {
+      return;
+    }
+
+    const ndc = new THREE.Vector2((touchX / width) * 2 - 1, -(touchY / height) * 2 + 1);
+    raycasterRef.current.setFromCamera(ndc, cameraRef.current);
+    const intersections = raycasterRef.current.intersectObject(meshRef.current, false);
+    const hit = intersections[0];
+    if (!hit || hit.faceIndex === undefined) return;
+
+    const regionId = bodyDataRef.current.faceRegions[hit.faceIndex];
+    if (regionId) onRegionPress?.(regionId);
+  }, [height, onRegionPress, width]);
+
   // ─── Pan responder for drag rotation ────────────────────────
   const panResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponderCapture: () => true,
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) =>
+        Math.abs(gestureState.dx) > Math.abs(gestureState.dy) &&
+        Math.abs(gestureState.dx) > HORIZONTAL_DRAG_THRESHOLD,
+      onMoveShouldSetPanResponderCapture: (_, gestureState) =>
+        Math.abs(gestureState.dx) > Math.abs(gestureState.dy) &&
+        Math.abs(gestureState.dx) > HORIZONTAL_DRAG_THRESHOLD,
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: (evt) => {
         isDraggingRef.current = true;
+        touchMovedRef.current = true;
         velocityRef.current = 0;
-        lastTouchXRef.current = evt.nativeEvent.pageX;
+        lastTouchXRef.current = evt.nativeEvent.locationX;
         lastTimestampRef.current = Date.now();
         onDragStart?.();
       },
       onPanResponderMove: (evt) => {
         const now = Date.now();
-        const dx = evt.nativeEvent.pageX - lastTouchXRef.current;
+        const dx = evt.nativeEvent.locationX - lastTouchXRef.current;
         const dt = Math.max(1, now - lastTimestampRef.current);
+        if (!Number.isFinite(dx) || !Number.isFinite(dt)) return;
         const delta = dx * 0.006;
-        rotationRef.current += delta;
-        velocityRef.current = (delta / dt) * 16;
-        lastTouchXRef.current = evt.nativeEvent.pageX;
+        rotationRef.current = normalizeRotation(rotationRef.current + delta);
+        velocityRef.current = Number.isFinite(delta / dt) ? (delta / dt) * 16 : 0;
+        lastTouchXRef.current = evt.nativeEvent.locationX;
         lastTimestampRef.current = now;
         if (groupRef.current) {
           groupRef.current.rotation.y = rotationRef.current;
@@ -102,10 +144,12 @@ function InteractiveBody({
       },
       onPanResponderRelease: () => {
         isDraggingRef.current = false;
+        velocityRef.current = Number.isFinite(velocityRef.current) ? Math.max(-0.2, Math.min(0.2, velocityRef.current)) : 0;
         onDragEnd?.();
       },
       onPanResponderTerminate: () => {
         isDraggingRef.current = false;
+        velocityRef.current = 0;
         onDragEnd?.();
       },
     })
@@ -128,6 +172,7 @@ function InteractiveBody({
         );
         camera.position.set(0, 0, 5);
         camera.lookAt(0, 0, 0);
+        cameraRef.current = camera;
 
         // Lighting — flat shading needs higher ambient (no smooth gradient)
         scene.add(new THREE.AmbientLight(0xffffff, 0.7));
@@ -168,6 +213,9 @@ function InteractiveBody({
           posAttr.setXYZ(i, ox * scale, oz * scale, -oy * scale);
         }
         posAttr.needsUpdate = true;
+        geometry.computeVertexNormals();
+        geometry.computeBoundingBox();
+        geometry.computeBoundingSphere();
 
         // Apply per-face region coloring (centroid-based)
         const bodyData = applyBodyColors(geometry, stimulusRef.current);
@@ -176,11 +224,14 @@ function InteractiveBody({
         const material = new THREE.MeshPhongMaterial({
           vertexColors: true,
           flatShading: true,
-          shininess: 15,
-          specular: new THREE.Color(0x333333),
+          shininess: 4,
+          specular: new THREE.Color(0x111111),
+          side: THREE.DoubleSide,
         });
 
         const mesh = new THREE.Mesh(geometry, material);
+        mesh.frustumCulled = false;
+        meshRef.current = mesh;
         const group = new THREE.Group();
         group.add(mesh);
         group.rotation.y = rotationRef.current;
@@ -194,7 +245,9 @@ function InteractiveBody({
           // Apply inertia when not dragging
           if (!isDraggingRef.current && Math.abs(velocityRef.current) > 0.0001) {
             velocityRef.current *= 0.95;
-            rotationRef.current += velocityRef.current;
+            rotationRef.current = normalizeRotation(rotationRef.current + velocityRef.current);
+          } else if (!Number.isFinite(velocityRef.current)) {
+            velocityRef.current = 0;
           }
 
           // Always sync rotation from ref (covers both drag + inertia)
@@ -225,6 +278,8 @@ function InteractiveBody({
   useEffect(() => {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      meshRef.current = null;
+      cameraRef.current = null;
     };
   }, []);
 
@@ -238,8 +293,36 @@ function InteractiveBody({
   }
 
   return (
-    <View style={[styles.container, { width, height }]} {...panResponder.panHandlers}>
-      <GLView style={{ width, height }} onContextCreate={onContextCreate} />
+      <View
+        style={[styles.container, { width, height }]}
+    >
+      <GLView
+        style={{ width, height }}
+        onContextCreate={onContextCreate}
+        pointerEvents="none"
+      />
+      <View
+        style={styles.touchOverlay}
+        onTouchStart={(evt) => {
+          touchMovedRef.current = false;
+          touchStartRef.current = {
+            x: evt.nativeEvent.locationX,
+            y: evt.nativeEvent.locationY,
+          };
+        }}
+        onTouchMove={(evt) => {
+          const dx = evt.nativeEvent.locationX - touchStartRef.current.x;
+          const dy = evt.nativeEvent.locationY - touchStartRef.current.y;
+          if (Math.abs(dx) > TAP_THRESHOLD || Math.abs(dy) > TAP_THRESHOLD) {
+            touchMovedRef.current = true;
+          }
+        }}
+        onTouchEnd={(evt) => {
+          if (isDraggingRef.current || touchMovedRef.current) return;
+          pickRegion(evt.nativeEvent.locationX, evt.nativeEvent.locationY);
+        }}
+        {...panResponder.panHandlers}
+      />
     </View>
   );
 }
@@ -250,6 +333,11 @@ const styles = StyleSheet.create({
   container: {
     overflow: 'hidden',
     borderRadius: 12,
+  },
+  touchOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
+    elevation: 2,
   },
   fallback: {
     backgroundColor: '#141414',

@@ -3,6 +3,7 @@ Workout logging routes
 Handles logging completed workouts and viewing history
 """
 
+import logging
 from typing import Optional
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Depends, status, Query
@@ -20,6 +21,7 @@ from schemas.auth import ErrorResponse
 from api.dependencies import get_current_user, AuthUser
 
 router = APIRouter(prefix="/api/workouts", tags=["Workouts"])
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -62,9 +64,43 @@ def build_workout_response(workout_data: dict, exercises_data: list) -> WorkoutL
         completed_at=workout_data["completed_at"],
         duration_minutes=workout_data.get("duration_minutes"),
         notes=workout_data.get("notes"),
+        session_id_dropped=workout_data.get("session_id_dropped", False),
         exercises=exercises,
         created_at=workout_data["created_at"],
     )
+
+
+def validate_workout_exercises(workout: WorkoutLogCreate) -> None:
+    """Validate set-array consistency and reject workouts with no completed work."""
+    has_completed_work = False
+
+    for exercise in workout.exercises:
+        if len(exercise.reps) != exercise.sets_completed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Exercise '{exercise.exercise_name}': reps array length "
+                       f"({len(exercise.reps)}) must match sets_completed ({exercise.sets_completed})",
+            )
+        if len(exercise.weight) != exercise.sets_completed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Exercise '{exercise.exercise_name}': weight array length "
+                       f"({len(exercise.weight)}) must match sets_completed ({exercise.sets_completed})",
+            )
+        if exercise.rir is not None and len(exercise.rir) != exercise.sets_completed:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Exercise '{exercise.exercise_name}': rir array length "
+                       f"({len(exercise.rir)}) must match sets_completed ({exercise.sets_completed})",
+            )
+        if any(reps > 0 for reps in exercise.reps):
+            has_completed_work = True
+
+    if not has_completed_work:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Workout must include at least one set with reps greater than 0",
+        )
 
 
 def build_workout_summary_response(
@@ -119,26 +155,7 @@ async def log_workout(
     try:
         supabase = get_supabase_client_with_token(current_user.access_token)
 
-        # Validate exercise data consistency
-        for exercise in workout.exercises:
-            if len(exercise.reps) != exercise.sets_completed:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Exercise '{exercise.exercise_name}': reps array length "
-                           f"({len(exercise.reps)}) must match sets_completed ({exercise.sets_completed})",
-                )
-            if len(exercise.weight) != exercise.sets_completed:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Exercise '{exercise.exercise_name}': weight array length "
-                           f"({len(exercise.weight)}) must match sets_completed ({exercise.sets_completed})",
-                )
-            if exercise.rir is not None and len(exercise.rir) != exercise.sets_completed:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Exercise '{exercise.exercise_name}': rir array length "
-                           f"({len(exercise.rir)}) must match sets_completed ({exercise.sets_completed})",
-                )
+        validate_workout_exercises(workout)
 
         # Use provided completed_at or default to now
         completed_at = workout.completed_at or datetime.utcnow()
@@ -153,12 +170,19 @@ async def log_workout(
         # Validate session_id FK before inserting — the session may have been
         # deleted/recreated if the user replaced exercises mid-workout
         session_id = workout.session_id
+        session_id_dropped = False
         if session_id:
             session_check = supabase.table("sessions").select("id").eq(
                 "id", session_id
             ).execute()
             if session_check.data:
                 workout_data["session_id"] = session_id
+            else:
+                session_id_dropped = True
+                logger.warning(
+                    "Dropping stale workout session_id",
+                    extra={"user_id": current_user.id, "session_id": session_id},
+                )
 
         if workout.split_id:
             workout_data["split_id"] = workout.split_id
@@ -213,7 +237,11 @@ async def log_workout(
                 pass  # Non-critical — workout is already saved
 
         # Build and return response
-        return build_workout_response(workout_result.data[0], exercises_data)
+        response_payload = {
+            **workout_result.data[0],
+            "session_id_dropped": session_id_dropped,
+        }
+        return build_workout_response(response_payload, exercises_data)
 
     except HTTPException:
         raise
@@ -462,23 +490,7 @@ async def update_workout(
                 detail="Workout not found",
             )
 
-        # Validate exercise data
-        for exercise in workout.exercises:
-            if len(exercise.reps) != exercise.sets_completed:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Exercise '{exercise.exercise_name}': reps length mismatch",
-                )
-            if len(exercise.weight) != exercise.sets_completed:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Exercise '{exercise.exercise_name}': weight length mismatch",
-                )
-            if exercise.rir is not None and len(exercise.rir) != exercise.sets_completed:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Exercise '{exercise.exercise_name}': rir length mismatch",
-                )
+        validate_workout_exercises(workout)
 
         # Update workout log metadata
         update_data = {"session_name": workout.session_name}

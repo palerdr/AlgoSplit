@@ -107,9 +107,10 @@ export function useUpdateSplitExercises() {
   return useMutation({
     mutationFn: ({ id, updates }: { id: string; updates: SplitExerciseBatchUpdateItem[] }) =>
       updateSplitExercises(id, updates),
-    onSuccess: (_result, variables) => {
+    onSuccess: async (_result, variables) => {
       queryClient.invalidateQueries({ queryKey: splitKeys.detail(variables.id) });
       queryClient.invalidateQueries({ queryKey: splitKeys.analysis(variables.id) });
+      await queryClient.refetchQueries({ queryKey: splitKeys.detail(variables.id), exact: true });
     },
   });
 }

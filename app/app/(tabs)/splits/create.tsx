@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Button, Input } from '../../../src/components/ui';
 import SessionEditorMobile from '../../../src/components/splits/SessionEditorMobile';
 import { useCreateSplit } from '../../../src/hooks/useSplits';
+import { useSettingsStore } from '../../../src/stores/settingsStore';
 import { getErrorMessage } from '../../../src/api/client';
 import { generateExerciseId } from '../../../src/utils/splitEditHelpers';
 import { colors, typography, spacing, borders } from '../../../src/theme';
@@ -25,13 +26,16 @@ export default function CreateSplitScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const createMutation = useCreateSplit();
+  const defaultDataset = useSettingsStore((s) => s.dataset);
+  const defaultStimulusDuration = useSettingsStore((s) => s.stimulusDuration);
+  const defaultMaintenanceVolume = useSettingsStore((s) => s.maintenanceVolume);
 
   const [splitName, setSplitName] = useState('');
   const [sessions, setSessions] = useState<SessionInput[]>([makeDefaultSession()]);
-  const [dataset, setDataset] = useState<'schoenfeld' | 'pelland' | 'average'>('average');
+  const [dataset, setDataset] = useState<'schoenfeld' | 'pelland' | 'average'>(defaultDataset);
   const [cycleLength, setCycleLength] = useState('');
-  const [stimulusDuration, setStimulusDuration] = useState('48');
-  const [maintenanceVolume, setMaintenanceVolume] = useState('4');
+  const [stimulusDuration, setStimulusDuration] = useState(String(defaultStimulusDuration));
+  const [maintenanceVolume, setMaintenanceVolume] = useState(String(defaultMaintenanceVolume));
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState('');
   const [isDraggingExercises, setIsDraggingExercises] = useState(false);

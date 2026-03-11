@@ -8,11 +8,12 @@ import {
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native';
-import { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
 import * as Haptics from 'expo-haptics';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const DAY_WIDTH = 48;
+const DAY_WIDTH = 44;
+const DAY_HEIGHT = 76;
 const SIDE_PADDING = (SCREEN_WIDTH - DAY_WIDTH) / 2;
 const DAY_NAMES = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
@@ -42,25 +43,71 @@ interface DateSelectorProps {
 }
 
 export default function DateSelector({ onDateChange, workoutDates, resetToken = 0 }: DateSelectorProps) {
-  const days = getDaysArray(new Date(), 30);
-  const todayIndex = days.findIndex(d => isToday(d));
+  const days = useMemo(() => getDaysArray(new Date(), 30), []);
+  const todayIndex = useMemo(() => days.findIndex(d => isToday(d)), [days]);
   const scrollRef = useRef<any>(null);
+  const hasPositionedInitially = useRef(false);
+  const snapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const snapReleaseRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestOffsetRef = useRef(todayIndex * DAY_WIDTH);
+  const isAutoSnappingRef = useRef(false);
   const scrollX = useRef(new Animated.Value(todayIndex * DAY_WIDTH)).current;
   const lastHapticIndex = useRef(todayIndex);
   const [_selectedIndex, setSelectedIndex] = useState(todayIndex);
 
-  useEffect(() => {
-    setTimeout(() => {
-      scrollRef.current?.scrollTo({ x: todayIndex * DAY_WIDTH, animated: false });
-    }, 50);
+  const snapToIndex = useCallback((index: number, animated = true) => {
+    isAutoSnappingRef.current = true;
+    scrollRef.current?.scrollTo({
+      x: index * DAY_WIDTH,
+      animated,
+    });
+    if (snapReleaseRef.current) {
+      clearTimeout(snapReleaseRef.current);
+    }
+    snapReleaseRef.current = setTimeout(() => {
+      isAutoSnappingRef.current = false;
+      snapReleaseRef.current = null;
+    }, animated ? 220 : 0);
   }, []);
+
+  const settleToOffset = useCallback((offsetX: number, animated = true) => {
+    const index = Math.round(offsetX / DAY_WIDTH);
+    const clamped = Math.max(0, Math.min(days.length - 1, index));
+    snapToIndex(clamped, animated);
+    setSelectedIndex(clamped);
+    onDateChange?.(days[clamped]);
+  }, [days, onDateChange, snapToIndex]);
+
+  const scheduleSettle = useCallback((offsetX: number, delayMs: number) => {
+    if (snapTimeoutRef.current) {
+      clearTimeout(snapTimeoutRef.current);
+    }
+    snapTimeoutRef.current = setTimeout(() => {
+      settleToOffset(offsetX);
+      snapTimeoutRef.current = null;
+    }, delayMs);
+  }, [settleToOffset]);
 
   useEffect(() => {
     setSelectedIndex(todayIndex);
     lastHapticIndex.current = todayIndex;
-    scrollRef.current?.scrollTo({ x: todayIndex * DAY_WIDTH, animated: true });
+    requestAnimationFrame(() => {
+      snapToIndex(todayIndex, hasPositionedInitially.current);
+      hasPositionedInitially.current = true;
+    });
     onDateChange?.(days[todayIndex]);
-  }, [days, onDateChange, resetToken, todayIndex]);
+  }, [days, onDateChange, resetToken, snapToIndex, todayIndex]);
+
+  useEffect(() => {
+    return () => {
+      if (snapTimeoutRef.current) {
+        clearTimeout(snapTimeoutRef.current);
+      }
+      if (snapReleaseRef.current) {
+        clearTimeout(snapReleaseRef.current);
+      }
+    };
+  }, []);
 
   const handleScroll = Animated.event(
     [{ nativeEvent: { contentOffset: { x: scrollX } } }],
@@ -68,22 +115,29 @@ export default function DateSelector({ onDateChange, workoutDates, resetToken = 
       useNativeDriver: Platform.OS !== 'web',
       listener: (event: NativeSyntheticEvent<NativeScrollEvent>) => {
         const offsetX = event.nativeEvent.contentOffset.x;
+        latestOffsetRef.current = offsetX;
         const index = Math.round(offsetX / DAY_WIDTH);
         const clamped = Math.max(0, Math.min(days.length - 1, index));
         if (clamped !== lastHapticIndex.current) {
           lastHapticIndex.current = clamped;
           Haptics.selectionAsync();
         }
+        if (!isAutoSnappingRef.current) {
+          scheduleSettle(offsetX, 90);
+        }
       },
     }
   );
 
   const handleScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const index = Math.round(e.nativeEvent.contentOffset.x / DAY_WIDTH);
-    const clamped = Math.max(0, Math.min(days.length - 1, index));
-    setSelectedIndex(clamped);
-    onDateChange?.(days[clamped]);
-  }, [days, onDateChange]);
+    latestOffsetRef.current = e.nativeEvent.contentOffset.x;
+    settleToOffset(latestOffsetRef.current);
+  }, [settleToOffset]);
+
+  const handleScrollEndDrag = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    latestOffsetRef.current = e.nativeEvent.contentOffset.x;
+    scheduleSettle(latestOffsetRef.current, 60);
+  }, [scheduleSettle]);
 
   return (
     <View style={styles.container}>
@@ -92,11 +146,11 @@ export default function DateSelector({ onDateChange, workoutDates, resetToken = 
         ref={scrollRef}
         horizontal
         showsHorizontalScrollIndicator={false}
-        snapToInterval={DAY_WIDTH}
+        bounces={false}
         decelerationRate="fast"
         onScroll={handleScroll}
         onMomentumScrollEnd={handleScrollEnd}
-        onScrollEndDrag={handleScrollEnd}
+        onScrollEndDrag={handleScrollEndDrag}
         scrollEventThrottle={16}
         contentContainerStyle={styles.scrollContent}
       >
@@ -106,7 +160,7 @@ export default function DateSelector({ onDateChange, workoutDates, resetToken = 
 
           const itemScale = scrollX.interpolate({
             inputRange: [(i - 1.5) * DAY_WIDTH, i * DAY_WIDTH, (i + 1.5) * DAY_WIDTH],
-            outputRange: [0.8, 1.15, 0.8],
+            outputRange: [0.88, 1.04, 0.88],
             extrapolate: 'clamp',
           });
 
@@ -130,11 +184,17 @@ export default function DateSelector({ onDateChange, workoutDates, resetToken = 
               <Text style={[styles.dayName, today && styles.todayAccent]}>
                 {DAY_NAMES[day.getDay()]}
               </Text>
-              {today && <View style={styles.todayMarker} />}
               <Text style={[styles.dayNumber, today && styles.todayAccent]}>
                 {day.getDate()}
               </Text>
-              {hasWorkout && <View style={styles.dot} />}
+              <View
+                style={[
+                  styles.dot,
+                  hasWorkout && styles.workoutDot,
+                  today && styles.todayDot,
+                  today && hasWorkout && styles.todayDotFilled,
+                ]}
+              />
             </Animated.View>
           );
         })}
@@ -145,17 +205,17 @@ export default function DateSelector({ onDateChange, workoutDates, resetToken = 
 
 const styles = StyleSheet.create({
   container: {
-    height: 64,
+    height: DAY_HEIGHT,
     width: SCREEN_WIDTH,
     justifyContent: 'center',
   },
   centerHighlight: {
     position: 'absolute',
     width: DAY_WIDTH - 2,
-    height: 58,
+    height: DAY_HEIGHT - 8,
     left: (SCREEN_WIDTH - DAY_WIDTH + 2) / 2,
-    top: 6,
-    borderRadius: 14,
+    top: 4,
+    borderRadius: 18,
     backgroundColor: 'rgba(232, 232, 232, 0.07)',
     borderWidth: 0.5,
     borderColor: 'rgba(232, 232, 232, 0.1)',
@@ -166,7 +226,7 @@ const styles = StyleSheet.create({
   },
   dayItem: {
     width: DAY_WIDTH,
-    height: 52,
+    height: DAY_HEIGHT - 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -174,31 +234,39 @@ const styles = StyleSheet.create({
     color: '#555',
     fontSize: 9,
     fontWeight: '600',
-    marginBottom: 3,
+    marginBottom: 4,
     letterSpacing: 0.3,
   },
   dayNumber: {
     color: '#E8E8E8',
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '800',
     fontVariant: ['tabular-nums'],
+    marginBottom: 10,
   },
   todayAccent: {
     color: '#fff',
   },
-  todayMarker: {
-    width: 12,
-    height: 3,
-    borderRadius: 999,
-    backgroundColor: '#22C55E',
-    marginBottom: 4,
-  },
   dot: {
     width: 4,
     height: 4,
-    borderRadius: 2,
-    backgroundColor: '#E8E8E8',
+    borderRadius: 999,
+    backgroundColor: 'transparent',
     position: 'absolute',
-    bottom: 3,
+    bottom: 10,
+  },
+  todayDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#22C55E',
+    backgroundColor: '#0D0D0D',
+  },
+  todayDotFilled: {
+    backgroundColor: '#22C55E',
+  },
+  workoutDot: {
+    backgroundColor: '#22C55E',
   },
 });

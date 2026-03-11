@@ -130,6 +130,10 @@ class FakeTableQuery:
         self._filters.append(("gte", column, value))
         return self
 
+    def lte(self, column: str, value: Any) -> "FakeTableQuery":
+        self._filters.append(("lte", column, value))
+        return self
+
     def order(self, column: str, desc: bool = False) -> "FakeTableQuery":
         self._order_by = (column, desc)
         return self
@@ -161,6 +165,8 @@ class FakeTableQuery:
             if op == "in" and row_value not in value:
                 return False
             if op == "gte" and row_value < value:
+                return False
+            if op == "lte" and row_value > value:
                 return False
         return True
 

@@ -463,7 +463,7 @@ export default function SplitDetailScreen() {
         </View>
       ) : (
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} hitSlop={8}>
+          <TouchableOpacity onPress={() => router.replace('/(tabs)/splits')} hitSlop={8}>
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle} numberOfLines={1}>

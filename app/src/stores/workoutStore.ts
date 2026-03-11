@@ -21,6 +21,7 @@ export interface WorkoutExercise {
 interface ActiveWorkout {
   sessionName: string;
   startedAt: string;
+  workoutDate?: string;
   exercises: WorkoutExercise[];
   sessionId?: string;
   splitId?: string;
@@ -40,10 +41,32 @@ function generateId(): string {
   return Math.random().toString(36).substring(2, 9);
 }
 
+function buildSideNote(side: 'L' | 'R', notes: string): string {
+  const trimmed = notes.trim();
+  return trimmed ? `${side} | ${trimmed}` : side;
+}
+
+function toWorkoutCompletionIso(workoutDate?: string): string | undefined {
+  if (!workoutDate) return undefined;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(workoutDate);
+  if (!match) return undefined;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const date = new Date(year, month, day);
+
+  const now = new Date();
+  date.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+  return date.toISOString();
+}
+
 interface WorkoutState {
   activeWorkout: ActiveWorkout | null;
+  selectedWorkoutDate: string | null;
   restTimer: RestTimerState;
 
+  setSelectedWorkoutDate: (date: string | null) => void;
   startWorkout: (sessionName: string) => void;
   startWorkoutFromSession: (
     sessionName: string,
@@ -70,8 +93,9 @@ interface WorkoutState {
 
   getWorkoutData: () => {
     sessionName: string;
+    completedAt?: string;
     exercises: WorkoutExerciseCreate[];
-    durationMinutes: number;
+    durationMinutes?: number;
     sessionId?: string;
     splitId?: string;
   } | null;
@@ -81,19 +105,27 @@ export const useWorkoutStore = create<WorkoutState>()(
   persist(
     (set, get) => ({
       activeWorkout: null,
+      selectedWorkoutDate: null,
       restTimer: { isRunning: false, duration: DEFAULT_REST_DURATION, remaining: 0, exerciseId: null },
 
+      setSelectedWorkoutDate: (date) => {
+        set({ selectedWorkoutDate: date });
+      },
+
       startWorkout: (sessionName) => {
+        const { selectedWorkoutDate } = get();
         set({
           activeWorkout: {
             sessionName,
             startedAt: new Date().toISOString(),
+            workoutDate: selectedWorkoutDate ?? undefined,
             exercises: [],
           },
         });
       },
 
       startWorkoutFromSession: (sessionName, exercises, previousData, sessionId, splitId) => {
+        const { selectedWorkoutDate } = get();
         const workoutExercises: WorkoutExercise[] = exercises.map((ex) => {
           let sets: SetData[];
           if (ex.unilateral) {
@@ -108,7 +140,15 @@ export const useWorkoutStore = create<WorkoutState>()(
           return { id: generateId(), name: ex.name, sets, notes: '', unilateral: ex.unilateral || undefined };
         });
         set({
-          activeWorkout: { sessionName, startedAt: new Date().toISOString(), exercises: workoutExercises, sessionId, splitId, previousData },
+          activeWorkout: {
+            sessionName,
+            startedAt: new Date().toISOString(),
+            workoutDate: selectedWorkoutDate ?? undefined,
+            exercises: workoutExercises,
+            sessionId,
+            splitId,
+            previousData,
+          },
         });
       },
 
@@ -288,49 +328,56 @@ export const useWorkoutStore = create<WorkoutState>()(
         const { activeWorkout } = get();
         if (!activeWorkout) return null;
         const startTime = new Date(activeWorkout.startedAt).getTime();
-        const durationMinutes = Math.round((Date.now() - startTime) / 60000);
+        const rawDurationMinutes = Math.round((Date.now() - startTime) / 60000);
+        const durationMinutes = rawDurationMinutes > 0 ? rawDurationMinutes : undefined;
 
         const exercises: WorkoutExerciseCreate[] = activeWorkout.exercises
           .filter((ex) => ex.sets.some((s) => s.reps > 0))
-          .map((exercise) => {
+          .flatMap((exercise) => {
             if (exercise.unilateral) {
-              const merged: { reps: number; weight: number; rir?: number }[] = [];
+              const leftSets: SetData[] = [];
+              const rightSets: SetData[] = [];
+
               for (let i = 0; i < exercise.sets.length; i += 2) {
                 const left = exercise.sets[i];
                 const right = exercise.sets[i + 1];
-                if (!(left?.reps > 0) && !(right?.reps > 0)) continue;
-                merged.push({
-                  reps: Math.max(left?.reps ?? 0, right?.reps ?? 0),
-                  weight: Math.max(left?.weight ?? 0, right?.weight ?? 0),
-                  rir: left?.rir ?? right?.rir,
-                });
+                if (left?.reps > 0) leftSets.push(left);
+                if (right?.reps > 0) rightSets.push(right);
               }
-              // Positional RIR: same length as reps/weight, default 0 for missing
-              const hasAnyRir = merged.some((s) => s.rir !== undefined);
-              return {
-                exercise_name: exercise.name,
-                sets_completed: merged.length,
-                reps: merged.map((s) => s.reps),
-                weight: merged.map((s) => s.weight),
-                rir: hasAnyRir ? merged.map((s) => s.rir ?? 0) : undefined,
-                notes: exercise.notes || undefined,
-              };
+
+              return ([
+                { side: 'L' as const, sets: leftSets },
+                { side: 'R' as const, sets: rightSets },
+              ])
+                .filter((entry) => entry.sets.length > 0)
+                .map((entry) => {
+                  const hasAnyRir = entry.sets.some((s) => s.rir !== undefined);
+                  return {
+                    exercise_name: exercise.name,
+                    sets_completed: entry.sets.length,
+                    reps: entry.sets.map((s) => s.reps),
+                    weight: entry.sets.map((s) => s.weight),
+                    rir: hasAnyRir ? entry.sets.map((s) => s.rir ?? 0) : undefined,
+                    notes: buildSideNote(entry.side, exercise.notes),
+                  };
+                });
             }
             const validSets = exercise.sets.filter((s) => s.reps > 0);
             // Positional RIR: same length as reps/weight, default 0 for missing
             const hasAnyRir = validSets.some((s) => s.rir !== undefined);
-            return {
+            return [{
               exercise_name: exercise.name,
               sets_completed: validSets.length,
               reps: validSets.map((s) => s.reps),
               weight: validSets.map((s) => s.weight),
               rir: hasAnyRir ? validSets.map((s) => s.rir ?? 0) : undefined,
               notes: exercise.notes || undefined,
-            };
+            }];
           });
 
         return {
           sessionName: activeWorkout.sessionName,
+          completedAt: toWorkoutCompletionIso(activeWorkout.workoutDate),
           exercises,
           durationMinutes,
           sessionId: activeWorkout.sessionId,
@@ -341,7 +388,10 @@ export const useWorkoutStore = create<WorkoutState>()(
     {
       name: 'workout-storage',
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: (state) => ({ activeWorkout: state.activeWorkout }),
+      partialize: (state) => ({
+        activeWorkout: state.activeWorkout,
+        selectedWorkoutDate: state.selectedWorkoutDate,
+      }),
     },
   ),
 );

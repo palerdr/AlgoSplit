@@ -4,7 +4,7 @@ Pydantic schemas for workout logging
 
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ============================================================================
@@ -34,6 +34,15 @@ class WorkoutExerciseCreate(BaseModel):
             ]
         }
     }
+
+    @field_validator("rir")
+    @classmethod
+    def validate_rir_range(cls, rir: Optional[List[int]]) -> Optional[List[int]]:
+        if rir is None:
+            return None
+        if any(value < 0 or value > 5 for value in rir):
+            raise ValueError("rir values must be between 0 and 5")
+        return rir
 
 
 class WorkoutExerciseResponse(BaseModel):
@@ -137,6 +146,9 @@ class WorkoutLogResponse(BaseModel):
     completed_at: datetime = Field(..., description="When workout was completed")
     duration_minutes: Optional[int] = Field(None, description="Duration in minutes")
     notes: Optional[str] = Field(None, description="Workout notes")
+    session_id_dropped: bool = Field(
+        False, description="Whether the requested session_id could not be linked"
+    )
     exercises: List[WorkoutExerciseResponse] = Field(
         default=[], description="Exercises performed"
     )

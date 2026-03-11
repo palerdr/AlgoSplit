@@ -110,11 +110,27 @@ export async function getWorkoutStats(days?: number): Promise<WorkoutStatsRespon
 
 export async function analyzeWorkouts(params?: {
   days?: number;
+  endDate?: string;
+  timezoneOffsetMinutes?: number;
+  stimulusDuration?: number;
+  maintenanceVolume?: number;
+  dataset?: 'schoenfeld' | 'pelland' | 'average';
 }): Promise<AnalysisResponse> {
   const response = await apiClient.post<AnalysisResponse>(
     '/api/analyze-workouts',
     null,
-    { params: { days: params?.days ?? 7 } },
+    {
+      params: {
+        days: params?.days ?? 7,
+        stimulus_duration: params?.stimulusDuration ?? 48,
+        maintenance_volume: params?.maintenanceVolume ?? 3,
+        dataset: params?.dataset ?? 'schoenfeld',
+        ...(params?.endDate ? { end_date: params.endDate } : {}),
+        ...(params?.timezoneOffsetMinutes != null
+          ? { timezone_offset_minutes: params.timezoneOffsetMinutes }
+          : {}),
+      },
+    },
   );
   return response.data;
 }

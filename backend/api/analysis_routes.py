@@ -8,7 +8,7 @@ the 29-region granular muscle model.
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Optional
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 import sys
 from pathlib import Path
 
@@ -84,6 +84,8 @@ async def analyze_split(request: SplitRequest):
 @router.post("/analyze-workouts", response_model=AnalysisResponse)
 async def analyze_workouts(
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
+    end_date: Optional[date] = Query(None, description="Inclusive end date for the workout window"),
+    timezone_offset_minutes: int = Query(0, ge=-840, le=840, description="Client local offset from UTC in minutes"),
     stimulus_duration: int = Query(48, ge=24, le=96, description="Stimulus duration in hours"),
     maintenance_volume: int = Query(3, ge=1, le=9, description="Maintenance volume sets"),
     dataset: str = Query("schoenfeld", description="Fatigue curve dataset"),
@@ -97,14 +99,21 @@ async def analyze_workouts(
     """
     try:
         supabase = get_supabase_client_with_token(current_user.access_token)
+        effective_end_date = end_date or datetime.utcnow().date()
+        window_start_date = effective_end_date - timedelta(days=days - 1)
+        local_window_start = datetime.combine(window_start_date, time.min)
+        local_window_end = datetime.combine(effective_end_date, time.max)
+        offset_delta = timedelta(minutes=timezone_offset_minutes)
+        window_start = local_window_start + offset_delta
+        window_end = local_window_end + offset_delta
 
         # Fetch workout logs within the time window
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
         workouts_result = (
             supabase.table("workout_logs")
             .select("*")
             .eq("user_id", current_user.id)
-            .gte("completed_at", cutoff_date.isoformat())
+            .gte("completed_at", window_start.isoformat())
+            .lte("completed_at", window_end.isoformat())
             .order("completed_at")
             .execute()
         )
@@ -129,6 +138,7 @@ async def analyze_workouts(
             stimulus_duration=stimulus_duration,
             maintenance_volume=maintenance_volume,
             dataset=dataset,
+            now=window_end,
         )
 
     except HTTPException:

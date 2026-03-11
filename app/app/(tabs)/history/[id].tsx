@@ -1,11 +1,13 @@
-import { View, Text, ScrollView, TouchableOpacity, Platform, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, Alert, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useWorkout, useDeleteWorkout } from '../../../src/hooks/useWorkouts';
-import { Spinner } from '../../../src/components/ui';
-import { confirm } from '../../../src/utils/confirm';
+import { useSettingsStore } from '../../../src/stores/settingsStore';
+import { Modal, Spinner } from '../../../src/components/ui';
 import { colors, borders, spacing } from '../../../src/theme';
+import { displayWeight } from '../../../src/utils/unitConversion';
+import { useState } from 'react';
 
 export default function WorkoutDetailScreen() {
   const raw = useLocalSearchParams<{ id: string }>().id;
@@ -14,17 +16,23 @@ export default function WorkoutDetailScreen() {
   const insets = useSafeAreaInsets();
   const { data: workout, isLoading } = useWorkout(id);
   const deleteMutation = useDeleteWorkout();
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const weightUnit = useSettingsStore((s) => s.weightUnit);
 
   const handleDelete = () => {
     if (!id) return;
-    confirm('Delete Workout', 'This cannot be undone.', 'Delete', async () => {
-      try {
-        await deleteMutation.mutateAsync(id);
-        router.back();
-      } catch {
-        if (Platform.OS === 'web') window.alert('Failed to delete workout.');
-      }
-    });
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!id) return;
+    try {
+      await deleteMutation.mutateAsync(id);
+      setShowDeleteConfirm(false);
+      router.back();
+    } catch {
+      Alert.alert('Error', 'Failed to delete workout.');
+    }
   };
 
   if (isLoading) return <Spinner fullScreen />;
@@ -93,7 +101,7 @@ export default function WorkoutDetailScreen() {
             {ex.reps.map((reps, i) => (
               <View key={i} style={styles.setRow}>
                 <Text style={[styles.setNum, { width: 32 }]}>{i + 1}</Text>
-                <Text style={[styles.setValue, { flex: 1 }]}>{ex.weight[i]} lbs</Text>
+                <Text style={[styles.setValue, { flex: 1 }]}>{displayWeight(ex.weight[i], weightUnit)}</Text>
                 <Text style={[styles.setValue, { flex: 1 }]}>{reps}</Text>
                 {ex.rir && (
                   <Text style={[styles.setValue, { flex: 0.7 }]}>
@@ -107,6 +115,32 @@ export default function WorkoutDetailScreen() {
           </View>
         ))}
       </ScrollView>
+
+      <Modal visible={showDeleteConfirm} onClose={() => setShowDeleteConfirm(false)} title="Delete Workout">
+        <View style={styles.deleteModalBody}>
+          <Text style={styles.deleteModalText}>This cannot be undone.</Text>
+          <View style={styles.deleteModalActions}>
+            <TouchableOpacity
+              style={styles.deleteCancelBtn}
+              onPress={() => setShowDeleteConfirm(false)}
+              disabled={deleteMutation.isPending}
+            >
+              <Text style={styles.deleteCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.deleteConfirmBtn}
+              onPress={confirmDelete}
+              disabled={deleteMutation.isPending}
+            >
+              {deleteMutation.isPending ? (
+                <Spinner />
+              ) : (
+                <Text style={styles.deleteConfirmText}>Delete</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -221,5 +255,47 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     marginTop: 40,
+  },
+  deleteModalBody: {
+    paddingBottom: spacing.md,
+  },
+  deleteModalText: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: spacing.xl,
+  },
+  deleteModalActions: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  deleteCancelBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: borders.radius.lg,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  deleteCancelText: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  deleteConfirmBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: borders.radius.lg,
+    backgroundColor: colors.red,
+    minHeight: 48,
+  },
+  deleteConfirmText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

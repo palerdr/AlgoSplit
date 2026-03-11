@@ -1,8 +1,10 @@
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { SetData } from '../../stores/workoutStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { colors } from '../../theme';
+import { convertLbToDisplay, parseWeightInput } from '../../utils/unitConversion';
 
 interface SetRowMobileProps {
   setIndex: number;
@@ -25,9 +27,20 @@ function SetRowMobile({
   onRemove,
   canRemove,
 }: SetRowMobileProps) {
+  const weightUnit = useSettingsStore((s) => s.weightUnit);
   const label = sideLabel
     ? `${setIndex + 1}${sideLabel}`
     : `${setIndex + 1}`;
+  const [weightInput, setWeightInput] = useState(
+    data.weight ? String(convertLbToDisplay(data.weight, weightUnit)) : '',
+  );
+  const [isWeightFocused, setIsWeightFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isWeightFocused) {
+      setWeightInput(data.weight ? String(convertLbToDisplay(data.weight, weightUnit)) : '');
+    }
+  }, [data.weight, isWeightFocused, weightUnit]);
 
   return (
     <View style={[styles.row, data.completed && styles.rowCompleted]}>
@@ -35,17 +48,33 @@ function SetRowMobile({
 
       <View style={styles.inputCell}>
         <TextInput
-          style={styles.input}
+          style={[styles.input, styles.weightInput]}
           keyboardType="decimal-pad"
-          value={data.weight ? String(data.weight) : ''}
-          placeholder={previousSet?.weight ? String(previousSet.weight) : '0'}
+          value={weightInput}
+          placeholder={
+            previousSet?.weight
+              ? String(convertLbToDisplay(previousSet.weight, weightUnit))
+              : '0'
+          }
           placeholderTextColor={colors.textDim}
           onChangeText={(t) => {
+            setWeightInput(t);
             const v = parseFloat(t);
-            onUpdate({ weight: isNaN(v) ? 0 : v });
+            onUpdate({ weight: isNaN(v) ? 0 : parseWeightInput(v, weightUnit) });
+          }}
+          onFocus={() => setIsWeightFocused(true)}
+          onBlur={() => {
+            setIsWeightFocused(false);
+            const normalizedWeight = parseFloat(weightInput);
+            setWeightInput(
+              !Number.isNaN(normalizedWeight) && normalizedWeight !== 0
+                ? String(convertLbToDisplay(parseWeightInput(normalizedWeight, weightUnit), weightUnit))
+                : '',
+            );
           }}
           selectTextOnFocus
         />
+        <Text style={styles.unitLabel}>{weightUnit}</Text>
       </View>
 
       <View style={styles.inputCell}>
@@ -143,6 +172,17 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     textAlign: 'center',
     paddingHorizontal: 4,
+  },
+  weightInput: {
+    paddingRight: 24,
+  },
+  unitLabel: {
+    position: 'absolute',
+    right: 8,
+    top: 11,
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
   },
   checkBtn: {
     width: 34,

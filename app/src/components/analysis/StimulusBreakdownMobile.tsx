@@ -27,12 +27,37 @@ function TierBadge({ tier }: { tier: string }) {
   );
 }
 
+function formatFactor(value: number): string {
+  return value.toFixed(2);
+}
+
 function ContributionRow({ c }: { c: MuscleContribution }) {
+  const [expanded, setExpanded] = useState(false);
+
   return (
-    <View style={styles.contribRow}>
-      <Text style={styles.contribMuscle} numberOfLines={1}>{c.display_name}</Text>
-      <TierBadge tier={c.tier} />
-      <Text style={styles.contribValue}>{c.total_stimulus.toFixed(2)}</Text>
+    <View style={styles.contribCard}>
+      <TouchableOpacity style={styles.contribRow} onPress={() => setExpanded(!expanded)} activeOpacity={0.8}>
+        <View style={styles.contribPrimary}>
+          <Ionicons
+            name={expanded ? 'chevron-down' : 'chevron-forward'}
+            size={12}
+            color={colors.textMuted}
+          />
+          <Text style={styles.contribMuscle} numberOfLines={1}>{c.display_name}</Text>
+        </View>
+        <TierBadge tier={c.tier} />
+        <Text style={styles.contribValue}>{c.total_stimulus.toFixed(2)}</Text>
+      </TouchableOpacity>
+
+      {expanded && (
+        <View style={styles.setEquationList}>
+          {c.sets.map((set) => (
+            <Text key={set.set_number} style={styles.setEquationText}>
+              {`Set ${set.set_number}: ${formatFactor(set.weight)} x ${formatFactor(set.recovery_multiplier)} rec x ${formatFactor(set.bilateral_multiplier)} bil x ${formatFactor(set.local_multiplier)} local x ${formatFactor(set.global_multiplier)} cns x ${formatFactor(set.consecutive_day_multiplier)} day = ${formatFactor(set.final_stimulus)}`}
+            </Text>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -273,16 +298,25 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     marginTop: 2,
   },
+  contribCard: {
+    paddingVertical: 4,
+    borderBottomWidth: 0.5,
+    borderBottomColor: colors.border,
+  },
   contribRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
     gap: 8,
+  },
+  contribPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 4,
   },
   contribMuscle: {
     color: colors.textSecondary,
     fontSize: 12,
-    flex: 1,
   },
   tierBadge: {
     paddingHorizontal: 6,
@@ -300,5 +334,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     minWidth: 36,
     textAlign: 'right',
+  },
+  setEquationList: {
+    marginTop: 6,
+    marginLeft: 16,
+    gap: 4,
+  },
+  setEquationText: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    lineHeight: 15,
   },
 });
