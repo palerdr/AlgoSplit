@@ -4,10 +4,12 @@ import type { WorkoutLogResponse } from '../../types/api.types';
 
 export interface SessionDataPoint {
   date: Date;
+  sessionName: string;
   weight: number;
   reps: number;
   rir: number | null;
   capacityScore: number;
+  setNumber: number;
 }
 
 export interface ChartPoint {
@@ -49,38 +51,47 @@ export function extractSessionPoints(
   const points: SessionDataPoint[] = [];
 
   for (const workout of workouts) {
-    const exercise = workout.exercises.find(
+    const matchingExercises = workout.exercises.filter(
       (e) => e.exercise_name.toLowerCase() === exerciseName.toLowerCase(),
     );
-    if (!exercise) continue;
+    if (matchingExercises.length === 0) continue;
 
     let bestScore = -Infinity;
     let bestWeight = 0;
     let bestReps = 0;
     let bestRir: number | null = null;
+    let bestSetNumber = 0;
 
-    for (let i = 0; i < exercise.reps.length; i++) {
-      const w = exercise.weight[i] ?? 0;
-      const r = exercise.reps[i] ?? 0;
-      const ir = exercise.rir?.[i] ?? null;
-      if (w === 0) continue;
+    let setOffset = 0;
+    for (const exercise of matchingExercises) {
+      for (let i = 0; i < exercise.reps.length; i++) {
+        const w = exercise.weight[i] ?? 0;
+        const r = exercise.reps[i] ?? 0;
+        const ir = exercise.rir?.[i] ?? null;
+        if (w === 0) continue;
 
-      const score = computeCapacityScore(w, r, ir);
-      if (score > bestScore) {
-        bestScore = score;
-        bestWeight = w;
-        bestReps = r;
-        bestRir = ir;
+        const score = computeCapacityScore(w, r, ir);
+        if (score > bestScore) {
+          bestScore = score;
+          bestWeight = w;
+          bestReps = r;
+          bestRir = ir;
+          bestSetNumber = setOffset + i + 1;
+        }
       }
+
+      setOffset += exercise.reps.length;
     }
 
     if (bestScore > 0 && isFinite(bestScore)) {
       points.push({
         date: new Date(workout.completed_at),
+        sessionName: workout.session_name,
         weight: bestWeight,
         reps: bestReps,
         rir: bestRir,
         capacityScore: bestScore,
+        setNumber: bestSetNumber,
       });
     }
   }

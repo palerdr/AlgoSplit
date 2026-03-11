@@ -164,11 +164,25 @@ export default function ProgressSplineChart({ points }: Props) {
               fill={progressColor(normalized[i])}
               stroke={colors.bg}
               strokeWidth={1.5}
-              onPress={() => handleDotPress(i)}
             />
           ))}
         </Svg>
       )}
+
+      {containerWidth > 0 &&
+        chartPoints.map((cp, i) => (
+          <Pressable
+            key={`hit-${i}`}
+            style={[
+              styles.dotHitTarget,
+              {
+                left: cp.x - 18,
+                top: cp.y - 18,
+              },
+            ]}
+            onPress={() => handleDotPress(i)}
+          />
+        ))}
 
       {/* Tooltip overlay */}
       {tappedIndex != null && chartPoints[tappedIndex] && (
@@ -192,6 +206,9 @@ export default function ProgressSplineChart({ points }: Props) {
               year: '2-digit',
             })}
           </Text>
+          <Text style={styles.tooltipSession}>
+            {points[tappedIndex].sessionName} · Set {points[tappedIndex].setNumber}
+          </Text>
           <Text style={styles.tooltipLine}>
             {points[tappedIndex].weight}lb x {points[tappedIndex].reps}
             {points[tappedIndex].rir != null ? ` @${points[tappedIndex].rir}RIR` : ''}
@@ -210,6 +227,12 @@ const styles = StyleSheet.create({
     width: '100%',
     height: CHART_HEIGHT,
     position: 'relative',
+  },
+  dotHitTarget: {
+    position: 'absolute',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
   },
   tooltip: {
     position: 'absolute',
@@ -230,6 +253,11 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 13,
     fontWeight: '600',
+  },
+  tooltipSession: {
+    color: colors.textMuted,
+    fontSize: 11,
+    marginTop: 1,
   },
   tooltipScore: {
     color: colors.green,

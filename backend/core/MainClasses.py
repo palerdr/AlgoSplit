@@ -696,13 +696,8 @@ class Session:
                             mc['sets'].append(bd)
                             mc['total_stimulus'] += bd['final_stimulus']
 
-            # Any muscle that received stimulus should update recency/frequency
-            # tracking so indirect work does not bypass recovery or atrophy.
-            stimulated_muscles = set()
-            for tier in ['prime', 'secondary', 'tertiary', 'quaternary']:
-                stimulated_muscles.update(tiered_targets.get(tier, {}).keys())
-
-            for muscle_id in stimulated_muscles:
+            # Frequency tracks direct/prime training, not secondary stimulus.
+            for muscle_id in tiered_targets.get('prime', {}).keys():
                 muscle = muscles.get(muscle_id)
                 if muscle:
                     muscle.last_trained_time = self.time

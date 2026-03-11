@@ -89,6 +89,25 @@ describe('extractSessionPoints', () => {
     expect(points[0].weight).toBe(155);
     expect(points[0].reps).toBe(6);
     expect(points[0].capacityScore).toBeCloseTo(186, 0);
+    expect(points[0].setNumber).toBe(3);
+    expect(points[0].sessionName).toBe('Test');
+  });
+
+  it('picks the best set across multiple exercise rows in the same workout', () => {
+    const workouts = [
+      makeWorkout('2025-01-01T12:00:00Z', [
+        { name: 'Bench Press', reps: [8, 8], weight: [135, 145] },
+        { name: 'Bench Press', reps: [6], weight: [165], rir: [1] },
+      ]),
+    ];
+
+    const points = extractSessionPoints(workouts, 'Bench Press');
+    expect(points).toHaveLength(1);
+    expect(points[0].weight).toBe(165);
+    expect(points[0].reps).toBe(6);
+    expect(points[0].rir).toBe(1);
+    expect(points[0].setNumber).toBe(3);
+    expect(points[0].capacityScore).toBeCloseTo(203.5, 1);
   });
 
   it('skips zero-weight sets', () => {
@@ -136,8 +155,8 @@ describe('normalizeScores', () => {
 
   it('returns 0.5 for all-equal scores', () => {
     const points = [
-      { date: new Date(), weight: 100, reps: 10, rir: null, capacityScore: 133 },
-      { date: new Date(), weight: 100, reps: 10, rir: null, capacityScore: 133 },
+      { date: new Date(), sessionName: 'Test', weight: 100, reps: 10, rir: null, capacityScore: 133, setNumber: 1 },
+      { date: new Date(), sessionName: 'Test', weight: 100, reps: 10, rir: null, capacityScore: 133, setNumber: 1 },
     ];
     const norms = normalizeScores(points);
     expect(norms).toEqual([0.5, 0.5]);
@@ -145,9 +164,9 @@ describe('normalizeScores', () => {
 
   it('normalizes to [0, 1] range', () => {
     const points = [
-      { date: new Date(), weight: 100, reps: 10, rir: null, capacityScore: 100 },
-      { date: new Date(), weight: 100, reps: 10, rir: null, capacityScore: 150 },
-      { date: new Date(), weight: 100, reps: 10, rir: null, capacityScore: 200 },
+      { date: new Date(), sessionName: 'Test', weight: 100, reps: 10, rir: null, capacityScore: 100, setNumber: 1 },
+      { date: new Date(), sessionName: 'Test', weight: 100, reps: 10, rir: null, capacityScore: 150, setNumber: 1 },
+      { date: new Date(), sessionName: 'Test', weight: 100, reps: 10, rir: null, capacityScore: 200, setNumber: 1 },
     ];
     const norms = normalizeScores(points);
     expect(norms[0]).toBe(0);
@@ -204,30 +223,40 @@ describe('computeTrend', () => {
   it('returns flat for fewer than 2 points', () => {
     expect(computeTrend([])).toBe('flat');
     expect(
-      computeTrend([{ date: new Date(), weight: 100, reps: 10, rir: null, capacityScore: 133 }]),
+      computeTrend([
+        {
+          date: new Date(),
+          sessionName: 'Test',
+          weight: 100,
+          reps: 10,
+          rir: null,
+          capacityScore: 133,
+          setNumber: 1,
+        },
+      ]),
     ).toBe('flat');
   });
 
   it('returns up when recent capacity is > 2% higher', () => {
     const points = [
-      { date: new Date('2025-01-01'), weight: 100, reps: 10, rir: null, capacityScore: 100 },
-      { date: new Date('2025-01-08'), weight: 100, reps: 10, rir: null, capacityScore: 110 },
+      { date: new Date('2025-01-01'), sessionName: 'Test', weight: 100, reps: 10, rir: null, capacityScore: 100, setNumber: 1 },
+      { date: new Date('2025-01-08'), sessionName: 'Test', weight: 100, reps: 10, rir: null, capacityScore: 110, setNumber: 1 },
     ];
     expect(computeTrend(points)).toBe('up');
   });
 
   it('returns down when recent capacity is > 2% lower', () => {
     const points = [
-      { date: new Date('2025-01-01'), weight: 100, reps: 10, rir: null, capacityScore: 110 },
-      { date: new Date('2025-01-08'), weight: 100, reps: 10, rir: null, capacityScore: 100 },
+      { date: new Date('2025-01-01'), sessionName: 'Test', weight: 100, reps: 10, rir: null, capacityScore: 110, setNumber: 1 },
+      { date: new Date('2025-01-08'), sessionName: 'Test', weight: 100, reps: 10, rir: null, capacityScore: 100, setNumber: 1 },
     ];
     expect(computeTrend(points)).toBe('down');
   });
 
   it('returns flat when change is within 2%', () => {
     const points = [
-      { date: new Date('2025-01-01'), weight: 100, reps: 10, rir: null, capacityScore: 100 },
-      { date: new Date('2025-01-08'), weight: 100, reps: 10, rir: null, capacityScore: 101 },
+      { date: new Date('2025-01-01'), sessionName: 'Test', weight: 100, reps: 10, rir: null, capacityScore: 100, setNumber: 1 },
+      { date: new Date('2025-01-08'), sessionName: 'Test', weight: 100, reps: 10, rir: null, capacityScore: 101, setNumber: 1 },
     ];
     expect(computeTrend(points)).toBe('flat');
   });

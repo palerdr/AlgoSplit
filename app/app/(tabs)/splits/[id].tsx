@@ -20,6 +20,7 @@ import {
   useUpdateSplit,
   useUpdateSplitExercises,
 } from '../../../src/hooks/useSplits';
+import { getErrorMessage } from '../../../src/api/client';
 import { Spinner, Card } from '../../../src/components/ui';
 import AnalysisTabView from '../../../src/components/analysis/AnalysisTabView';
 import SessionEditorMobile from '../../../src/components/splits/SessionEditorMobile';
@@ -119,7 +120,7 @@ export default function SplitDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { data: split, isLoading: splitLoading } = useSplit(id);
-  const { data: analysis, isLoading: analysisLoading } = useSplitAnalysis(id);
+  const { data: analysis, isLoading: analysisLoading, error: analysisError } = useSplitAnalysis(id);
   const deleteMutation = useDeleteSplit();
   const replaceMutation = useReplaceSplit({ invalidateLists: false });
   const updateMutation = useUpdateSplit({ invalidateLists: false });
@@ -136,6 +137,7 @@ export default function SplitDetailScreen() {
 
   // Advanced settings — always interactive, independent from edit mode
   const [advDataset, setAdvDataset] = useState<'schoenfeld' | 'pelland' | 'average'>('average');
+  const [advCycleLength, setAdvCycleLength] = useState('');
   const [advStimulusDuration, setAdvStimulusDuration] = useState('48');
   const [advMaintenanceVolume, setAdvMaintenanceVolume] = useState('4');
 
@@ -143,6 +145,7 @@ export default function SplitDetailScreen() {
   useEffect(() => {
     if (split) {
       setAdvDataset((split.dataset as 'schoenfeld' | 'pelland' | 'average') ?? 'average');
+      setAdvCycleLength(split.cycle_length != null ? String(split.cycle_length) : '');
       setAdvStimulusDuration(String(split.stimulus_duration ?? 48));
       setAdvMaintenanceVolume(String(split.maintenance_volume ?? 3));
     }
@@ -172,6 +175,7 @@ export default function SplitDetailScreen() {
     // Revert advanced settings to saved values
     if (split) {
       setAdvDataset((split.dataset as 'schoenfeld' | 'pelland' | 'average') ?? 'average');
+      setAdvCycleLength(split.cycle_length != null ? String(split.cycle_length) : '');
       setAdvStimulusDuration(String(split.stimulus_duration ?? 48));
       setAdvMaintenanceVolume(String(split.maintenance_volume ?? 3));
     }
@@ -180,16 +184,17 @@ export default function SplitDetailScreen() {
   // Edit-mode dirty check (includes advanced settings)
   const dirty = useMemo(() => {
     if (!split || !isEditing) return false;
+    const parsedCycleLength = parseInt(advCycleLength, 10);
     const current = {
       name: editName,
       sessions: editSessions,
       dataset: advDataset,
+      cycle_length: Number.isFinite(parsedCycleLength) ? parsedCycleLength : undefined,
       stimulus_duration: parseInt(advStimulusDuration, 10) || 48,
       maintenance_volume: parseInt(advMaintenanceVolume, 10) || 3,
-      cycle_length: split.cycle_length ?? undefined,
     };
     return checkHasChanges(split, current);
-  }, [split, isEditing, editName, editSessions, advDataset, advStimulusDuration, advMaintenanceVolume]);
+  }, [split, isEditing, editName, editSessions, advDataset, advCycleLength, advStimulusDuration, advMaintenanceVolume]);
 
   const handleSave = useCallback(async () => {
     if (!id || !dirty || !split) return;
@@ -207,9 +212,12 @@ export default function SplitDetailScreen() {
         metadataUpdate.name = nextName;
       }
       const nextDataset = advDataset;
+      const parsedCycleLength = parseInt(advCycleLength, 10);
+      const nextCycleLength = Number.isFinite(parsedCycleLength) ? parsedCycleLength : null;
       const nextStimulus = parseInt(advStimulusDuration, 10) || 48;
       const nextMaintenance = parseInt(advMaintenanceVolume, 10) || 3;
       if (nextDataset !== split.dataset) metadataUpdate.dataset = nextDataset;
+      if (nextCycleLength !== (split.cycle_length ?? null)) metadataUpdate.cycle_length = nextCycleLength;
       if (nextStimulus !== (split.stimulus_duration ?? 48)) metadataUpdate.stimulus_duration = nextStimulus;
       if (nextMaintenance !== (split.maintenance_volume ?? 3)) metadataUpdate.maintenance_volume = nextMaintenance;
 
@@ -249,9 +257,9 @@ export default function SplitDetailScreen() {
           name: editName,
           sessions: editSessions,
           dataset: advDataset,
+          cycle_length: nextCycleLength ?? undefined,
           stimulus_duration: parseInt(advStimulusDuration, 10) || 48,
           maintenance_volume: parseInt(advMaintenanceVolume, 10) || 3,
-          cycle_length: split?.cycle_length ?? undefined,
         }),
       });
       setIsEditing(false);
@@ -265,6 +273,7 @@ export default function SplitDetailScreen() {
     editName,
     editSessions,
     advDataset,
+    advCycleLength,
     advStimulusDuration,
     advMaintenanceVolume,
     replaceMutation,
@@ -276,12 +285,19 @@ export default function SplitDetailScreen() {
   const saveAdvancedSettings = useCallback(
     (overrides?: {
       dataset?: 'schoenfeld' | 'pelland' | 'average';
+      cycle_length?: number | null;
       stimulus_duration?: number;
       maintenance_volume?: number;
     }) => {
       if (!split || !id || isEditing) return;
       const nextDataset =
         overrides?.dataset ?? ((advDataset as 'schoenfeld' | 'pelland' | 'average') ?? 'average');
+      const nextCycleLength =
+        overrides?.cycle_length ??
+        (() => {
+          const parsed = parseInt(advCycleLength, 10);
+          return Number.isFinite(parsed) ? parsed : null;
+        })();
       const nextStimulusDuration =
         overrides?.stimulus_duration ?? (parseInt(advStimulusDuration, 10) || 48);
       const nextMaintenanceVolume =
@@ -289,6 +305,7 @@ export default function SplitDetailScreen() {
 
       if (
         nextDataset === split.dataset &&
+        nextCycleLength === (split.cycle_length ?? null) &&
         nextStimulusDuration === (split.stimulus_duration ?? 48) &&
         nextMaintenanceVolume === (split.maintenance_volume ?? 3)
       ) {
@@ -299,12 +316,13 @@ export default function SplitDetailScreen() {
         id,
         data: {
           dataset: nextDataset,
+          cycle_length: nextCycleLength,
           stimulus_duration: nextStimulusDuration,
           maintenance_volume: nextMaintenanceVolume,
         },
       });
     },
-    [split, id, isEditing, advDataset, advStimulusDuration, advMaintenanceVolume, updateMutation],
+    [split, id, isEditing, advDataset, advCycleLength, advStimulusDuration, advMaintenanceVolume, updateMutation],
   );
 
   const handleAdvDatasetChange = useCallback(
@@ -322,6 +340,16 @@ export default function SplitDetailScreen() {
       saveAdvancedSettings({ stimulus_duration: parseInt(advStimulusDuration, 10) || 48 });
     }
   }, [isEditing, split, advStimulusDuration, saveAdvancedSettings]);
+
+  const handleAdvCycleLengthBlur = useCallback(() => {
+    if (!isEditing && split) {
+      const parsed = parseInt(advCycleLength, 10);
+      const nextCycleLength = Number.isFinite(parsed) ? parsed : null;
+      if (nextCycleLength !== (split.cycle_length ?? null)) {
+        saveAdvancedSettings({ cycle_length: nextCycleLength });
+      }
+    }
+  }, [isEditing, split, advCycleLength, saveAdvancedSettings]);
 
   const handleAdvMaintenanceBlur = useCallback(() => {
     if (!isEditing && split && advMaintenanceVolume !== String(split.maintenance_volume ?? 3)) {
@@ -528,6 +556,14 @@ export default function SplitDetailScreen() {
         {/* Analysis — always visible below sessions */}
         {analysisLoading ? (
           <Spinner style={styles.analysisSpinner} />
+        ) : analysisError ? (
+          <Card style={styles.analysisErrorCard}>
+            <Text style={styles.analysisErrorTitle}>Analysis unavailable</Text>
+            <Text style={styles.analysisErrorBody}>{getErrorMessage(analysisError)}</Text>
+            <Text style={styles.analysisErrorHint}>
+              If you recently changed auth cookies, log out and sign back in from Settings.
+            </Text>
+          </Card>
         ) : analysis ? (
           <>
             {/* Summary Stats — 2x2 grid */}
@@ -598,6 +634,18 @@ export default function SplitDetailScreen() {
                         </TouchableOpacity>
                       ))}
                     </View>
+                </View>
+                  <View style={styles.advInputRow}>
+                    <Text style={styles.advLabel}>Cycle Length (days)</Text>
+                    <TextInput
+                      style={styles.advTextInput}
+                      value={advCycleLength}
+                      onChangeText={setAdvCycleLength}
+                      onBlur={handleAdvCycleLengthBlur}
+                      keyboardType="numeric"
+                      placeholder="Auto"
+                      placeholderTextColor={colors.textMuted}
+                    />
                   </View>
                   <View style={styles.advInputRow}>
                     <Text style={styles.advLabel}>Stimulus Duration (hrs)</Text>
@@ -743,6 +791,27 @@ const styles = StyleSheet.create({
   },
   analysisSpinner: {
     marginVertical: 20,
+  },
+  analysisErrorCard: {
+    marginTop: 20,
+    borderColor: 'rgba(239, 68, 68, 0.35)',
+  },
+  analysisErrorTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  analysisErrorBody: {
+    color: colors.red,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 6,
+  },
+  analysisErrorHint: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
   },
   // Stats grid
   statsGrid: {

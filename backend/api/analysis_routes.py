@@ -315,8 +315,8 @@ def _build_response(split: Split, request: SplitRequest) -> AnalysisResponse:
 
     # Calculate summary
     total_sets = sum(data['sets'] for data in muscle_data)
-    trained_muscles = sum(1 for data in muscle_data if data['sets'] > 0)
-    avg_net = sum(data['net'] for data in muscle_data if data['sets'] > 0) / max(trained_muscles, 1)
+    trained_muscles = sum(1 for data in muscle_data if data['stimulus'] > 0)
+    avg_net = sum(data['net'] for data in muscle_data if data['stimulus'] > 0) / max(trained_muscles, 1)
 
     summary = SummaryStats(
         total_sets=total_sets,
@@ -357,14 +357,14 @@ def _generate_suggestions(muscle_data: List[dict], maintenance_volume: int) -> L
         stimulus = data['stimulus']
 
         # Under-stimulated
-        if net < 1.0 and sets > 0:
+        if net < 1.0 and stimulus > 0:
             suggestions.append(OptimizationSuggestion(
                 priority='HIGH',
                 muscle=name,
                 issue='Under-stimulated',
                 suggestion=f"Net stimulus is only {net:.2f}. Consider adding 2-4 more sets or increasing frequency."
             ))
-        elif net < 2.0 and sets > 0:
+        elif net < 2.0 and stimulus > 0:
             suggestions.append(OptimizationSuggestion(
                 priority='MEDIUM',
                 muscle=name,

@@ -38,9 +38,10 @@ function isToday(d: Date): boolean {
 interface DateSelectorProps {
   onDateChange?: (date: Date) => void;
   workoutDates?: Set<string>;
+  resetToken?: number;
 }
 
-export default function DateSelector({ onDateChange, workoutDates }: DateSelectorProps) {
+export default function DateSelector({ onDateChange, workoutDates, resetToken = 0 }: DateSelectorProps) {
   const days = getDaysArray(new Date(), 30);
   const todayIndex = days.findIndex(d => isToday(d));
   const scrollRef = useRef<any>(null);
@@ -53,6 +54,13 @@ export default function DateSelector({ onDateChange, workoutDates }: DateSelecto
       scrollRef.current?.scrollTo({ x: todayIndex * DAY_WIDTH, animated: false });
     }, 50);
   }, []);
+
+  useEffect(() => {
+    setSelectedIndex(todayIndex);
+    lastHapticIndex.current = todayIndex;
+    scrollRef.current?.scrollTo({ x: todayIndex * DAY_WIDTH, animated: true });
+    onDateChange?.(days[todayIndex]);
+  }, [days, onDateChange, resetToken, todayIndex]);
 
   const handleScroll = Animated.event(
     [{ nativeEvent: { contentOffset: { x: scrollX } } }],
@@ -122,6 +130,7 @@ export default function DateSelector({ onDateChange, workoutDates }: DateSelecto
               <Text style={[styles.dayName, today && styles.todayAccent]}>
                 {DAY_NAMES[day.getDay()]}
               </Text>
+              {today && <View style={styles.todayMarker} />}
               <Text style={[styles.dayNumber, today && styles.todayAccent]}>
                 {day.getDate()}
               </Text>
@@ -176,6 +185,13 @@ const styles = StyleSheet.create({
   },
   todayAccent: {
     color: '#fff',
+  },
+  todayMarker: {
+    width: 12,
+    height: 3,
+    borderRadius: 999,
+    backgroundColor: '#22C55E',
+    marginBottom: 4,
   },
   dot: {
     width: 4,

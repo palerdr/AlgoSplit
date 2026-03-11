@@ -29,6 +29,7 @@ export default function CreateSplitScreen() {
   const [splitName, setSplitName] = useState('');
   const [sessions, setSessions] = useState<SessionInput[]>([makeDefaultSession()]);
   const [dataset, setDataset] = useState<'schoenfeld' | 'pelland' | 'average'>('average');
+  const [cycleLength, setCycleLength] = useState('');
   const [stimulusDuration, setStimulusDuration] = useState('48');
   const [maintenanceVolume, setMaintenanceVolume] = useState('4');
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -65,6 +66,7 @@ export default function CreateSplitScreen() {
 
     setError('');
     try {
+      const parsedCycleLength = parseInt(cycleLength, 10);
       const result = await createMutation.mutateAsync({
         name: splitName.trim(),
         sessions: sessions
@@ -75,6 +77,7 @@ export default function CreateSplitScreen() {
             exercises: s.exercises.filter((e) => e.name.trim()),
           })),
         dataset,
+        cycle_length: Number.isFinite(parsedCycleLength) ? parsedCycleLength : undefined,
         stimulus_duration: parseInt(stimulusDuration, 10) || 48,
         maintenance_volume: parseInt(maintenanceVolume, 10) || 3,
       });
@@ -157,6 +160,14 @@ export default function CreateSplitScreen() {
                 ))}
               </View>
             </View>
+            <Input
+              label="Cycle Length (days)"
+              value={cycleLength}
+              onChangeText={setCycleLength}
+              keyboardType="numeric"
+              containerStyle={styles.advInput}
+              placeholder="Auto from last session day"
+            />
             <Input
               label="Stimulus Duration (hours)"
               value={stimulusDuration}

@@ -77,6 +77,7 @@ export function editableToSplitRequest(state: EditableState): SplitRequest {
 function normalizeSplitRequest(req: SplitRequest): string {
   const normalized = {
     name: req.name.trim(),
+    cycle_length: req.cycle_length ?? null,
     dataset: req.dataset ?? 'pelland',
     stimulus_duration: req.stimulus_duration ?? 48,
     maintenance_volume: req.maintenance_volume ?? 3,
