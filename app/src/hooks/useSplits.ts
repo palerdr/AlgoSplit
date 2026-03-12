@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import {
   getSplits,
   getSplit,
@@ -149,5 +149,18 @@ export function useDeleteSplit() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: splitKeys.lists() });
     },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Prefetch helper
+// ---------------------------------------------------------------------------
+
+/** Prefetch splits list so the Splits tab is warm on arrival. */
+export function prefetchSplitsQueries(qc: QueryClient) {
+  qc.prefetchQuery({
+    queryKey: splitKeys.list(),
+    queryFn: getSplits,
+    staleTime: 5 * 60 * 1000,
   });
 }

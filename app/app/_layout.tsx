@@ -10,9 +10,17 @@ import { registerTransitionHandler } from '../src/utils/workoutTransition';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { retry: 1, staleTime: 5 * 60 * 1000 },
+    queries: {
+      retry: 1,
+      staleTime: 5 * 60 * 1000,
+      gcTime: 30 * 60 * 1000,    // survive tab switches without refetching
+      refetchOnWindowFocus: false, // avoid refetch storms on app resume
+    },
   },
 });
+
+// Export so AuthProvider can prefetch after login
+export { queryClient };
 
 export default function RootLayout() {
   const router = useRouter();

@@ -11,10 +11,13 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRef, useState, useEffect, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import * as Haptics from 'expo-haptics';
 import { triggerExpandTransition } from '../../src/utils/workoutTransition';
 import { useWorkoutStore } from '../../src/stores/workoutStore';
 import { useAuth } from '../../src/hooks/useAuth';
+import { prefetchDashboardQueries, prefetchHistoryQueries } from '../../src/hooks/useWorkouts';
+import { prefetchSplitsQueries } from '../../src/hooks/useSplits';
 import { Spinner } from '../../src/components/ui';
 import StartWorkoutSheet from '../../src/components/workout/StartWorkoutSheet';
 
@@ -163,6 +166,7 @@ function WorkoutButton({ onBlocked, onTrigger }: { onBlocked: () => void; onTrig
 
 export default function TabLayout() {
   const { isAuthenticated, isLoading } = useAuth();
+  const queryClient = useQueryClient();
   const msgOpacity = useRef(new Animated.Value(0)).current;
   const msgVisible = useRef(false);
   const [showStartSheet, setShowStartSheet] = useState(false);
@@ -176,6 +180,14 @@ export default function TabLayout() {
       toValue: 0, duration: 800, delay: 1200, useNativeDriver: true,
     }).start(() => { msgVisible.current = false; });
   }, [msgOpacity]);
+
+  // Prefetch critical data on first mount (right after auth resolves)
+  // so dashboard, splits, and history queries are warm before the user interacts.
+  useEffect(() => {
+    prefetchDashboardQueries(queryClient);
+    prefetchSplitsQueries(queryClient);
+    prefetchHistoryQueries(queryClient);
+  }, [queryClient]);
 
   const handleStartQuick = useCallback(() => {
     useWorkoutStore.getState().startWorkout('Quick Workout');
@@ -212,6 +224,7 @@ export default function TabLayout() {
             title: 'Dashboard',
             tabBarIcon: ({ color, size }) => <Ionicons name="grid-outline" size={size} color={color} />,
           }}
+          listeners={{ tabPress: () => prefetchDashboardQueries(queryClient) }}
         />
         <Tabs.Screen
           name="splits"
@@ -219,6 +232,7 @@ export default function TabLayout() {
             title: 'Splits',
             tabBarIcon: ({ color, size }) => <Ionicons name="barbell-outline" size={size} color={color} />,
           }}
+          listeners={{ tabPress: () => prefetchSplitsQueries(queryClient) }}
         />
         <Tabs.Screen
           name="workout-placeholder"
@@ -231,6 +245,7 @@ export default function TabLayout() {
             title: 'History',
             tabBarIcon: ({ color, size }) => <Ionicons name="time-outline" size={size} color={color} />,
           }}
+          listeners={{ tabPress: () => prefetchHistoryQueries(queryClient) }}
         />
         <Tabs.Screen
           name="more"
