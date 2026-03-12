@@ -137,9 +137,6 @@ export default function DashboardScreen() {
   }
   const dialSize = isDesktop ? 110 : 90;
 
-  // Only block render on the primary analysis query — summaries (calendar dots)
-  // can populate asynchronously without holding back the entire dashboard.
-  if (isLoading) return <Spinner fullScreen />;
 
   return (
     <View style={styles.safeArea}>
@@ -157,7 +154,9 @@ export default function DashboardScreen() {
           />
         </View>
 
-        {hasAnalysisData ? (
+        {isLoading ? (
+          <Spinner style={{ marginTop: 60 }} />
+        ) : hasAnalysisData ? (
           isDesktop ? (
             <View style={[styles.mainRow, styles.mainRowDesktop]}>
               <View style={[styles.bodyContainer, { width: bodyWidth, height: bodyHeight }]}>
@@ -254,7 +253,7 @@ export default function DashboardScreen() {
           </View>
         )}
 
-        {hasAnalysisData && (
+        {!isLoading && hasAnalysisData && (
           <View style={[styles.insightsSection, isDesktop && styles.insightsDesktop]}>
             {insights.map((insight, i) => (
               <InsightCard
