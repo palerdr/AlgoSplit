@@ -5,6 +5,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from time import perf_counter
 from uuid import uuid4
 
 # Add backend to path for imports
@@ -112,6 +113,46 @@ async def rate_limit_middleware(request: Request, call_next):
         response.headers["X-RateLimit-Remaining"] = str(limit_result.remaining)
         response.headers["X-RateLimit-Reset"] = str(limit_result.retry_after)
     return response
+
+
+# ---------------------------------------------------------------------------
+# Lightweight server timing for hot endpoints
+# ---------------------------------------------------------------------------
+_PERF_PREFIXES = (
+    "/api/analyze-workouts",
+    "/api/analyze-split",
+    "/api/workouts/summaries",
+    "/api/workouts/stats/summary",
+    "/api/workouts",
+    "/api/splits",
+)
+
+perf_logger = logging.getLogger("algosplit.perf")
+
+
+@app.middleware("http")
+async def perf_timing_middleware(request: Request, call_next):
+    path = request.url.path
+    if not any(path.startswith(p) for p in _PERF_PREFIXES):
+        return await call_next(request)
+
+    t0 = perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (perf_counter() - t0) * 1000
+
+    # Extract user id from the auth dependency result if available
+    user_id = getattr(request.state, "user_id", None) or "anon"
+    perf_logger.info(
+        "[perf] %s %s %dms user=%s status=%s",
+        request.method,
+        path,
+        int(elapsed_ms),
+        user_id,
+        response.status_code,
+    )
+    response.headers["Server-Timing"] = f"total;dur={elapsed_ms:.1f}"
+    return response
+
 
 # CORS middleware for frontend access
 frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")

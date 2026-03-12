@@ -107,10 +107,10 @@ async def analyze_workouts(
         window_start = local_window_start + offset_delta
         window_end = local_window_end + offset_delta
 
-        # Fetch workout logs within the time window
+        # Fetch workout logs within the time window — only columns needed for analysis
         workouts_result = (
             supabase.table("workout_logs")
-            .select("*")
+            .select("id, completed_at, session_name")
             .eq("user_id", current_user.id)
             .gte("completed_at", window_start.isoformat())
             .lte("completed_at", window_end.isoformat())
@@ -121,11 +121,11 @@ async def analyze_workouts(
         if not workouts_result.data:
             return _empty_workout_analysis(days, stimulus_duration, maintenance_volume, dataset)
 
-        # Get all exercises for these workouts
+        # Get only columns needed for analysis (exercise name + sets)
         workout_ids = [w["id"] for w in workouts_result.data]
         exercises_result = (
             supabase.table("workout_exercises")
-            .select("*")
+            .select("workout_log_id, exercise_name, sets_completed, order_index")
             .in_("workout_log_id", workout_ids)
             .order("order_index")
             .execute()

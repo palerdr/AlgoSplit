@@ -341,16 +341,19 @@ MUSCLE_HIERARCHY: Dict[str, Dict[str, MuscleRegionData]] = {
 }
 
 
+# Pre-computed flat region map (built once at import time).
+_ALL_REGIONS: Dict[str, MuscleRegionData] = {}
+for _group, _regions in MUSCLE_HIERARCHY.items():
+    for _region_id, _data in _regions.items():
+        _ALL_REGIONS[_region_id] = _data
+
+
 def get_all_muscle_regions() -> Dict[str, MuscleRegionData]:
     """
     Return flat dictionary of all muscle regions.
     Keys are region IDs (e.g., 'clavicular', 'sternocostal').
     """
-    muscles = {}
-    for group, regions in MUSCLE_HIERARCHY.items():
-        for region_id, data in regions.items():
-            muscles[region_id] = data
-    return muscles
+    return _ALL_REGIONS
 
 
 def get_muscle_region(region_id: str) -> MuscleRegionData:
@@ -383,12 +386,14 @@ def get_axial_fatigue_muscles() -> List[str]:
 
 def get_parent_groups() -> List[str]:
     """Get list of all unique parent groups."""
-    all_regions = get_all_muscle_regions()
-    return list(set(data.parent_group for data in all_regions.values()))
+    return _PARENT_GROUPS
 
+
+# Pre-computed at import time
+_PARENT_GROUPS: List[str] = list(set(data.parent_group for data in _ALL_REGIONS.values()))
 
 # Total count for validation
-TOTAL_MUSCLE_REGIONS = len(get_all_muscle_regions())  # Should be 29
+TOTAL_MUSCLE_REGIONS = len(_ALL_REGIONS)  # Should be 29
 
 # Mapping from old coarse muscle names to new granular regions
 LEGACY_MUSCLE_MAPPING = {

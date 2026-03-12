@@ -200,11 +200,11 @@ async def log_workout(
             )
 
         workout_log_id = workout_result.data[0]["id"]
-        exercises_data = []
 
-        # Insert workout exercises
+        # Batch insert all exercises in a single DB round-trip
+        exercise_rows = []
         for idx, exercise in enumerate(workout.exercises):
-            exercise_data = {
+            row = {
                 "workout_log_id": workout_log_id,
                 "exercise_name": exercise.exercise_name,
                 "sets_completed": exercise.sets_completed,
@@ -214,16 +214,16 @@ async def log_workout(
             }
 
             if exercise.notes:
-                exercise_data["notes"] = exercise.notes
+                row["notes"] = exercise.notes
             if exercise.rir is not None:
-                exercise_data["rir"] = exercise.rir
+                row["rir"] = exercise.rir
 
-            exercise_result = supabase.table("workout_exercises").insert(
-                exercise_data
-            ).execute()
+            exercise_rows.append(row)
 
-            if exercise_result.data:
-                exercises_data.append(exercise_result.data[0])
+        exercises_result = supabase.table("workout_exercises").insert(
+            exercise_rows
+        ).execute()
+        exercises_data = exercises_result.data or []
 
         # If linked to a program session, mark it completed
         if workout.program_session_id:
@@ -277,10 +277,10 @@ async def get_workout_history(
     try:
         supabase = get_supabase_client_with_token(current_user.access_token)
 
-        # Build query
-        query = supabase.table("workout_logs").select("*").eq(
-            "user_id", current_user.id
-        )
+        # Build query — include count="exact" to get total in same round-trip
+        query = supabase.table("workout_logs").select(
+            "*", count="exact"
+        ).eq("user_id", current_user.id)
 
         # Filter by date if specified
         if days:
@@ -314,16 +314,8 @@ async def get_workout_history(
             exercises_data = exercises_by_workout.get(workout_data["id"], [])
             workouts.append(build_workout_response(workout_data, exercises_data))
 
-        # Get total count (for pagination)
-        count_query = supabase.table("workout_logs").select(
-            "id", count="exact"
-        ).eq("user_id", current_user.id)
-
-        if days:
-            count_query = count_query.gte("completed_at", cutoff_date.isoformat())
-
-        count_result = count_query.execute()
-        total = count_result.count if count_result.count else len(workouts)
+        # Total count already returned by count="exact" (eliminates separate query)
+        total = result.count if result.count else len(workouts)
 
         return WorkoutHistoryResponse(workouts=workouts, total=total)
 
@@ -358,9 +350,16 @@ async def get_workout_history_summaries(
     try:
         supabase = get_supabase_client_with_token(current_user.access_token)
 
-        query = supabase.table("workout_logs").select("*").eq(
-            "user_id", current_user.id
+        # Only select columns needed for summary cards (avoid transferring
+        # notes and other heavy fields).
+        _SUMMARY_COLS = (
+            "id, user_id, session_id, split_id, session_name, "
+            "completed_at, duration_minutes, created_at"
         )
+
+        query = supabase.table("workout_logs").select(
+            _SUMMARY_COLS, count="exact"
+        ).eq("user_id", current_user.id)
 
         cutoff_date = None
         if days:
@@ -395,13 +394,8 @@ async def get_workout_history_summaries(
             for workout_data in result.data
         ]
 
-        count_query = supabase.table("workout_logs").select(
-            "id", count="exact"
-        ).eq("user_id", current_user.id)
-        if cutoff_date:
-            count_query = count_query.gte("completed_at", cutoff_date.isoformat())
-        count_result = count_query.execute()
-        total = count_result.count if count_result.count else len(workouts)
+        # Total count is already returned by the count="exact" option
+        total = result.count if result.count else len(workouts)
 
         return WorkoutSummaryListResponse(workouts=workouts, total=total)
 
@@ -622,10 +616,10 @@ async def get_workout_stats(
     try:
         supabase = get_supabase_client_with_token(current_user.access_token)
 
-        # Build query
-        query = supabase.table("workout_logs").select("*").eq(
-            "user_id", current_user.id
-        )
+        # Build query — only select columns needed for stats calculation
+        query = supabase.table("workout_logs").select(
+            "id, completed_at, duration_minutes"
+        ).eq("user_id", current_user.id)
 
         # Filter by date if specified
         if days:
@@ -646,8 +640,10 @@ async def get_workout_stats(
 
         workout_ids = [w["id"] for w in workouts_result.data]
 
-        # Get all exercises for these workouts
-        exercises_result = supabase.table("workout_exercises").select("*").in_(
+        # Get only columns needed for stats (avoid fetching notes, order_index)
+        exercises_result = supabase.table("workout_exercises").select(
+            "workout_log_id, exercise_name, sets_completed, reps, weight"
+        ).in_(
             "workout_log_id", workout_ids
         ).execute()
 
