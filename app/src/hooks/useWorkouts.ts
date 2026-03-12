@@ -10,12 +10,18 @@ import {
   analyzeWorkouts,
   workoutKeys,
 } from '../api/workouts.api';
+import { traceAsync } from '../dev/perfTrace';
 import type { WorkoutLogCreate } from '../types/api.types';
 
 export function useWorkoutHistory(params?: { limit?: number; offset?: number; days?: number }) {
   return useQuery({
     queryKey: workoutKeys.list(params ?? {}),
-    queryFn: () => getWorkouts(params),
+    queryFn: () =>
+      traceAsync('mobile:history:getWorkouts', () => getWorkouts(params), {
+        limit: params?.limit,
+        offset: params?.offset,
+        days: params?.days,
+      }),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
@@ -24,7 +30,10 @@ export function useWorkoutHistory(params?: { limit?: number; offset?: number; da
 export function useCompleteWorkoutHistory(params?: { days?: number }) {
   return useQuery({
     queryKey: [...workoutKeys.list(params ?? {}), 'complete'],
-    queryFn: () => getAllWorkouts(params),
+    queryFn: () =>
+      traceAsync('mobile:history:getAllWorkouts', () => getAllWorkouts(params), {
+        days: params?.days,
+      }),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
@@ -33,7 +42,12 @@ export function useCompleteWorkoutHistory(params?: { days?: number }) {
 export function useWorkoutHistorySummaries(params?: { limit?: number; offset?: number; days?: number }) {
   return useQuery({
     queryKey: [...workoutKeys.list(params ?? {}), 'summary'],
-    queryFn: () => getWorkoutSummaries(params),
+    queryFn: () =>
+      traceAsync('mobile:history:getWorkoutSummaries', () => getWorkoutSummaries(params), {
+        limit: params?.limit,
+        offset: params?.offset,
+        days: params?.days,
+      }),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
@@ -50,7 +64,10 @@ export function useWorkout(id: string | undefined) {
 export function useWorkoutStats(days?: number) {
   return useQuery({
     queryKey: workoutKeys.stats(days),
-    queryFn: () => getWorkoutStats(days),
+    queryFn: () =>
+      traceAsync('mobile:history:getWorkoutStats', () => getWorkoutStats(days), {
+        days,
+      }),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
@@ -132,14 +149,26 @@ export function useRecentStimulus(
       params?.dataset ?? 'schoenfeld',
     ],
     queryFn: () =>
-      analyzeWorkouts({
-        days,
-        endDate,
-        timezoneOffsetMinutes,
-        stimulusDuration: params?.stimulusDuration,
-        maintenanceVolume: params?.maintenanceVolume,
-        dataset: params?.dataset,
-      }),
+      traceAsync(
+        'mobile:dashboard:analyzeWorkouts',
+        () =>
+          analyzeWorkouts({
+            days,
+            endDate,
+            timezoneOffsetMinutes,
+            stimulusDuration: params?.stimulusDuration,
+            maintenanceVolume: params?.maintenanceVolume,
+            dataset: params?.dataset,
+          }),
+        {
+          days,
+          endDate,
+          timezoneOffsetMinutes,
+          stimulusDuration: params?.stimulusDuration,
+          maintenanceVolume: params?.maintenanceVolume,
+          dataset: params?.dataset,
+        },
+      ),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });

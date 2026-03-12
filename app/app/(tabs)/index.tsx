@@ -6,6 +6,7 @@ import { DateSelector, DialGauge, InsightCard } from '../../src/components/share
 import InteractiveBody from '../../src/components/3d/InteractiveBody';
 import { Modal, Spinner } from '../../src/components/ui';
 import { useRecentStimulus, useWorkoutHistorySummaries } from '../../src/hooks/useWorkouts';
+import { startPerfSpan } from '../../src/dev/perfTrace';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useWorkoutStore } from '../../src/stores/workoutStore';
 import {
@@ -33,6 +34,7 @@ export default function DashboardScreen() {
   const dataset = useSettingsStore((s) => s.dataset);
   const isDesktop = screenWidth > DESKTOP_BREAKPOINT;
   const isFocused = useIsFocused();
+  const screenLoadSpanRef = useRef<ReturnType<typeof startPerfSpan> | null>(null);
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [resetToken, setResetToken] = useState(0);
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
@@ -84,6 +86,24 @@ export default function DashboardScreen() {
     [workoutSummaryData],
   );
   const hasAnalysisData = (analysis?.summary.total_sets ?? 0) > 0;
+
+  useEffect(() => {
+    const isBusy = isLoading || isSummaryLoading;
+    if (isBusy && !screenLoadSpanRef.current) {
+      screenLoadSpanRef.current = startPerfSpan('mobile:dashboard:screen-load', {
+        selectedDate: selectedDateKey,
+      });
+      return;
+    }
+
+    if (!isBusy && screenLoadSpanRef.current) {
+      screenLoadSpanRef.current({
+        hasAnalysisData,
+        summaryCount: workoutSummaryData?.workouts.length ?? 0,
+      });
+      screenLoadSpanRef.current = null;
+    }
+  }, [hasAnalysisData, isLoading, isSummaryLoading, selectedDateKey, workoutSummaryData?.workouts.length]);
 
   // Derive display data from analysis
   const stimulusLevels = useMemo(

@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useWorkoutHistory } from '../../../src/hooks/useWorkouts';
+import { useWorkoutHistorySummaries } from '../../../src/hooks/useWorkouts';
+import { startPerfSpan } from '../../../src/dev/perfTrace';
 import { Spinner } from '../../../src/components/ui';
 import ProgressTabPanel from '../../../src/components/progress/ProgressTabPanel';
 import { colors, borders, spacing } from '../../../src/theme';
-import type { WorkoutLogResponse } from '../../../src/types/api.types';
+import type { WorkoutSummaryResponse } from '../../../src/types/api.types';
 
 function formatRelativeDate(dateStr: string): string {
   const d = new Date(dateStr);
@@ -26,17 +27,34 @@ export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const [activeView, setActiveView] = useState<'log' | 'progress'>('log');
-  const { data: history, isLoading, refetch, isRefetching } = useWorkoutHistory({ limit: 100 });
+  const screenLoadSpanRef = useRef<ReturnType<typeof startPerfSpan> | null>(null);
+  const { data: history, isLoading, refetch, isRefetching } = useWorkoutHistorySummaries({ limit: 100 });
 
   const workouts = history?.workouts ?? [];
 
-  const renderWorkout = ({ item }: { item: WorkoutLogResponse }) => {
-    const exCount = item.exercises.length;
-    const totalSets = item.exercises.reduce((sum, e) => sum + e.sets_completed, 0);
+  useEffect(() => {
+    if (activeView !== 'log') return;
+
+    if (isLoading && !screenLoadSpanRef.current) {
+      screenLoadSpanRef.current = startPerfSpan('mobile:history:screen-load', {
+        limit: 100,
+      });
+      return;
+    }
+
+    if (!isLoading && screenLoadSpanRef.current) {
+      screenLoadSpanRef.current({
+        rows: workouts.length,
+      });
+      screenLoadSpanRef.current = null;
+    }
+  }, [activeView, isLoading, workouts.length]);
+
+  const renderWorkout = ({ item }: { item: WorkoutSummaryResponse }) => {
     const metaParts = [
       item.duration_minutes != null ? `${item.duration_minutes}m` : null,
-      `${totalSets} sets`,
-      `${exCount} exercises`,
+      `${item.total_sets} sets`,
+      `${item.exercise_count} exercises`,
     ].filter(Boolean);
 
     return (
@@ -90,6 +108,10 @@ export default function HistoryScreen() {
           keyExtractor={(w) => w.id}
           renderItem={renderWorkout}
           contentContainerStyle={styles.list}
+          initialNumToRender={12}
+          maxToRenderPerBatch={12}
+          windowSize={8}
+          removeClippedSubviews
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl

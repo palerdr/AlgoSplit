@@ -5,6 +5,8 @@ import { Renderer, THREE } from 'expo-three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
 import { Asset } from 'expo-asset';
 import { applyBodyColors, updateBodyColors, type ColoredBodyData } from './buildBodyMeshes';
+import { BODY_3D_CONFIG } from './threeConfig';
+import { startPerfSpan, traceAsync, traceSync } from '../../dev/perfTrace';
 
 interface InteractiveBodyProps {
   width: number;
@@ -57,8 +59,12 @@ function InteractiveBody({
   onDragEnd,
 }: InteractiveBodyProps) {
   const [glError, setGlError] = useState(false);
-  const HORIZONTAL_DRAG_THRESHOLD = 5;
-  const TAP_THRESHOLD = 6;
+  const HORIZONTAL_DRAG_THRESHOLD = BODY_3D_CONFIG.interaction.horizontalDragThreshold;
+  const TAP_THRESHOLD = BODY_3D_CONFIG.interaction.tapThreshold;
+  const DRAG_SENSITIVITY = BODY_3D_CONFIG.interaction.dragSensitivity;
+  const INERTIA_DECAY = BODY_3D_CONFIG.interaction.inertiaDecay;
+  const MAX_RELEASE_VELOCITY = BODY_3D_CONFIG.interaction.maxReleaseVelocity;
+  const MIN_INERTIA_VELOCITY = BODY_3D_CONFIG.interaction.minInertiaVelocity;
   const TWO_PI = Math.PI * 2;
 
   // Rotation state — start at 0 so the transformed STL faces forward
@@ -133,7 +139,7 @@ function InteractiveBody({
         const dx = evt.nativeEvent.locationX - lastTouchXRef.current;
         const dt = Math.max(1, now - lastTimestampRef.current);
         if (!Number.isFinite(dx) || !Number.isFinite(dt)) return;
-        const delta = dx * 0.006;
+        const delta = dx * DRAG_SENSITIVITY;
         rotationRef.current = normalizeRotation(rotationRef.current + delta);
         velocityRef.current = Number.isFinite(delta / dt) ? (delta / dt) * 16 : 0;
         lastTouchXRef.current = evt.nativeEvent.locationX;
@@ -144,7 +150,9 @@ function InteractiveBody({
       },
       onPanResponderRelease: () => {
         isDraggingRef.current = false;
-        velocityRef.current = Number.isFinite(velocityRef.current) ? Math.max(-0.2, Math.min(0.2, velocityRef.current)) : 0;
+        velocityRef.current = Number.isFinite(velocityRef.current)
+          ? Math.max(-MAX_RELEASE_VELOCITY, Math.min(MAX_RELEASE_VELOCITY, velocityRef.current))
+          : 0;
         onDragEnd?.();
       },
       onPanResponderTerminate: () => {
@@ -158,67 +166,77 @@ function InteractiveBody({
   // ─── GL context creation ────────────────────────────────────
   const onContextCreate = useCallback(
     async (gl: ExpoWebGLRenderingContext) => {
+      const finishInitSpan = startPerfSpan('mobile:dashboard:3d:init', {
+        width,
+        height,
+        platform: Platform.OS,
+      });
+
       try {
         const renderer = new Renderer({ gl });
         renderer.setSize(gl.drawingBufferWidth, gl.drawingBufferHeight);
-        renderer.setClearColor(0x0d0d0d, 1);
+        renderer.setClearColor(BODY_3D_CONFIG.render.clearColorHex, 1);
 
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(
-          35,
+          BODY_3D_CONFIG.camera.fov,
           gl.drawingBufferWidth / gl.drawingBufferHeight,
-          0.1,
-          100
+          BODY_3D_CONFIG.camera.near,
+          BODY_3D_CONFIG.camera.far,
         );
-        camera.position.set(0, 0, 5);
+        camera.position.set(
+          BODY_3D_CONFIG.camera.position[0],
+          BODY_3D_CONFIG.camera.position[1],
+          BODY_3D_CONFIG.camera.position[2],
+        );
         camera.lookAt(0, 0, 0);
         cameraRef.current = camera;
 
-        // Lighting — flat shading needs higher ambient (no smooth gradient)
-        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-        const main = new THREE.DirectionalLight(0xffffff, 1.2);
-        main.position.set(3, 4, 5);
-        scene.add(main);
-        const fill = new THREE.DirectionalLight(0xffffff, 0.7);
-        fill.position.set(-4, 1, 3);
-        scene.add(fill);
-        const rim = new THREE.DirectionalLight(0xffffff, 0.6);
-        rim.position.set(-2, 3, -2);
-        scene.add(rim);
-        const bottom = new THREE.DirectionalLight(0xffffff, 0.3);
-        bottom.position.set(0, -3, 2);
-        scene.add(bottom);
-        const back = new THREE.DirectionalLight(0xffffff, 0.35);
-        back.position.set(1, 0, -4);
-        scene.add(back);
-
-        // Load STL body model
-        const geometry = await loadSTLGeometry();
-
-        // Scale to fit ~2.8 units in largest dimension
-        const bbox = new THREE.Box3().setFromBufferAttribute(
-          geometry.getAttribute('position') as THREE.BufferAttribute
-        );
-        const size = new THREE.Vector3();
-        bbox.getSize(size);
-        const scale = 2.8 / Math.max(size.x, size.y, size.z);
-
-        // Transform vertices: Z-up STL → Y-up world + apply scale
-        const posAttr = geometry.getAttribute('position') as THREE.BufferAttribute;
-        for (let i = 0; i < posAttr.count; i++) {
-          const ox = posAttr.getX(i);
-          const oy = posAttr.getY(i);
-          const oz = posAttr.getZ(i);
-          // STL Z-up → Y-up: (x, y, z) → (x, z, -y)
-          posAttr.setXYZ(i, ox * scale, oz * scale, -oy * scale);
+        scene.add(new THREE.AmbientLight(0xffffff, BODY_3D_CONFIG.lighting.ambientIntensity));
+        for (const lightConfig of BODY_3D_CONFIG.lighting.directional) {
+          const light = new THREE.DirectionalLight(0xffffff, lightConfig.intensity);
+          light.position.set(
+            lightConfig.position[0],
+            lightConfig.position[1],
+            lightConfig.position[2],
+          );
+          scene.add(light);
         }
-        posAttr.needsUpdate = true;
-        geometry.computeVertexNormals();
-        geometry.computeBoundingBox();
-        geometry.computeBoundingSphere();
 
-        // Apply per-face region coloring (centroid-based)
-        const bodyData = applyBodyColors(geometry, stimulusRef.current);
+        const geometry = await traceAsync('mobile:dashboard:3d:load-stl', () => loadSTLGeometry(), {
+          platform: Platform.OS,
+        });
+
+        const posAttr = traceSync('mobile:dashboard:3d:transform-geometry', () => {
+          const bbox = new THREE.Box3().setFromBufferAttribute(
+            geometry.getAttribute('position') as THREE.BufferAttribute,
+          );
+          const size = new THREE.Vector3();
+          bbox.getSize(size);
+          const scale = BODY_3D_CONFIG.model.maxDimension / Math.max(size.x, size.y, size.z);
+
+          const positionAttribute = geometry.getAttribute('position') as THREE.BufferAttribute;
+          for (let i = 0; i < positionAttribute.count; i++) {
+            const ox = positionAttribute.getX(i);
+            const oy = positionAttribute.getY(i);
+            const oz = positionAttribute.getZ(i);
+            positionAttribute.setXYZ(i, ox * scale, oz * scale, -oy * scale);
+          }
+          positionAttribute.needsUpdate = true;
+          geometry.computeVertexNormals();
+          geometry.computeBoundingBox();
+          geometry.computeBoundingSphere();
+
+          return positionAttribute;
+        });
+
+        const bodyData = traceSync(
+          'mobile:dashboard:3d:apply-colors',
+          () => applyBodyColors(geometry, stimulusRef.current),
+          {
+            faces: posAttr.count / 3,
+          },
+        );
         bodyDataRef.current = bodyData;
 
         const material = new THREE.MeshPhongMaterial({
@@ -243,8 +261,8 @@ function InteractiveBody({
           rafRef.current = requestAnimationFrame(animate);
 
           // Apply inertia when not dragging
-          if (!isDraggingRef.current && Math.abs(velocityRef.current) > 0.0001) {
-            velocityRef.current *= 0.95;
+          if (!isDraggingRef.current && Math.abs(velocityRef.current) > MIN_INERTIA_VELOCITY) {
+            velocityRef.current *= INERTIA_DECAY;
             rotationRef.current = normalizeRotation(rotationRef.current + velocityRef.current);
           } else if (!Number.isFinite(velocityRef.current)) {
             velocityRef.current = 0;
@@ -259,12 +277,18 @@ function InteractiveBody({
           gl.endFrameEXP();
         };
         animate();
+
+        finishInitSpan({
+          vertices: posAttr.count,
+          faces: posAttr.count / 3,
+        });
       } catch (err) {
         console.warn('InteractiveBody GL error, falling back:', err);
         setGlError(true);
+        finishInitSpan({ failed: true });
       }
     },
-    []
+    [INERTIA_DECAY, MIN_INERTIA_VELOCITY, height, normalizeRotation, width]
   );
 
   // ─── Update colors when stimulus changes ────────────────────
