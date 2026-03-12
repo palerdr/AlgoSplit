@@ -1,5 +1,5 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
-import { View, StyleSheet, PanResponder, Text, Platform } from 'react-native';
+import { View, StyleSheet, PanResponder, Text, Platform, ActivityIndicator } from 'react-native';
 import { GLView, ExpoWebGLRenderingContext } from 'expo-gl';
 import { Renderer, THREE } from 'expo-three';
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
@@ -17,9 +17,18 @@ interface InteractiveBodyProps {
   onDragEnd?: () => void;
 }
 
+// ─── STL geometry cache ─────────────────────────────────────────
+// Parsed BufferGeometry is cached at module level so subsequent mounts
+// (tab switches, date changes) skip the expensive download + parse.
+// We cache the raw (un-transformed) geometry and clone per mount so
+// each instance gets its own position attribute to transform.
+
+let _cachedRawGeometry: THREE.BufferGeometry | null = null;
+let _cachePromise: Promise<THREE.BufferGeometry> | null = null;
+
 // ─── STL loader (web + native) ──────────────────────────────────
 
-async function loadSTLGeometry(): Promise<THREE.BufferGeometry> {
+async function loadSTLGeometryRaw(): Promise<THREE.BufferGeometry> {
   const asset = Asset.fromModule(require('../../../assets/models/body.stl'));
   await asset.downloadAsync();
 
@@ -42,10 +51,30 @@ async function loadSTLGeometry(): Promise<THREE.BufferGeometry> {
   }
 
   const loader = new STLLoader();
-  let geometry = loader.parse(arrayBuffer);
+  const geometry = loader.parse(arrayBuffer);
   geometry.center();
 
   return geometry;
+}
+
+async function loadSTLGeometry(): Promise<THREE.BufferGeometry> {
+  if (_cachedRawGeometry) {
+    return _cachedRawGeometry.clone();
+  }
+
+  if (!_cachePromise) {
+    _cachePromise = loadSTLGeometryRaw().then((geo) => {
+      _cachedRawGeometry = geo;
+      return geo;
+    }).catch((err: unknown) => {
+      _cachePromise = null;
+      throw err;
+    }) as Promise<THREE.BufferGeometry>;
+  }
+
+  const raw = await _cachePromise;
+  // First caller gets a clone too — the cached original stays untouched
+  return raw.clone();
 }
 
 // ─── Component ──────────────────────────────────────────────────
@@ -59,6 +88,7 @@ function InteractiveBody({
   onDragEnd,
 }: InteractiveBodyProps) {
   const [glError, setGlError] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
   const HORIZONTAL_DRAG_THRESHOLD = BODY_3D_CONFIG.interaction.horizontalDragThreshold;
   const TAP_THRESHOLD = BODY_3D_CONFIG.interaction.tapThreshold;
   const DRAG_SENSITIVITY = BODY_3D_CONFIG.interaction.dragSensitivity;
@@ -203,8 +233,10 @@ function InteractiveBody({
           scene.add(light);
         }
 
+        const stlCacheHit = _cachedRawGeometry !== null;
         const geometry = await traceAsync('mobile:dashboard:3d:load-stl', () => loadSTLGeometry(), {
           platform: Platform.OS,
+          cacheHit: stlCacheHit,
         });
 
         const posAttr = traceSync('mobile:dashboard:3d:transform-geometry', () => {
@@ -277,13 +309,16 @@ function InteractiveBody({
           gl.endFrameEXP();
         };
         animate();
+        setIsInitializing(false);
 
         finishInitSpan({
           vertices: posAttr.count,
           faces: posAttr.count / 3,
+          stlCacheHit,
         });
       } catch (err) {
         console.warn('InteractiveBody GL error, falling back:', err);
+        setIsInitializing(false);
         setGlError(true);
         finishInitSpan({ failed: true });
       }
@@ -320,6 +355,12 @@ function InteractiveBody({
       <View
         style={[styles.container, { width, height }]}
     >
+      {isInitializing && (
+        <View style={[styles.initPlaceholder, { width, height }]}>
+          <ActivityIndicator size="small" color="#333" />
+          <Text style={styles.initText}>Loading model…</Text>
+        </View>
+      )}
       <GLView
         style={{ width, height }}
         onContextCreate={onContextCreate}
@@ -372,5 +413,18 @@ const styles = StyleSheet.create({
   fallbackText: {
     color: '#555',
     fontSize: 11,
+  },
+  initPlaceholder: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#141414',
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  initText: {
+    color: '#444',
+    fontSize: 11,
+    marginTop: 8,
   },
 });

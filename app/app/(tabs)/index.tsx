@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
-import { View, ScrollView, StyleSheet, useWindowDimensions, Text } from 'react-native';
+import { View, ScrollView, StyleSheet, useWindowDimensions, Text, InteractionManager } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 import { DateSelector, DialGauge, InsightCard } from '../../src/components/shared';
@@ -38,6 +38,17 @@ export default function DashboardScreen() {
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [resetToken, setResetToken] = useState(0);
   const [selectedRegionId, setSelectedRegionId] = useState<string | null>(null);
+
+  // ─── Deferred 3D mount ──────────────────────────────────────
+  // Delay mounting the heavy InteractiveBody GL component so that
+  // dials, date selector, and insights paint on the first frame.
+  const [body3dReady, setBody3dReady] = useState(false);
+  useEffect(() => {
+    const handle = InteractionManager.runAfterInteractions(() => {
+      requestAnimationFrame(() => setBody3dReady(true));
+    });
+    return () => handle.cancel();
+  }, []);
   const selectedDateKey = useMemo(() => formatDateKey(selectedDate), [selectedDate]);
   const analysisDateKey = useMemo(() => formatDateKey(new Date()), []);
   const analysisTimezoneOffsetMinutes = useMemo(() => new Date().getTimezoneOffset(), []);
@@ -138,6 +149,12 @@ export default function DashboardScreen() {
   const dialSize = isDesktop ? 110 : 90;
 
 
+
+  // Inline body placeholder shown while the GL component is deferred
+  const bodyPlaceholder = (
+    <View style={[styles.bodyPlaceholder, { width: bodyWidth, height: bodyHeight }]} />
+  );
+
   return (
     <View style={styles.safeArea}>
       <ScrollView
@@ -160,14 +177,18 @@ export default function DashboardScreen() {
           isDesktop ? (
             <View style={[styles.mainRow, styles.mainRowDesktop]}>
               <View style={[styles.bodyContainer, { width: bodyWidth, height: bodyHeight }]}>
-                <InteractiveBody
-                  width={bodyWidth}
-                  height={bodyHeight}
-                  stimulusLevels={stimulusLevels}
-                  onRegionPress={setSelectedRegionId}
-                  onDragStart={handleDragStart}
-                  onDragEnd={handleDragEnd}
-                />
+                {body3dReady ? (
+                  <InteractiveBody
+                    width={bodyWidth}
+                    height={bodyHeight}
+                    stimulusLevels={stimulusLevels}
+                    onRegionPress={setSelectedRegionId}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                  />
+                ) : (
+                  bodyPlaceholder
+                )}
               </View>
               <View style={styles.dialsDesktop}>
                 <DialGauge
@@ -204,14 +225,18 @@ export default function DashboardScreen() {
           ) : (
             <View style={styles.mainColumnMobile}>
               <View style={[styles.bodyContainer, { width: bodyWidth, height: bodyHeight }]}>
-                <InteractiveBody
-                  width={bodyWidth}
-                  height={bodyHeight}
-                  stimulusLevels={stimulusLevels}
-                  onRegionPress={setSelectedRegionId}
-                  onDragStart={handleDragStart}
-                  onDragEnd={handleDragEnd}
-                />
+                {body3dReady ? (
+                  <InteractiveBody
+                    width={bodyWidth}
+                    height={bodyHeight}
+                    stimulusLevels={stimulusLevels}
+                    onRegionPress={setSelectedRegionId}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                  />
+                ) : (
+                  bodyPlaceholder
+                )}
               </View>
               <View style={styles.dialsRowMobile}>
                 <DialGauge
@@ -334,6 +359,10 @@ const styles = StyleSheet.create({
   },
   bodyContainer: {
     alignItems: 'center',
+  },
+  bodyPlaceholder: {
+    backgroundColor: '#141414',
+    borderRadius: 12,
   },
   dialsDesktop: {
     alignItems: 'center',
