@@ -137,8 +137,6 @@ export default function DashboardScreen() {
   }
   const dialSize = isDesktop ? 110 : 90;
 
-  if (isLoading || isSummaryLoading) return <Spinner fullScreen />;
-
   return (
     <View style={styles.safeArea}>
       <ScrollView
@@ -155,7 +153,9 @@ export default function DashboardScreen() {
           />
         </View>
 
-        {hasAnalysisData ? (
+        {isLoading ? (
+          <Spinner style={{ marginTop: 60 }} />
+        ) : hasAnalysisData ? (
           isDesktop ? (
             <View style={[styles.mainRow, styles.mainRowDesktop]}>
               <View style={[styles.bodyContainer, { width: bodyWidth, height: bodyHeight }]}>
@@ -252,7 +252,7 @@ export default function DashboardScreen() {
           </View>
         )}
 
-        {hasAnalysisData && (
+        {!isLoading && hasAnalysisData && (
           <View style={[styles.insightsSection, isDesktop && styles.insightsDesktop]}>
             {insights.map((insight, i) => (
               <InsightCard

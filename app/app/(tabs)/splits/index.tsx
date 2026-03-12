@@ -58,8 +58,6 @@ export default function SplitsScreen() {
     </TouchableOpacity>
   );
 
-  if (isLoading) return <Spinner fullScreen />;
-
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
@@ -81,7 +79,9 @@ export default function SplitsScreen() {
         </View>
       </View>
 
-      {error ? (
+      {isLoading ? (
+        <Spinner style={{ marginTop: 40 }} />
+      ) : error ? (
         <View style={styles.centered}>
           <Text style={styles.errorText}>Failed to load splits</Text>
         </View>

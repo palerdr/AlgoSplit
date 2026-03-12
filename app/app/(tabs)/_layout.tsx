@@ -192,8 +192,7 @@ export default function TabLayout() {
     triggerExpandTransition();
   }, []);
 
-  if (isLoading) return <Spinner fullScreen />;
-  if (!isAuthenticated) return <Redirect href="/(auth)/login" />;
+  if (!isLoading && !isAuthenticated) return <Redirect href="/(auth)/login" />;
 
   return (
     <View style={{ flex: 1 }}>
