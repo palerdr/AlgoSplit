@@ -137,7 +137,9 @@ export default function DashboardScreen() {
   }
   const dialSize = isDesktop ? 110 : 90;
 
-  if (isLoading || isSummaryLoading) return <Spinner fullScreen />;
+  // Only block render on the primary analysis query — summaries (calendar dots)
+  // can populate asynchronously without holding back the entire dashboard.
+  if (isLoading) return <Spinner fullScreen />;
 
   return (
     <View style={styles.safeArea}>

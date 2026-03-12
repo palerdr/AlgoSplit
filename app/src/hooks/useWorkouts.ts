@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import {
   getAllWorkouts,
   getWorkouts,
@@ -127,6 +127,27 @@ export function usePreviousWorkoutData(sessionName: string | undefined) {
   });
 }
 
+/** Build the query key for recent-stimulus so prefetch + useQuery share the same entry. */
+export function recentStimulusKey(
+  days: number,
+  endDate: string,
+  timezoneOffsetMinutes: number,
+  stimulusDuration: number,
+  maintenanceVolume: number,
+  dataset: string,
+) {
+  return [
+    ...workoutKeys.all,
+    'recent-stimulus',
+    days,
+    endDate,
+    timezoneOffsetMinutes,
+    stimulusDuration,
+    maintenanceVolume,
+    dataset,
+  ] as const;
+}
+
 export function useRecentStimulus(
   days = 7,
   endDate?: string,
@@ -137,17 +158,14 @@ export function useRecentStimulus(
     dataset?: 'schoenfeld' | 'pelland' | 'average';
   },
 ) {
+  const sd = params?.stimulusDuration ?? 48;
+  const mv = params?.maintenanceVolume ?? 3;
+  const ds = params?.dataset ?? 'schoenfeld';
+  const ed = endDate ?? 'today';
+  const tzo = timezoneOffsetMinutes ?? 0;
+
   return useQuery({
-    queryKey: [
-      ...workoutKeys.all,
-      'recent-stimulus',
-      days,
-      endDate ?? 'today',
-      timezoneOffsetMinutes ?? 'local',
-      params?.stimulusDuration ?? 48,
-      params?.maintenanceVolume ?? 3,
-      params?.dataset ?? 'schoenfeld',
-    ],
+    queryKey: recentStimulusKey(days, ed, tzo, sd, mv, ds),
     queryFn: () =>
       traceAsync(
         'mobile:dashboard:analyzeWorkouts',
@@ -156,20 +174,76 @@ export function useRecentStimulus(
             days,
             endDate,
             timezoneOffsetMinutes,
-            stimulusDuration: params?.stimulusDuration,
-            maintenanceVolume: params?.maintenanceVolume,
-            dataset: params?.dataset,
+            stimulusDuration: sd,
+            maintenanceVolume: mv,
+            dataset: ds,
           }),
         {
           days,
           endDate,
           timezoneOffsetMinutes,
-          stimulusDuration: params?.stimulusDuration,
-          maintenanceVolume: params?.maintenanceVolume,
-          dataset: params?.dataset,
+          stimulusDuration: sd,
+          maintenanceVolume: mv,
+          dataset: ds,
         },
       ),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Prefetch helpers — fire-and-forget into an external QueryClient
+// ---------------------------------------------------------------------------
+
+function formatDateKeyUtil(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Prefetch the dashboard-critical queries so they are warm before the tab
+ * mounts.  Call after auth resolves or on tab-press.  Uses
+ * `prefetchQuery` so it never triggers a refetch if data is already fresh.
+ */
+export function prefetchDashboardQueries(qc: QueryClient) {
+  const today = formatDateKeyUtil(new Date());
+  const tzo = new Date().getTimezoneOffset();
+  // Lazy-require to avoid pulling settingsStore into the module's import graph
+  // (which would break tests that mock useAuth without mocking zustand/middleware).
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { useSettingsStore } = require('../stores/settingsStore') as {
+    useSettingsStore: { getState: () => { stimulusDuration: number; maintenanceVolume: number; dataset: 'schoenfeld' | 'pelland' | 'average' } };
+  };
+  const { stimulusDuration, maintenanceVolume, dataset } = useSettingsStore.getState();
+
+  // 1. Recent stimulus (analysis) — the primary dashboard query
+  qc.prefetchQuery({
+    queryKey: recentStimulusKey(7, today, tzo, stimulusDuration, maintenanceVolume, dataset),
+    queryFn: () =>
+      analyzeWorkouts({
+        days: 7,
+        endDate: today,
+        timezoneOffsetMinutes: tzo,
+        stimulusDuration,
+        maintenanceVolume,
+        dataset,
+      }),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // 2. Workout summaries (calendar dots) — lightweight, shared with history
+  qc.prefetchQuery({
+    queryKey: [...workoutKeys.list({ days: 61, limit: 500 }), 'summary'],
+    queryFn: () => getWorkoutSummaries({ days: 61, limit: 500 }),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+/** Prefetch history summaries so the History tab is warm on arrival. */
+export function prefetchHistoryQueries(qc: QueryClient) {
+  qc.prefetchQuery({
+    queryKey: [...workoutKeys.list({ limit: 100 }), 'summary'],
+    queryFn: () => getWorkoutSummaries({ limit: 100 }),
+    staleTime: 5 * 60 * 1000,
   });
 }
