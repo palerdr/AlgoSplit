@@ -59,4 +59,9 @@ nul
 !DEPLOYMENT.md
 app/AGENTS.md
 app/agentic/**/*.md
+!sync/**/*.md
+sync/logs/
+sync/pids/
+worktrees/*
+!worktrees/.gitkeep
 
