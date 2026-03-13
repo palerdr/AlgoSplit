@@ -3,6 +3,7 @@ import {
   getAllWorkouts,
   getWorkouts,
   getWorkoutSummaries,
+  getWorkoutDates,
   getWorkout,
   getWorkoutStats,
   logWorkout,
@@ -34,6 +35,7 @@ export function useCompleteWorkoutHistory(params?: { days?: number }) {
       traceAsync('mobile:history:getAllWorkouts', () => getAllWorkouts(params), {
         days: params?.days,
       }),
+    placeholderData: (previousData) => previousData,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
@@ -46,6 +48,23 @@ export function useWorkoutHistorySummaries(params?: { limit?: number; offset?: n
       traceAsync('mobile:history:getWorkoutSummaries', () => getWorkoutSummaries(params), {
         limit: params?.limit,
         offset: params?.offset,
+        days: params?.days,
+      }),
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Fetch distinct workout completion dates (YYYY-MM-DD strings).
+ * Uses the lightweight /api/workouts/dates endpoint — single DB query,
+ * no exercise join.  Ideal for calendar dot rendering.
+ */
+export function useWorkoutDates(params?: { days?: number }) {
+  return useQuery({
+    queryKey: [...workoutKeys.all, 'dates', params?.days],
+    queryFn: () =>
+      traceAsync('mobile:dashboard:getWorkoutDates', () => getWorkoutDates(params), {
         days: params?.days,
       }),
     staleTime: 5 * 60 * 1000,
@@ -80,6 +99,7 @@ export function useLogWorkout() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: workoutKeys.lists() });
       qc.invalidateQueries({ queryKey: workoutKeys.stats() });
+      qc.invalidateQueries({ queryKey: [...workoutKeys.all, 'dates'] });
       qc.invalidateQueries({ queryKey: [...workoutKeys.all, 'recent-stimulus'] });
     },
   });
@@ -92,6 +112,7 @@ export function useDeleteWorkout() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: workoutKeys.lists() });
       qc.invalidateQueries({ queryKey: workoutKeys.stats() });
+      qc.invalidateQueries({ queryKey: [...workoutKeys.all, 'dates'] });
       qc.invalidateQueries({ queryKey: [...workoutKeys.all, 'recent-stimulus'] });
     },
   });
@@ -231,10 +252,10 @@ export function prefetchDashboardQueries(qc: QueryClient) {
     staleTime: 5 * 60 * 1000,
   });
 
-  // 2. Workout summaries (calendar dots) — lightweight, shared with history
+  // 2. Workout dates (calendar dots) — single DB query, no exercise join
   qc.prefetchQuery({
-    queryKey: [...workoutKeys.list({ days: 61, limit: 500 }), 'summary'],
-    queryFn: () => getWorkoutSummaries({ days: 61, limit: 500 }),
+    queryKey: [...workoutKeys.all, 'dates', 61],
+    queryFn: () => getWorkoutDates({ days: 61 }),
     staleTime: 5 * 60 * 1000,
   });
 }
@@ -244,6 +265,17 @@ export function prefetchHistoryQueries(qc: QueryClient) {
   qc.prefetchQuery({
     queryKey: [...workoutKeys.list({ limit: 100 }), 'summary'],
     queryFn: () => getWorkoutSummaries({ limit: 100 }),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function prefetchCompleteWorkoutHistory(
+  qc: QueryClient,
+  params?: { days?: number },
+) {
+  qc.prefetchQuery({
+    queryKey: [...workoutKeys.list(params ?? {}), 'complete'],
+    queryFn: () => getAllWorkouts(params),
     staleTime: 5 * 60 * 1000,
   });
 }

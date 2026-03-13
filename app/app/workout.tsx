@@ -35,6 +35,8 @@ export default function WorkoutScreen() {
   const addExercise = useWorkoutStore((s) => s.addExercise);
   const cancelWorkout = useWorkoutStore((s) => s.cancelWorkout);
   const getWorkoutData = useWorkoutStore((s) => s.getWorkoutData);
+  const storedIndex = useWorkoutStore((s) => s.currentExerciseIndex);
+  const setStoredIndex = useWorkoutStore((s) => s.setCurrentExerciseIndex);
 
   const logWorkoutMutation = useLogWorkout();
 
@@ -44,7 +46,8 @@ export default function WorkoutScreen() {
   // Merge fetched previous data into the store if not already set
   const previousData = activeWorkout?.previousData ?? fetchedPrevData ?? undefined;
 
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const currentIndex = storedIndex;
+  const setCurrentIndex = setStoredIndex;
   const [showPicker, setShowPicker] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pagerHeight, setPagerHeight] = useState(0);
@@ -59,8 +62,8 @@ export default function WorkoutScreen() {
   // Clamp currentIndex if exercises removed
   useEffect(() => {
     const max = exerciseCount; // summary page
-    setCurrentIndex((i) => Math.min(i, max));
-  }, [exerciseCount]);
+    if (currentIndex > max) setCurrentIndex(max);
+  }, [exerciseCount, currentIndex, setCurrentIndex]);
 
   const handleScrollBeginDrag = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -161,7 +164,7 @@ export default function WorkoutScreen() {
 
     if (index === exerciseCount) {
       return (
-        <View style={[styles.pageWrapper, styles.summaryPageWrapper, pageStyle]}>
+        <View style={[styles.pageWrapper, styles.summaryPageWrapper, pageStyle, { paddingBottom: 0 }]}>
           <View style={[styles.card, styles.summaryCard]}>
             <WorkoutSummaryMobile
               sessionName={sessionName}
@@ -260,6 +263,7 @@ export default function WorkoutScreen() {
               offset: SCREEN_WIDTH * index,
               index,
             })}
+            initialScrollIndex={currentIndex}
             initialNumToRender={1}
             maxToRenderPerBatch={1}
             windowSize={3}
@@ -272,6 +276,7 @@ export default function WorkoutScreen() {
           <ExerciseNavMobile
             currentIndex={currentIndex}
             totalExercises={exerciseCount}
+            isSaving={logWorkoutMutation.isPending}
             onPrev={() => scrollToIndex(Math.max(0, currentIndex - 1))}
             onNext={() => scrollToIndex(Math.min(exerciseCount, currentIndex + 1))}
             onFinish={handleFinish}
@@ -305,7 +310,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   summaryPageWrapper: {
-    alignItems: 'stretch',
+    justifyContent: 'flex-start',
+    paddingTop: 8,
   },
   card: {
     width: '100%',
@@ -323,6 +329,7 @@ const styles = StyleSheet.create({
     flex: 1,
     maxHeight: '100%',
     paddingBottom: 0,
+    alignSelf: 'stretch',
   },
   emptyContainer: {
     flex: 1,

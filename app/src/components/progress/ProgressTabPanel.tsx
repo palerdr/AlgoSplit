@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   View,
   Text,
@@ -8,7 +9,10 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useCompleteWorkoutHistory } from '../../hooks/useWorkouts';
+import {
+  prefetchCompleteWorkoutHistory,
+  useCompleteWorkoutHistory,
+} from '../../hooks/useWorkouts';
 import { useSplitsList } from '../../hooks/useSplits';
 import ProgressSplineChart from './ProgressSplineChart';
 import ProgressExercisePickerSheet from './ProgressExercisePickerSheet';
@@ -32,6 +36,7 @@ interface Props {
 }
 
 export default function ProgressTabPanel({ showHeader = false }: Props) {
+  const queryClient = useQueryClient();
   const [timeRange, setTimeRange] = useState<TimeRange>('1M');
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [showPicker, setShowPicker] = useState(false);
@@ -41,7 +46,11 @@ export default function ProgressTabPanel({ showHeader = false }: Props) {
     [timeRange],
   );
 
-  const { data: workoutData, isLoading } = useCompleteWorkoutHistory(queryParams);
+  const {
+    data: workoutData,
+    isLoading,
+    isFetching,
+  } = useCompleteWorkoutHistory(queryParams);
   const { data: splitsData } = useSplitsList();
 
   const workouts = workoutData?.workouts ?? [];
@@ -86,6 +95,19 @@ export default function ProgressTabPanel({ showHeader = false }: Props) {
     }
   }, [workouts, exerciseList, selectedExercise]);
 
+  useEffect(() => {
+    if (!workoutData) return;
+
+    if (timeRange === '1M') {
+      prefetchCompleteWorkoutHistory(queryClient, { days: RANGE_DAYS['6M'] });
+      return;
+    }
+
+    if (timeRange === '6M') {
+      prefetchCompleteWorkoutHistory(queryClient);
+    }
+  }, [queryClient, timeRange, workoutData]);
+
   const sessionPoints = useMemo(() => {
     if (!selectedExercise) return [];
     return extractSessionPoints(workouts, selectedExercise);
@@ -125,6 +147,13 @@ export default function ProgressTabPanel({ showHeader = false }: Props) {
             </TouchableOpacity>
           ))}
         </View>
+
+        {isFetching && !isLoading ? (
+          <View style={styles.loadingPill}>
+            <ActivityIndicator size="small" color={colors.green} />
+            <Text style={styles.loadingPillText}>Updating range...</Text>
+          </View>
+        ) : null}
 
         <TouchableOpacity style={styles.selectorCard} onPress={() => setShowPicker(true)}>
           <View style={styles.selectorLeft}>
@@ -223,6 +252,23 @@ const styles = StyleSheet.create({
   },
   rangeTextActive: {
     color: colors.text,
+  },
+  loadingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 8,
+    backgroundColor: colors.surface,
+    borderRadius: 999,
+    borderWidth: 0.5,
+    borderColor: colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  loadingPillText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
   },
   selectorCard: {
     flexDirection: 'row',

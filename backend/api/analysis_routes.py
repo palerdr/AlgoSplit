@@ -9,6 +9,8 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Optional
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
+import threading
+import time as _time
 import sys
 from pathlib import Path
 
@@ -38,6 +40,44 @@ from core.granular_patterns import (
 )
 
 router = APIRouter()
+
+
+# ============================================================================
+# ANALYSIS CACHE
+# ============================================================================
+# The analyze-workouts result for a given (user, params) tuple is
+# deterministic until that user logs, updates, or deletes a workout.
+# We cache the serialised AnalysisResponse keyed by (user_id, params)
+# with a 10-minute TTL.  Entries are also explicitly purged per-user
+# when workout mutations occur (see `invalidate_analysis_cache`).
+
+_ANALYSIS_CACHE_TTL_S = 10 * 60  # 10 minutes
+_analysis_cache: dict[str, tuple[AnalysisResponse, float]] = {}
+_analysis_cache_lock = threading.Lock()
+
+
+def _analysis_cache_key(
+    user_id: str,
+    days: int,
+    end_date: Optional[date],
+    timezone_offset_minutes: int,
+    stimulus_duration: int,
+    maintenance_volume: int,
+    dataset: str,
+) -> str:
+    return f"{user_id}:{days}:{end_date}:{timezone_offset_minutes}:{stimulus_duration}:{maintenance_volume}:{dataset}"
+
+
+def invalidate_analysis_cache(user_id: str) -> None:
+    """Purge all cached analysis entries for a given user.
+
+    Call this from workout mutation endpoints (log, update, delete) so
+    the next analyze-workouts request reflects the new state.
+    """
+    with _analysis_cache_lock:
+        keys_to_remove = [k for k in _analysis_cache if k.startswith(f"{user_id}:")]
+        for k in keys_to_remove:
+            _analysis_cache.pop(k, None)
 
 
 # ============================================================================
@@ -98,6 +138,19 @@ async def analyze_workouts(
     converts it to Split format, and runs the stimulus engine.
     """
     try:
+        # Check cache first
+        cache_key = _analysis_cache_key(
+            current_user.id, days, end_date, timezone_offset_minutes,
+            stimulus_duration, maintenance_volume, dataset,
+        )
+        now_mono = _time.monotonic()
+        with _analysis_cache_lock:
+            cached = _analysis_cache.get(cache_key)
+            if cached is not None:
+                response, cached_at = cached
+                if now_mono - cached_at < _ANALYSIS_CACHE_TTL_S:
+                    return response
+
         supabase = get_supabase_client_with_token(current_user.access_token)
         effective_end_date = end_date or datetime.utcnow().date()
         window_start_date = effective_end_date - timedelta(days=days - 1)
@@ -119,7 +172,10 @@ async def analyze_workouts(
         )
 
         if not workouts_result.data:
-            return _empty_workout_analysis(days, stimulus_duration, maintenance_volume, dataset)
+            result = _empty_workout_analysis(days, stimulus_duration, maintenance_volume, dataset)
+            with _analysis_cache_lock:
+                _analysis_cache[cache_key] = (result, _time.monotonic())
+            return result
 
         # Get only columns needed for analysis (exercise name + sets)
         workout_ids = [w["id"] for w in workouts_result.data]
@@ -131,7 +187,7 @@ async def analyze_workouts(
             .execute()
         )
 
-        return _build_workout_analysis(
+        result = _build_workout_analysis(
             workouts_result.data,
             exercises_result.data or [],
             days=days,
@@ -140,6 +196,12 @@ async def analyze_workouts(
             dataset=dataset,
             now=window_end,
         )
+
+        # Store in cache
+        with _analysis_cache_lock:
+            _analysis_cache[cache_key] = (result, _time.monotonic())
+
+        return result
 
     except HTTPException:
         raise

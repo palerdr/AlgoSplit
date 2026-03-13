@@ -327,6 +327,11 @@ export interface WorkoutSummaryListResponse {
   total: number;
 }
 
+export interface WorkoutDatesResponse {
+  dates: string[];
+  total: number;
+}
+
 export interface WorkoutStatsResponse {
   total_workouts: number;
   total_sets: number;

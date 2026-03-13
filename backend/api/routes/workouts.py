@@ -14,11 +14,13 @@ from schemas.workouts import (
     WorkoutHistoryResponse,
     WorkoutSummaryListResponse,
     WorkoutSummaryResponse,
+    WorkoutDatesResponse,
     WorkoutStatsResponse,
     WorkoutExerciseResponse,
 )
 from schemas.auth import ErrorResponse
 from api.dependencies import get_current_user, AuthUser
+from api.analysis_routes import invalidate_analysis_cache
 
 router = APIRouter(prefix="/api/workouts", tags=["Workouts"])
 logger = logging.getLogger(__name__)
@@ -236,6 +238,9 @@ async def log_workout(
             except Exception:
                 pass  # Non-critical — workout is already saved
 
+        # Invalidate cached analysis for this user
+        invalidate_analysis_cache(current_user.id)
+
         # Build and return response
         response_payload = {
             **workout_result.data[0],
@@ -406,6 +411,63 @@ async def get_workout_history_summaries(
         )
 
 
+@router.get(
+    "/dates",
+    response_model=WorkoutDatesResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+    },
+    summary="Get workout dates",
+    description="Get distinct dates with completed workouts (for calendar dots)",
+)
+async def get_workout_dates(
+    current_user: AuthUser = Depends(get_current_user),
+    days: Optional[int] = Query(None, ge=1, description="Filter to last N days"),
+):
+    """
+    Return distinct completion dates as YYYY-MM-DD strings.
+
+    Single DB round-trip, no exercise join — designed for calendar dot
+    rendering where only the presence of a workout matters.
+    """
+    try:
+        supabase = get_supabase_client_with_token(current_user.access_token)
+
+        query = supabase.table("workout_logs").select(
+            "id, completed_at"
+        ).eq("user_id", current_user.id)
+
+        if days:
+            cutoff_date = datetime.utcnow() - timedelta(days=days)
+            query = query.gte("completed_at", cutoff_date.isoformat())
+
+        result = query.order("completed_at", desc=True).limit(1000).execute()
+
+        if not result.data:
+            return WorkoutDatesResponse(dates=[], total=0)
+
+        # Extract unique YYYY-MM-DD strings
+        seen: set[str] = set()
+        dates: list[str] = []
+        for row in result.data:
+            completed_at = row.get("completed_at", "")
+            if not completed_at:
+                continue
+            date_str = str(completed_at)[:10]  # "2026-01-14T..." → "2026-01-14"
+            if date_str not in seen:
+                seen.add(date_str)
+                dates.append(date_str)
+
+        return WorkoutDatesResponse(dates=dates, total=len(dates))
+
+    except Exception as e:
+        logger.exception("Failed to fetch workout dates")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch workout dates: {str(e)}",
+        )
+
+
 @router.delete(
     "/exercises/by-name/{exercise_name}",
     responses={
@@ -520,6 +582,9 @@ async def update_workout(
             result = supabase.table("workout_exercises").insert(exercise_data).execute()
             if result.data:
                 exercises_data.append(result.data[0])
+
+        # Invalidate cached analysis for this user
+        invalidate_analysis_cache(current_user.id)
 
         # Fetch updated workout
         workout_result = supabase.table("workout_logs").select("*").eq(
@@ -734,6 +799,9 @@ async def delete_workout(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Workout not found",
             )
+
+        # Invalidate cached analysis for this user
+        invalidate_analysis_cache(current_user.id)
 
         return None
 

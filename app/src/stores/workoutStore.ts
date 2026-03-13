@@ -64,8 +64,10 @@ function toWorkoutCompletionIso(workoutDate?: string): string | undefined {
 interface WorkoutState {
   activeWorkout: ActiveWorkout | null;
   selectedWorkoutDate: string | null;
+  currentExerciseIndex: number;
   restTimer: RestTimerState;
 
+  setCurrentExerciseIndex: (index: number) => void;
   setSelectedWorkoutDate: (date: string | null) => void;
   startWorkout: (sessionName: string) => void;
   startWorkoutFromSession: (
@@ -106,7 +108,12 @@ export const useWorkoutStore = create<WorkoutState>()(
     (set, get) => ({
       activeWorkout: null,
       selectedWorkoutDate: null,
+      currentExerciseIndex: 0,
       restTimer: { isRunning: false, duration: DEFAULT_REST_DURATION, remaining: 0, exerciseId: null },
+
+      setCurrentExerciseIndex: (index) => {
+        set({ currentExerciseIndex: index });
+      },
 
       setSelectedWorkoutDate: (date) => {
         set({ selectedWorkoutDate: date });
@@ -115,6 +122,7 @@ export const useWorkoutStore = create<WorkoutState>()(
       startWorkout: (sessionName) => {
         const { selectedWorkoutDate } = get();
         set({
+          currentExerciseIndex: 0,
           activeWorkout: {
             sessionName,
             startedAt: new Date().toISOString(),
@@ -126,6 +134,7 @@ export const useWorkoutStore = create<WorkoutState>()(
 
       startWorkoutFromSession: (sessionName, exercises, previousData, sessionId, splitId) => {
         const { selectedWorkoutDate } = get();
+        set({ currentExerciseIndex: 0 });
         const workoutExercises: WorkoutExercise[] = exercises.map((ex) => {
           let sets: SetData[];
           if (ex.unilateral) {
@@ -155,6 +164,7 @@ export const useWorkoutStore = create<WorkoutState>()(
       cancelWorkout: () => {
         set({
           activeWorkout: null,
+          currentExerciseIndex: 0,
           restTimer: { isRunning: false, duration: DEFAULT_REST_DURATION, remaining: 0, exerciseId: null },
         });
       },
@@ -391,6 +401,7 @@ export const useWorkoutStore = create<WorkoutState>()(
       partialize: (state) => ({
         activeWorkout: state.activeWorkout,
         selectedWorkoutDate: state.selectedWorkoutDate,
+        currentExerciseIndex: state.currentExerciseIndex,
       }),
     },
   ),

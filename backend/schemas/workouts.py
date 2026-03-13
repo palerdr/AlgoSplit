@@ -212,6 +212,13 @@ class WorkoutSummaryListResponse(BaseModel):
 # Workout Stats Schemas
 # ============================================================================
 
+class WorkoutDatesResponse(BaseModel):
+    """Lightweight list of workout completion dates (YYYY-MM-DD strings)"""
+
+    dates: List[str] = Field(..., description="Dates with at least one completed workout")
+    total: int = Field(..., description="Number of dates returned")
+
+
 class WorkoutStatsResponse(BaseModel):
     """Workout statistics and progress metrics"""
 

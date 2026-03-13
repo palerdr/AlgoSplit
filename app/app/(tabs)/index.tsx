@@ -5,7 +5,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { DateSelector, DialGauge, InsightCard } from '../../src/components/shared';
 import InteractiveBody from '../../src/components/3d/InteractiveBody';
 import { Modal, Spinner } from '../../src/components/ui';
-import { useRecentStimulus, useWorkoutHistorySummaries } from '../../src/hooks/useWorkouts';
+import { useRecentStimulus, useWorkoutDates } from '../../src/hooks/useWorkouts';
 import { startPerfSpan } from '../../src/dev/perfTrace';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useWorkoutStore } from '../../src/stores/workoutStore';
@@ -82,24 +82,16 @@ export default function DashboardScreen() {
       dataset,
     },
   );
-  const { data: workoutSummaryData, isLoading: isSummaryLoading } = useWorkoutHistorySummaries({
-    days: 61,
-    limit: 500,
-  });
+  const { data: workoutDatesData, isLoading: isDatesLoading } = useWorkoutDates({ days: 61 });
 
   const workoutDates = useMemo(
-    () =>
-      new Set(
-        (workoutSummaryData?.workouts ?? []).map((workout) =>
-          formatDateKey(new Date(workout.completed_at)),
-        ),
-      ),
-    [workoutSummaryData],
+    () => new Set(workoutDatesData?.dates ?? []),
+    [workoutDatesData],
   );
   const hasAnalysisData = (analysis?.summary.total_sets ?? 0) > 0;
 
   useEffect(() => {
-    const isBusy = isLoading || isSummaryLoading;
+    const isBusy = isLoading || isDatesLoading;
     if (isBusy && !screenLoadSpanRef.current) {
       screenLoadSpanRef.current = startPerfSpan('mobile:dashboard:screen-load', {
         selectedDate: selectedDateKey,
@@ -110,11 +102,11 @@ export default function DashboardScreen() {
     if (!isBusy && screenLoadSpanRef.current) {
       screenLoadSpanRef.current({
         hasAnalysisData,
-        summaryCount: workoutSummaryData?.workouts.length ?? 0,
+        dateCount: workoutDatesData?.dates.length ?? 0,
       });
       screenLoadSpanRef.current = null;
     }
-  }, [hasAnalysisData, isLoading, isSummaryLoading, selectedDateKey, workoutSummaryData?.workouts.length]);
+  }, [hasAnalysisData, isLoading, isDatesLoading, selectedDateKey, workoutDatesData?.dates.length]);
 
   // Derive display data from analysis
   const stimulusLevels = useMemo(

@@ -1,10 +1,24 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { SetData } from '../../stores/workoutStore';
 import { useSettingsStore } from '../../stores/settingsStore';
 import { colors } from '../../theme';
 import { convertLbToDisplay, parseWeightInput } from '../../utils/unitConversion';
+
+/** Tiny superscript badge showing the delta from the previous workout set. */
+function DeltaBadge({ delta, invert }: { delta: number | null; invert?: boolean }) {
+  if (delta == null || delta === 0) return null;
+  // invert: for RIR, lower is better so a negative delta is "good"
+  const isPositive = delta > 0;
+  const isGood = invert ? !isPositive : isPositive;
+  const label = isPositive ? `+${delta}` : String(delta);
+  return (
+    <Text style={[styles.deltaBadge, { color: isGood ? colors.green : colors.red }]}>
+      {label}
+    </Text>
+  );
+}
 
 interface SetRowMobileProps {
   setIndex: number;
@@ -35,6 +49,24 @@ function SetRowMobile({
     data.weight ? String(convertLbToDisplay(data.weight, weightUnit)) : '',
   );
   const [isWeightFocused, setIsWeightFocused] = useState(false);
+
+  // Compute deltas from previous workout set (only when current value is entered)
+  const deltas = useMemo(() => {
+    if (!previousSet) return { weight: null, reps: null, rir: null };
+    const curWeightDisplay = data.weight ? convertLbToDisplay(data.weight, weightUnit) : null;
+    const prevWeightDisplay = previousSet.weight ? convertLbToDisplay(previousSet.weight, weightUnit) : null;
+    return {
+      weight:
+        curWeightDisplay != null && prevWeightDisplay != null
+          ? Math.round((curWeightDisplay - prevWeightDisplay) * 10) / 10
+          : null,
+      reps: data.reps > 0 ? data.reps - previousSet.reps : null,
+      rir:
+        data.rir != null && previousSet.rir != null
+          ? data.rir - previousSet.rir
+          : null,
+    };
+  }, [data.weight, data.reps, data.rir, previousSet, weightUnit]);
 
   useEffect(() => {
     if (!isWeightFocused) {
@@ -75,6 +107,7 @@ function SetRowMobile({
           selectTextOnFocus
         />
         <Text style={styles.unitLabel}>{weightUnit}</Text>
+        <DeltaBadge delta={deltas.weight} />
       </View>
 
       <View style={styles.inputCell}>
@@ -90,6 +123,7 @@ function SetRowMobile({
           }}
           selectTextOnFocus
         />
+        <DeltaBadge delta={deltas.reps} />
       </View>
 
       <View style={styles.rirCell}>
@@ -106,6 +140,7 @@ function SetRowMobile({
           }}
           selectTextOnFocus
         />
+        <DeltaBadge delta={deltas.rir} invert />
       </View>
 
       <TouchableOpacity
@@ -202,5 +237,13 @@ const styles = StyleSheet.create({
   },
   removePlaceholder: {
     width: 28,
+  },
+  deltaBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -2,
+    fontSize: 9,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
   },
 });

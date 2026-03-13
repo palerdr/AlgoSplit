@@ -4,6 +4,7 @@ import type {
   WorkoutLogResponse,
   WorkoutHistoryResponse,
   WorkoutSummaryListResponse,
+  WorkoutDatesResponse,
   WorkoutStatsResponse,
   AnalysisResponse,
 } from '../types/api.types';
@@ -67,6 +68,15 @@ export async function getWorkoutSummaries(params?: {
   days?: number;
 }): Promise<WorkoutSummaryListResponse> {
   const response = await apiClient.get<WorkoutSummaryListResponse>('/api/workouts/summaries', {
+    params,
+  });
+  return response.data;
+}
+
+export async function getWorkoutDates(params?: {
+  days?: number;
+}): Promise<WorkoutDatesResponse> {
+  const response = await apiClient.get<WorkoutDatesResponse>('/api/workouts/dates', {
     params,
   });
   return response.data;

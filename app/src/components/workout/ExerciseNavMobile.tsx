@@ -1,10 +1,11 @@
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
 
 interface ExerciseNavMobileProps {
   currentIndex: number;
   totalExercises: number;
+  isSaving?: boolean;
   onPrev: () => void;
   onNext: () => void;
   onFinish: () => void;
@@ -14,6 +15,7 @@ interface ExerciseNavMobileProps {
 export default function ExerciseNavMobile({
   currentIndex,
   totalExercises,
+  isSaving,
   onPrev,
   onNext,
   onFinish,
@@ -42,9 +44,23 @@ export default function ExerciseNavMobile({
       </View>
 
       {isSummary ? (
-        <TouchableOpacity style={styles.finishBtn} onPress={onFinish}>
-          <Ionicons name="checkmark" size={16} color="#111" />
-          <Text style={styles.finishText}>Save</Text>
+        <TouchableOpacity
+          style={[styles.finishBtn, isSaving && styles.finishBtnSaving]}
+          onPress={onFinish}
+          disabled={isSaving}
+          activeOpacity={0.7}
+        >
+          {isSaving ? (
+            <>
+              <ActivityIndicator size="small" color="#111" />
+              <Text style={styles.finishText}>Saving...</Text>
+            </>
+          ) : (
+            <>
+              <Ionicons name="checkmark" size={16} color="#111" />
+              <Text style={styles.finishText}>Save</Text>
+            </>
+          )}
         </TouchableOpacity>
       ) : isLastExercise ? (
         <TouchableOpacity style={styles.reviewBtn} onPress={onNext}>
@@ -115,6 +131,9 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     minWidth: 72,
     justifyContent: 'center',
+  },
+  finishBtnSaving: {
+    opacity: 0.7,
   },
   finishText: {
     color: '#111',
