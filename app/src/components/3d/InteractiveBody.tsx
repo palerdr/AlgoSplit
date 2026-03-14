@@ -2,9 +2,14 @@ import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { View, StyleSheet, PanResponder, Text, Platform, ActivityIndicator } from 'react-native';
 import { GLView, ExpoWebGLRenderingContext } from 'expo-gl';
 import { Renderer, THREE } from 'expo-three';
-import { STLLoader } from 'three/examples/jsm/loaders/STLLoader';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Asset } from 'expo-asset';
-import { applyBodyColors, updateBodyColors, type ColoredBodyData } from './buildBodyMeshes';
+import {
+  buildSegmentedBody,
+  type BodyPartGeometry,
+  type SegmentedBodyData,
+  updateSegmentedBodyColors,
+} from './buildBodyMeshes';
 import { BODY_3D_CONFIG } from './threeConfig';
 import { startPerfSpan, traceAsync, traceSync } from '../../dev/perfTrace';
 
@@ -17,64 +22,142 @@ interface InteractiveBodyProps {
   onDragEnd?: () => void;
 }
 
-// ─── STL geometry cache ─────────────────────────────────────────
-// Parsed BufferGeometry is cached at module level so subsequent mounts
+// ─── Body model cache ───────────────────────────────────────────
+// Parsed body-part geometries are cached at module level so subsequent mounts
 // (tab switches, date changes) skip the expensive download + parse.
-// We cache the raw (un-transformed) geometry and clone per mount so
-// each instance gets its own position attribute to transform.
+// We cache raw un-transformed meshes and clone per mount so each instance gets
+// its own geometry/material lifecycle.
 
-let _cachedRawGeometry: THREE.BufferGeometry | null = null;
-let _cachePromise: Promise<THREE.BufferGeometry> | null = null;
+let _cachedRawParts: BodyPartGeometry[] | null = null;
+let _cachePromise: Promise<BodyPartGeometry[]> | null = null;
 
-// ─── STL loader (web + native) ──────────────────────────────────
+// ─── GLB loader (web + native) ──────────────────────────────────
 
-async function loadSTLGeometryRaw(): Promise<THREE.BufferGeometry> {
-  const asset = Asset.fromModule(require('../../../assets/models/body.stl'));
+async function loadBinaryAssetBuffer(moduleId: number): Promise<ArrayBuffer> {
+  const asset = Asset.fromModule(moduleId);
   await asset.downloadAsync();
-
-  let arrayBuffer: ArrayBuffer;
 
   if (Platform.OS === 'web') {
     const response = await fetch(asset.uri);
-    arrayBuffer = await response.arrayBuffer();
-  } else {
-    const { readAsStringAsync } = require('expo-file-system/legacy');
-    const base64 = await readAsStringAsync(asset.localUri!, {
-      encoding: 'base64',
-    });
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    arrayBuffer = bytes.buffer;
+    return response.arrayBuffer();
   }
 
-  const loader = new STLLoader();
-  const geometry = loader.parse(arrayBuffer);
-  geometry.center();
-
-  return geometry;
+  const { readAsStringAsync } = require('expo-file-system/legacy');
+  const base64 = await readAsStringAsync(asset.localUri!, {
+    encoding: 'base64',
+  });
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
 }
 
-async function loadSTLGeometry(): Promise<THREE.BufferGeometry> {
-  if (_cachedRawGeometry) {
-    return _cachedRawGeometry.clone();
+interface LoadedGLTF {
+  scene: THREE.Group;
+}
+
+function extractBodyPartGeometries(gltf: LoadedGLTF): BodyPartGeometry[] {
+  gltf.scene.updateMatrixWorld(true);
+
+  const parts: BodyPartGeometry[] = [];
+  gltf.scene.traverse((obj: THREE.Object3D) => {
+    const maybeMesh = obj as THREE.Mesh & { isMesh?: boolean };
+    if (!maybeMesh.isMesh) return;
+
+    const geometry = maybeMesh.geometry.clone();
+    geometry.applyMatrix4(maybeMesh.matrixWorld.clone());
+
+    parts.push({
+      name: maybeMesh.name,
+      geometry: geometry.index ? geometry.toNonIndexed() : geometry,
+    });
+  });
+
+  if (parts.length === 0) {
+    throw new Error('GLB body model did not contain any meshes');
+  }
+
+  return parts;
+}
+
+async function loadBodyPartsRaw(): Promise<BodyPartGeometry[]> {
+  const arrayBuffer = await loadBinaryAssetBuffer(require('../../../assets/models/segmented_body.glb'));
+
+  const loader = new GLTFLoader();
+  const gltf = await new Promise<LoadedGLTF>((resolve, reject) => {
+    loader.parse(arrayBuffer, '', resolve, reject);
+  });
+
+  return extractBodyPartGeometries(gltf);
+}
+
+async function loadBodyParts(): Promise<BodyPartGeometry[]> {
+  if (_cachedRawParts) {
+    return _cachedRawParts.map((part) => ({
+      name: part.name,
+      geometry: part.geometry.clone(),
+    }));
   }
 
   if (!_cachePromise) {
-    _cachePromise = loadSTLGeometryRaw().then((geo) => {
-      _cachedRawGeometry = geo;
-      return geo;
+    _cachePromise = loadBodyPartsRaw().then((parts) => {
+      _cachedRawParts = parts;
+      return parts;
     }).catch((err: unknown) => {
       _cachePromise = null;
       throw err;
-    }) as Promise<THREE.BufferGeometry>;
+    }) as Promise<BodyPartGeometry[]>;
   }
 
   const raw = await _cachePromise;
-  // First caller gets a clone too — the cached original stays untouched
-  return raw.clone();
+  return raw.map((part) => ({
+    name: part.name,
+    geometry: part.geometry.clone(),
+  }));
+}
+
+function transformBodyParts(parts: BodyPartGeometry[]): { parts: BodyPartGeometry[]; vertexCount: number } {
+  const totalBounds = new THREE.Box3();
+  let hasBounds = false;
+
+  for (const part of parts) {
+    part.geometry.computeBoundingBox();
+    if (!part.geometry.boundingBox) continue;
+    if (!hasBounds) {
+      totalBounds.copy(part.geometry.boundingBox);
+      hasBounds = true;
+    } else {
+      totalBounds.union(part.geometry.boundingBox);
+    }
+  }
+
+  if (!hasBounds) {
+    throw new Error('Segmented body model did not produce valid bounds');
+  }
+
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  totalBounds.getSize(size);
+  totalBounds.getCenter(center);
+  const scale = BODY_3D_CONFIG.model.maxDimension / Math.max(size.x, size.y, size.z);
+
+  let vertexCount = 0;
+  for (const part of parts) {
+    part.geometry.translate(-center.x, -center.y, -center.z);
+    part.geometry.scale(scale, scale, scale);
+    part.geometry.deleteAttribute('normal');
+    part.geometry.computeVertexNormals();
+    part.geometry.computeBoundingBox();
+    part.geometry.computeBoundingSphere();
+
+    const positionAttribute = part.geometry.getAttribute('position') as THREE.BufferAttribute;
+    positionAttribute.needsUpdate = true;
+    vertexCount += positionAttribute.count;
+  }
+
+  return { parts, vertexCount };
 }
 
 // ─── Component ──────────────────────────────────────────────────
@@ -97,7 +180,7 @@ function InteractiveBody({
   const MIN_INERTIA_VELOCITY = BODY_3D_CONFIG.interaction.minInertiaVelocity;
   const TWO_PI = Math.PI * 2;
 
-  // Rotation state — start at 0 so the transformed STL faces forward
+  // Rotation state — start at 0 so the transformed body faces forward
   const rotationRef = useRef(0);
   const velocityRef = useRef(0);
   const lastTouchXRef = useRef(0);
@@ -108,10 +191,9 @@ function InteractiveBody({
 
   // Three.js refs
   const groupRef = useRef<THREE.Group | null>(null);
-  const meshRef = useRef<THREE.Mesh | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const raycasterRef = useRef(new THREE.Raycaster());
-  const bodyDataRef = useRef<ColoredBodyData | null>(null);
+  const bodyDataRef = useRef<SegmentedBodyData | null>(null);
   const rafRef = useRef<number | null>(null);
 
   // Track latest stimulus levels for color updates
@@ -128,7 +210,7 @@ function InteractiveBody({
     if (
       !Number.isFinite(touchX) ||
       !Number.isFinite(touchY) ||
-      !meshRef.current ||
+      !groupRef.current ||
       !cameraRef.current ||
       !bodyDataRef.current
     ) {
@@ -137,11 +219,11 @@ function InteractiveBody({
 
     const ndc = new THREE.Vector2((touchX / width) * 2 - 1, -(touchY / height) * 2 + 1);
     raycasterRef.current.setFromCamera(ndc, cameraRef.current);
-    const intersections = raycasterRef.current.intersectObject(meshRef.current, false);
+    const intersections = raycasterRef.current.intersectObject(groupRef.current, true);
     const hit = intersections[0];
-    if (!hit || hit.faceIndex === undefined) return;
+    if (!hit) return;
 
-    const regionId = bodyDataRef.current.faceRegions[hit.faceIndex];
+    const regionId = (hit.object.userData.regionId as string | null | undefined) ?? null;
     if (regionId) onRegionPress?.(regionId);
   }, [height, onRegionPress, width]);
 
@@ -233,57 +315,29 @@ function InteractiveBody({
           scene.add(light);
         }
 
-        const stlCacheHit = _cachedRawGeometry !== null;
-        const geometry = await traceAsync('mobile:dashboard:3d:load-stl', () => loadSTLGeometry(), {
+        const modelCacheHit = _cachedRawParts !== null;
+        const rawParts = await traceAsync('mobile:dashboard:3d:load-body-model', () => loadBodyParts(), {
           platform: Platform.OS,
-          cacheHit: stlCacheHit,
+          cacheHit: modelCacheHit,
+          format: 'glb',
+          segmented: true,
         });
 
-        const posAttr = traceSync('mobile:dashboard:3d:transform-geometry', () => {
-          const bbox = new THREE.Box3().setFromBufferAttribute(
-            geometry.getAttribute('position') as THREE.BufferAttribute,
-          );
-          const size = new THREE.Vector3();
-          bbox.getSize(size);
-          const scale = BODY_3D_CONFIG.model.maxDimension / Math.max(size.x, size.y, size.z);
-
-          const positionAttribute = geometry.getAttribute('position') as THREE.BufferAttribute;
-          for (let i = 0; i < positionAttribute.count; i++) {
-            const ox = positionAttribute.getX(i);
-            const oy = positionAttribute.getY(i);
-            const oz = positionAttribute.getZ(i);
-            positionAttribute.setXYZ(i, ox * scale, oz * scale, -oy * scale);
-          }
-          positionAttribute.needsUpdate = true;
-          geometry.computeVertexNormals();
-          geometry.computeBoundingBox();
-          geometry.computeBoundingSphere();
-
-          return positionAttribute;
+        const { parts, vertexCount } = traceSync('mobile:dashboard:3d:transform-geometry', () => {
+          return transformBodyParts(rawParts);
         });
 
         const bodyData = traceSync(
           'mobile:dashboard:3d:apply-colors',
-          () => applyBodyColors(geometry, stimulusRef.current),
+          () => buildSegmentedBody(parts, stimulusRef.current),
           {
-            faces: posAttr.count / 3,
+            meshes: parts.length,
           },
         );
         bodyDataRef.current = bodyData;
 
-        const material = new THREE.MeshPhongMaterial({
-          vertexColors: true,
-          flatShading: true,
-          shininess: 4,
-          specular: new THREE.Color(0x111111),
-          side: THREE.DoubleSide,
-        });
-
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.frustumCulled = false;
-        meshRef.current = mesh;
-        const group = new THREE.Group();
-        group.add(mesh);
+        const group = bodyData.group;
+        group.rotation.x = BODY_3D_CONFIG.model.tiltX;
         group.rotation.y = rotationRef.current;
         groupRef.current = group;
         scene.add(group);
@@ -302,6 +356,7 @@ function InteractiveBody({
 
           // Always sync rotation from ref (covers both drag + inertia)
           if (groupRef.current) {
+            groupRef.current.rotation.x = BODY_3D_CONFIG.model.tiltX;
             groupRef.current.rotation.y = rotationRef.current;
           }
 
@@ -312,9 +367,11 @@ function InteractiveBody({
         setIsInitializing(false);
 
         finishInitSpan({
-          vertices: posAttr.count,
-          faces: posAttr.count / 3,
-          stlCacheHit,
+          vertices: vertexCount,
+          meshes: parts.length,
+          modelCacheHit,
+          format: 'glb',
+          segmented: true,
         });
       } catch (err) {
         console.warn('InteractiveBody GL error, falling back:', err);
@@ -329,7 +386,7 @@ function InteractiveBody({
   // ─── Update colors when stimulus changes ────────────────────
   useEffect(() => {
     if (bodyDataRef.current) {
-      updateBodyColors(bodyDataRef.current, stimulusLevels);
+      updateSegmentedBodyColors(bodyDataRef.current, stimulusLevels);
     }
   }, [stimulusLevels]);
 
@@ -337,7 +394,7 @@ function InteractiveBody({
   useEffect(() => {
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      meshRef.current = null;
+      groupRef.current = null;
       cameraRef.current = null;
     };
   }, []);

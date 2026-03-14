@@ -14,19 +14,20 @@ export const BODY_3D_CONFIG = {
     position: [0, 0, 5] as const,
   },
   model: {
-    maxDimension: 2.8,
+    maxDimension: 2.55,
+    tiltX: 0.08,
   },
   render: {
     clearColorHex: 0x0d0d0d,
   },
   lighting: {
-    ambientIntensity: 0.7,
+    ambientIntensity: 1.05,
     directional: [
-      { intensity: 1.2, position: [3, 4, 5] as const },
-      { intensity: 0.7, position: [-4, 1, 3] as const },
-      { intensity: 0.6, position: [-2, 3, -2] as const },
-      { intensity: 0.3, position: [0, -3, 2] as const },
-      { intensity: 0.35, position: [1, 0, -4] as const },
+      { intensity: 1.45, position: [3, 4, 5] as const },
+      { intensity: 0.95, position: [-4, 1, 3] as const },
+      { intensity: 0.75, position: [-2, 3, -2] as const },
+      { intensity: 0.45, position: [0, -3, 2] as const },
+      { intensity: 0.55, position: [1, 0, -4] as const },
     ],
   },
 } as const;

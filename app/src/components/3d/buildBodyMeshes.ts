@@ -1,5 +1,5 @@
 import { THREE } from 'expo-three';
-import { getRegionHex, NEUTRAL_HEX } from './regionColors';
+import { getRegionHex, NEUTRAL_HEX, VISIBLE_REGION_IDS } from './regionColors';
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -8,9 +8,119 @@ export interface ColoredBodyData {
   faceRegions: string[];  // one region per face (every 3 vertices)
 }
 
-// ─── Unified vertex classifier for whole-body STL mesh ──────────
-// Coordinates: Y-up, centered at origin, front = +Z, right = +X
-// Body scaled so max dimension ≈ 2.8 units (height ~2.8, Y ≈ ±1.4)
+export interface BodyPartGeometry {
+  name: string;
+  geometry: THREE.BufferGeometry;
+}
+
+export interface SegmentedBodyData {
+  group: THREE.Group;
+  regionMeshes: Record<string, THREE.Mesh[]>;
+  neutralMeshes: THREE.Mesh[];
+}
+
+const VISIBLE_REGION_ID_SET = new Set<string>(VISIBLE_REGION_IDS);
+
+const BODY_MATERIAL_BASE = {
+  flatShading: false,
+  shininess: 2,
+  specular: new THREE.Color(0x111111),
+  side: THREE.DoubleSide,
+} as const;
+
+function createBodyMaterial(): THREE.MeshPhongMaterial {
+  return new THREE.MeshPhongMaterial({
+    ...BODY_MATERIAL_BASE,
+    color: new THREE.Color(NEUTRAL_HEX),
+    vertexColors: true,
+    transparent: false,
+    opacity: 1,
+  });
+}
+
+function applyMeshColor(mesh: THREE.Mesh, hex: string): void {
+  const geometry = mesh.geometry;
+  const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+  const colors = new Float32Array(position.count * 3);
+  const color = new THREE.Color(hex);
+
+  for (let i = 0; i < position.count; i++) {
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  const colorAttribute = geometry.getAttribute('color') as THREE.BufferAttribute;
+  colorAttribute.needsUpdate = true;
+}
+
+export function normalizeRegionObjectName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return '';
+  if (trimmed === 'neutral_body') return trimmed;
+
+  let normalized = trimmed.replace(/\.\d+$/, '');
+  if (!VISIBLE_REGION_ID_SET.has(normalized)) {
+    normalized = normalized.replace(/\d+$/, '');
+  }
+
+  return normalized;
+}
+
+export function buildSegmentedBody(
+  parts: BodyPartGeometry[],
+  stimulusLevels: Record<string, number>
+): SegmentedBodyData {
+  const group = new THREE.Group();
+  const regionMeshes: Record<string, THREE.Mesh[]> = {};
+  const neutralMeshes: THREE.Mesh[] = [];
+
+  for (const part of parts) {
+    const regionId = normalizeRegionObjectName(part.name);
+    const isRegion = VISIBLE_REGION_ID_SET.has(regionId);
+    const material = createBodyMaterial();
+
+    const mesh = new THREE.Mesh(part.geometry, material);
+    mesh.name = part.name;
+    mesh.frustumCulled = false;
+    mesh.userData.regionId = isRegion ? regionId : null;
+    applyMeshColor(mesh, isRegion ? getRegionHex(regionId, stimulusLevels) : NEUTRAL_HEX);
+
+    if (isRegion) {
+      regionMeshes[regionId] ??= [];
+      regionMeshes[regionId].push(mesh);
+    } else {
+      neutralMeshes.push(mesh);
+    }
+
+    group.add(mesh);
+  }
+
+  return { group, regionMeshes, neutralMeshes };
+}
+
+export function updateSegmentedBodyColors(
+  data: SegmentedBodyData,
+  stimulusLevels: Record<string, number>
+): void {
+  for (const [regionId, meshes] of Object.entries(data.regionMeshes)) {
+    const hex = getRegionHex(regionId, stimulusLevels);
+    for (const mesh of meshes) {
+      applyMeshColor(mesh, hex);
+    }
+  }
+
+  for (const mesh of data.neutralMeshes) {
+    applyMeshColor(mesh, NEUTRAL_HEX);
+  }
+}
+
+// ─── Fallback face classifier for unsegmented body meshes ───────
+// Coordinates: Y-up, centered at origin, front = +Z, right = +X.
+// This remains a geometric fallback for single-mesh assets. When the
+// GLB is later re-exported with authored per-region submeshes/groups,
+// this classifier can be bypassed entirely.
 
 // Approximate torso half-width at a given normalized height
 function getTorsoHalfWidth(ny: number): number {
@@ -31,8 +141,6 @@ function classifyBodyVertex(
 ): string {
   const ny = (y - minY) / height; // 0 = feet, 1 = head top
   const ax = Math.abs(x);
-  // STL front faces -Z after Z-up → Y-up transform, so negate for classifier
-  z = -z;
   const front = z > 0;
 
   // ── Head + neck: top ~15% ──

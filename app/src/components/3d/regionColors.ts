@@ -71,12 +71,13 @@ export function getRegionHex(
   stimulusLevels: Record<string, number>
 ): string {
   const level = Math.min(7, Math.max(0, Math.round(stimulusLevels[regionId])));
+  if (level === 0) return '#f1ece4';
   const variant = REGION_VARIANTS[regionId] ?? 0;
   return adjustHex(HEAT_VARIANTS[variant][level], getRegionShadeOffset(regionId));
 }
 
 /** Neutral color for decorative (non-region) body parts */
-export const NEUTRAL_HEX = '#232323';
+export const NEUTRAL_HEX = '#e7e1d8';
 
 /** All 28 visible muscle region IDs (deep_core excluded) */
 export const VISIBLE_REGION_IDS = [

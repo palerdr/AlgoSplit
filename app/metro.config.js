@@ -2,7 +2,7 @@ const { getDefaultConfig } = require('expo/metro-config');
 
 const config = getDefaultConfig(__dirname);
 
-// Add STL files as asset extensions for 3D body model
-config.resolver.assetExts.push('stl');
+// Add 3D body model assets for the dashboard visualizer.
+config.resolver.assetExts.push('stl', 'glb');
 
 module.exports = config;
