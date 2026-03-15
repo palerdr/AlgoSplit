@@ -1,7 +1,11 @@
 {
-  "buildCommand": "npm run build:web",
+  "installCommand": "npm install",
+  "buildCommand": "npx expo export --platform web",
   "outputDirectory": "dist",
   "framework": null,
+  "env": {
+    "NODE_OPTIONS": "--max-old-space-size=4096"
+  },
   "rewrites": [
     { "source": "/api/:path*", "destination": "https://algosplit.onrender.com/api/:path*" },
     { "source": "/auth/:path*", "destination": "https://algosplit.onrender.com/auth/:path*" },
