@@ -1,5 +1,7 @@
-app/
 backend/
+frontend/
 scripts/
 legacy/
 misc/
+sync/
+worktrees/
