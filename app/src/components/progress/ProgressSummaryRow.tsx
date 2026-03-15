@@ -1,6 +1,8 @@
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { convertLbToDisplay } from '../../utils/unitConversion';
 import { type SessionDataPoint, computeTrend } from './progressTransforms';
 
 interface Props {
@@ -8,6 +10,7 @@ interface Props {
 }
 
 export default function ProgressSummaryRow({ points }: Props) {
+  const weightUnit = useSettingsStore((s) => s.weightUnit);
   const trend = computeTrend(points);
   const latest = points.length > 0 ? points[points.length - 1] : null;
   const sessions = points.length;
@@ -30,7 +33,7 @@ export default function ProgressSummaryRow({ points }: Props) {
       <View style={styles.divider} />
 
       <View style={styles.cell}>
-        <Text style={styles.value}>{latest ? `${latest.weight}lb` : '\u2014'}</Text>
+        <Text style={styles.value}>{latest ? `${convertLbToDisplay(latest.weight, weightUnit)}${weightUnit}` : '\u2014'}</Text>
         <Text style={styles.label}>Latest</Text>
       </View>
 

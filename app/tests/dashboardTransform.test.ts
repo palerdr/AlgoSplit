@@ -7,9 +7,10 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 import {
   musclesToStimulusLevels,
   computeDashboardDials,
+  computeProgressDial,
   generateInsights,
 } from '../src/utils/analysisTransform';
-import type { AnalysisResponse, MuscleStats } from '../src/types/api.types';
+import type { AnalysisResponse, MuscleStats, WorkoutLogResponse } from '../src/types/api.types';
 
 // --------------- helpers ---------------
 
@@ -81,7 +82,6 @@ describe('computeDashboardDials', () => {
   it('returns zeroed dials for empty analysis', () => {
     const dials = computeDashboardDials(makeAnalysis());
     expect(dials.stimulus).toBe(0);
-    expect(dials.fatigue).toBe(0);
     expect(dials.recovery).toBe(100);
   });
 
@@ -101,7 +101,8 @@ describe('computeDashboardDials', () => {
       },
     });
     const dials = computeDashboardDials(analysis);
-    expect(dials.stimulus).toBe(50);
+    // Two muscles above threshold with ~3.25 weighted avg, /3.2 target -> high quality
+    expect(dials.stimulus).toBe(78);
   });
 
   it('caps stimulus at 100', () => {
@@ -127,22 +128,97 @@ describe('computeDashboardDials', () => {
     expect(dials.stimulus).toBe(100);
   });
 
-  it('computes fatigue dial from total_sets', () => {
-    const analysis = makeAnalysis({
-      muscles: [
-        makeMuscle({ net_stimulus: 3, stimulus: 4.2 }),
-        makeMuscle({ region_id: 'clavicular', net_stimulus: 2.5, stimulus: 3.5 }),
-      ],
-      summary: {
-        total_sets: 30,
-        muscles_trained: 10,
-        total_muscles: 29,
-        avg_net_stimulus: 3,
-        avg_sets_per_muscle: 3,
-      },
+});
+
+// --------------- computeProgressDial ---------------
+
+function makeWorkout(overrides: Partial<WorkoutLogResponse> = {}): WorkoutLogResponse {
+  return {
+    id: 'w1',
+    user_id: 'u1',
+    session_id: null,
+    split_id: null,
+    session_name: 'Push',
+    completed_at: new Date().toISOString(),
+    duration_minutes: null,
+    notes: null,
+    exercises: [],
+    created_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+describe('computeProgressDial', () => {
+  it('returns 0 with fewer than 2 workouts', () => {
+    expect(computeProgressDial([])).toBe(0);
+    expect(computeProgressDial([makeWorkout()])).toBe(0);
+  });
+
+  it('returns ~50 when exercises are maintained', () => {
+    const prev = makeWorkout({
+      completed_at: '2026-03-10T10:00:00Z',
+      exercises: [{
+        id: 'e1', workout_log_id: 'w1', exercise_name: 'Bench Press',
+        sets_completed: 3, reps: [8, 8, 8], weight: [100, 100, 100],
+        rir: null, order_index: 0, notes: null, created_at: '',
+      }],
     });
-    const dials = computeDashboardDials(analysis);
-    expect(dials.fatigue).toBe(81);
+    const recent = makeWorkout({
+      id: 'w2',
+      completed_at: '2026-03-12T10:00:00Z',
+      exercises: [{
+        id: 'e2', workout_log_id: 'w2', exercise_name: 'Bench Press',
+        sets_completed: 3, reps: [8, 8, 8], weight: [100, 100, 100],
+        rir: null, order_index: 0, notes: null, created_at: '',
+      }],
+    });
+    const score = computeProgressDial([prev, recent]);
+    // Maintained = ratio 1.0, maps to (1.0-0.85)/0.30*100 = 50 for ratio part
+    // 0 improved out of 1 = 0 improved share, so 50*0.7 + 0*0.3 = 35
+    expect(score).toBe(35);
+  });
+
+  it('scores higher when exercises improve', () => {
+    const prev = makeWorkout({
+      completed_at: '2026-03-10T10:00:00Z',
+      exercises: [{
+        id: 'e1', workout_log_id: 'w1', exercise_name: 'Bench Press',
+        sets_completed: 3, reps: [8, 8, 8], weight: [100, 100, 100],
+        rir: null, order_index: 0, notes: null, created_at: '',
+      }],
+    });
+    const recent = makeWorkout({
+      id: 'w2',
+      completed_at: '2026-03-12T10:00:00Z',
+      exercises: [{
+        id: 'e2', workout_log_id: 'w2', exercise_name: 'Bench Press',
+        sets_completed: 3, reps: [9, 9, 8], weight: [105, 105, 105],
+        rir: null, order_index: 0, notes: null, created_at: '',
+      }],
+    });
+    const score = computeProgressDial([prev, recent]);
+    expect(score).toBeGreaterThan(50);
+  });
+
+  it('returns 0 when no exercises overlap', () => {
+    const prev = makeWorkout({
+      completed_at: '2026-03-10T10:00:00Z',
+      exercises: [{
+        id: 'e1', workout_log_id: 'w1', exercise_name: 'Squat',
+        sets_completed: 3, reps: [5, 5, 5], weight: [140, 140, 140],
+        rir: null, order_index: 0, notes: null, created_at: '',
+      }],
+    });
+    const recent = makeWorkout({
+      id: 'w2',
+      completed_at: '2026-03-12T10:00:00Z',
+      exercises: [{
+        id: 'e2', workout_log_id: 'w2', exercise_name: 'Deadlift',
+        sets_completed: 3, reps: [5, 5, 5], weight: [180, 180, 180],
+        rir: null, order_index: 0, notes: null, created_at: '',
+      }],
+    });
+    expect(computeProgressDial([prev, recent])).toBe(0);
   });
 });
 

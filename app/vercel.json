@@ -1,0 +1,26 @@
+{
+  "buildCommand": "npm run build:web",
+  "outputDirectory": "dist",
+  "framework": null,
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://algosplit.onrender.com/api/:path*" },
+    { "source": "/auth/:path*", "destination": "https://algosplit.onrender.com/auth/:path*" },
+    { "source": "/health", "destination": "https://algosplit.onrender.com/health" },
+    { "source": "/keepalive", "destination": "https://algosplit.onrender.com/keepalive" },
+    { "source": "/((?!api/|auth/).*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/_expo/static/js/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    }
+  ]
+}

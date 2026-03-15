@@ -1,6 +1,8 @@
 import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { WorkoutExercise } from '../../stores/workoutStore';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { convertLbToDisplay } from '../../utils/unitConversion';
 import { colors } from '../../theme';
 
 interface WorkoutSummaryMobileProps {
@@ -16,6 +18,7 @@ export default function WorkoutSummaryMobile({
   exercises,
   onAddExercise,
 }: WorkoutSummaryMobileProps) {
+  const weightUnit = useSettingsStore((s) => s.weightUnit);
   const elapsedMin = Math.round((Date.now() - new Date(startedAt).getTime()) / 60000);
   const exercisesWithData = exercises.filter((ex) => ex.sets.some((s) => s.reps > 0));
 
@@ -43,18 +46,21 @@ export default function WorkoutSummaryMobile({
         exercisesWithData.map((exercise) => {
           const validSets = exercise.sets.filter((s) => s.reps > 0);
           const totalReps = validSets.reduce((sum, s) => sum + s.reps, 0);
-          const totalVol = validSets.reduce((sum, s) => sum + s.reps * s.weight, 0);
+          const totalVol = validSets.reduce(
+            (sum, s) => sum + s.reps * convertLbToDisplay(s.weight, weightUnit),
+            0,
+          );
 
           return (
             <View key={exercise.id} style={styles.exerciseCard}>
               <Text style={styles.exName}>{exercise.name}</Text>
               <Text style={styles.exMeta}>
-                {validSets.length} sets · {totalReps} reps · {Math.round(totalVol).toLocaleString()} lbs
+                {validSets.length} sets · {totalReps} reps · {Math.round(totalVol).toLocaleString()} {weightUnit}
               </Text>
               <View style={styles.chips}>
                 {validSets.map((s, i) => (
                   <View key={i} style={styles.chip}>
-                    <Text style={styles.chipText}>{s.weight}×{s.reps}</Text>
+                    <Text style={styles.chipText}>{convertLbToDisplay(s.weight, weightUnit)}×{s.reps}</Text>
                   </View>
                 ))}
               </View>

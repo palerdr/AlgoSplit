@@ -3,8 +3,14 @@ import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 
-// Platform-adaptive base URL
-const API_BASE_URL = Constants.expoConfig?.extra?.apiUrl || 'http://localhost:8000';
+// Platform-adaptive base URL.
+// In production web builds (Vercel), EXPO_PUBLIC_API_URL is set to '' so
+// requests go to the same origin and Vercel rewrites proxy them to Render.
+// In dev, falls back to localhost:8000.
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_URL ??
+  Constants.expoConfig?.extra?.apiUrl ??
+  'http://localhost:8000';
 
 const TOKEN_KEY = 'algosplit_access_token';
 const CSRF_KEY = 'algosplit_csrf_token';

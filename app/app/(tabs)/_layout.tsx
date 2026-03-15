@@ -182,11 +182,11 @@ export default function TabLayout() {
   }, [msgOpacity]);
 
   // Prefetch critical data on first mount (right after auth resolves)
-  // so dashboard, splits, and history queries are warm before the user interacts.
+  // Prefetch only dashboard-critical queries on mount.  Splits and history
+  // prefetches are deferred to their respective tabPress listeners so the
+  // cold-start path fires fewer parallel authenticated requests.
   useEffect(() => {
     prefetchDashboardQueries(queryClient);
-    prefetchSplitsQueries(queryClient);
-    prefetchHistoryQueries(queryClient);
   }, [queryClient]);
 
   const handleStartQuick = useCallback(() => {

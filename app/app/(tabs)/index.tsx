@@ -5,13 +5,14 @@ import { useIsFocused } from '@react-navigation/native';
 import { DateSelector, DialGauge, InsightCard } from '../../src/components/shared';
 import InteractiveBody from '../../src/components/3d/InteractiveBody';
 import { Modal, Spinner } from '../../src/components/ui';
-import { useRecentStimulus, useWorkoutDates } from '../../src/hooks/useWorkouts';
+import { useRecentStimulus, useWorkoutDates, useRecentWorkoutPair } from '../../src/hooks/useWorkouts';
 import { startPerfSpan } from '../../src/dev/perfTrace';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { useWorkoutStore } from '../../src/stores/workoutStore';
 import {
   musclesToStimulusLevels,
   computeDashboardDials,
+  computeProgressDial,
   generateInsights,
 } from '../../src/utils/analysisTransform';
 
@@ -82,7 +83,7 @@ export default function DashboardScreen() {
       dataset,
     },
   );
-  const { data: workoutDatesData, isLoading: isDatesLoading } = useWorkoutDates({ days: 61 });
+  const { data: workoutDatesData } = useWorkoutDates({ days: 61 });
 
   const workoutDates = useMemo(
     () => new Set(workoutDatesData?.dates ?? []),
@@ -90,23 +91,24 @@ export default function DashboardScreen() {
   );
   const hasAnalysisData = (analysis?.summary.total_sets ?? 0) > 0;
 
+  // Screen-load span depends only on analysis — calendar dots load
+  // independently and should not block the main dashboard render.
   useEffect(() => {
-    const isBusy = isLoading || isDatesLoading;
-    if (isBusy && !screenLoadSpanRef.current) {
+    if (isLoading && !screenLoadSpanRef.current) {
       screenLoadSpanRef.current = startPerfSpan('mobile:dashboard:screen-load', {
         selectedDate: selectedDateKey,
       });
       return;
     }
 
-    if (!isBusy && screenLoadSpanRef.current) {
+    if (!isLoading && screenLoadSpanRef.current) {
       screenLoadSpanRef.current({
         hasAnalysisData,
         dateCount: workoutDatesData?.dates.length ?? 0,
       });
       screenLoadSpanRef.current = null;
     }
-  }, [hasAnalysisData, isLoading, isDatesLoading, selectedDateKey, workoutDatesData?.dates.length]);
+  }, [hasAnalysisData, isLoading, selectedDateKey, workoutDatesData?.dates.length]);
 
   // Derive display data from analysis
   const stimulusLevels = useMemo(
@@ -114,10 +116,19 @@ export default function DashboardScreen() {
     [analysis],
   );
 
+  const { data: recentPairData, isLoading: isProgressLoading } = useRecentWorkoutPair();
+
   const dials = useMemo(
-    () => (analysis ? computeDashboardDials(analysis) : { stimulus: 0, fatigue: 0, recovery: 0 }),
+    () => (analysis ? computeDashboardDials(analysis) : { stimulus: 0, recovery: 0 }),
     [analysis],
   );
+
+  const progress = useMemo(
+    () => (recentPairData ? computeProgressDial(recentPairData.workouts) : 0),
+    [recentPairData],
+  );
+
+  const dialsReady = !isLoading && !isProgressLoading;
 
   const insights = useMemo(() => {
     if (analysis && hasAnalysisData) return generateInsights(analysis);
@@ -183,35 +194,39 @@ export default function DashboardScreen() {
                 )}
               </View>
               <View style={styles.dialsDesktop}>
-                <DialGauge
-                  value={dials.stimulus}
-                  label="Stimulus"
-                  size={dialSize}
-                  color="#4ADE80"
-                  colorEnd="#22C55E"
-                  delay={200}
-                  labelInside
-                />
-                <View style={styles.dialGap} />
-                <DialGauge
-                  value={dials.fatigue}
-                  label="Fatigue"
-                  size={dialSize}
-                  color="#EF4444"
-                  colorEnd="#EF4444"
-                  delay={400}
-                  labelInside
-                />
-                <View style={styles.dialGap} />
-                <DialGauge
-                  value={dials.recovery}
-                  label="Recovery"
-                  size={dialSize}
-                  color="#60A5FA"
-                  colorEnd="#60A5FA"
-                  delay={600}
-                  labelInside
-                />
+                {dialsReady && (
+                  <>
+                    <DialGauge
+                      value={dials.stimulus}
+                      label="Stimulus"
+                      size={dialSize}
+                      color="#4ADE80"
+                      colorEnd="#22C55E"
+                      delay={200}
+                      labelInside
+                    />
+                    <View style={styles.dialGap} />
+                    <DialGauge
+                      value={progress}
+                      label="Progress"
+                      size={dialSize}
+                      color="#F59E0B"
+                      colorEnd="#EAB308"
+                      delay={400}
+                      labelInside
+                    />
+                    <View style={styles.dialGap} />
+                    <DialGauge
+                      value={dials.recovery}
+                      label="Recovery"
+                      size={dialSize}
+                      color="#60A5FA"
+                      colorEnd="#60A5FA"
+                      delay={600}
+                      labelInside
+                    />
+                  </>
+                )}
               </View>
             </View>
           ) : (
@@ -231,33 +246,37 @@ export default function DashboardScreen() {
                 )}
               </View>
               <View style={styles.dialsRowMobile}>
-                <DialGauge
-                  value={dials.stimulus}
-                  label="Stimulus"
-                  size={dialSize}
-                  color="#4ADE80"
-                  colorEnd="#22C55E"
-                  delay={200}
-                  labelInside
-                />
-                <DialGauge
-                  value={dials.fatigue}
-                  label="Fatigue"
-                  size={dialSize}
-                  color="#EF4444"
-                  colorEnd="#EF4444"
-                  delay={400}
-                  labelInside
-                />
-                <DialGauge
-                  value={dials.recovery}
-                  label="Recovery"
-                  size={dialSize}
-                  color="#60A5FA"
-                  colorEnd="#60A5FA"
-                  delay={600}
-                  labelInside
-                />
+                {dialsReady && (
+                  <>
+                    <DialGauge
+                      value={dials.stimulus}
+                      label="Stimulus"
+                      size={dialSize}
+                      color="#4ADE80"
+                      colorEnd="#22C55E"
+                      delay={200}
+                      labelInside
+                    />
+                    <DialGauge
+                      value={progress}
+                      label="Progress"
+                      size={dialSize}
+                      color="#F59E0B"
+                      colorEnd="#EAB308"
+                      delay={400}
+                      labelInside
+                    />
+                    <DialGauge
+                      value={dials.recovery}
+                      label="Recovery"
+                      size={dialSize}
+                      color="#60A5FA"
+                      colorEnd="#60A5FA"
+                      delay={600}
+                      labelInside
+                    />
+                  </>
+                )}
               </View>
             </View>
           )

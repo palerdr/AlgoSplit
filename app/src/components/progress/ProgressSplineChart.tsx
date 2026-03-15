@@ -2,6 +2,8 @@ import { useState, useMemo, useCallback } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import Svg, { Path, Circle, Line, Text as SvgText, G } from 'react-native-svg';
 import { colors } from '../../theme';
+import { useSettingsStore } from '../../stores/settingsStore';
+import { convertLbToDisplay } from '../../utils/unitConversion';
 import {
   type SessionDataPoint,
   type ChartPoint,
@@ -18,6 +20,7 @@ interface Props {
 }
 
 export default function ProgressSplineChart({ points }: Props) {
+  const weightUnit = useSettingsStore((s) => s.weightUnit);
   const [containerWidth, setContainerWidth] = useState(0);
   const [tappedIndex, setTappedIndex] = useState<number | null>(null);
 
@@ -204,7 +207,7 @@ export default function ProgressSplineChart({ points }: Props) {
             {points[tappedIndex].sessionName} · Set {points[tappedIndex].setNumber}
           </Text>
           <Text style={styles.tooltipLine}>
-            {points[tappedIndex].weight}lb x {points[tappedIndex].reps}
+            {convertLbToDisplay(points[tappedIndex].weight, weightUnit)}{weightUnit} x {points[tappedIndex].reps}
             {points[tappedIndex].rir != null ? ` @${points[tappedIndex].rir}RIR` : ''}
           </Text>
           <Text style={styles.tooltipScore}>

@@ -26,7 +26,7 @@ function formatRelativeDate(dateStr: string): string {
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const [activeView, setActiveView] = useState<'log' | 'progress'>('log');
+  const [activeView, setActiveView] = useState<'log' | 'progress'>('progress');
   const screenLoadSpanRef = useRef<ReturnType<typeof startPerfSpan> | null>(null);
   const { data: history, isLoading, refetch, isRefetching } = useWorkoutHistorySummaries({ limit: 100 });
 
@@ -77,16 +77,16 @@ export default function HistoryScreen() {
       <Text style={styles.title}>History</Text>
       <View style={styles.switchRow}>
         <TouchableOpacity
-          style={[styles.switchBtn, activeView === 'log' && styles.switchBtnActive]}
-          onPress={() => setActiveView('log')}
-        >
-          <Text style={[styles.switchText, activeView === 'log' && styles.switchTextActive]}>Log</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
           style={[styles.switchBtn, activeView === 'progress' && styles.switchBtnActive]}
           onPress={() => setActiveView('progress')}
         >
           <Text style={[styles.switchText, activeView === 'progress' && styles.switchTextActive]}>Progress</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.switchBtn, activeView === 'log' && styles.switchBtnActive]}
+          onPress={() => setActiveView('log')}
+        >
+          <Text style={[styles.switchText, activeView === 'log' && styles.switchTextActive]}>Log</Text>
         </TouchableOpacity>
       </View>
 

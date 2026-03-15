@@ -28,6 +28,15 @@ export function useWorkoutHistory(params?: { limit?: number; offset?: number; da
   });
 }
 
+export function useRecentWorkoutPair() {
+  return useQuery({
+    queryKey: [...workoutKeys.list({ limit: 2 }), 'recent-pair'],
+    queryFn: () => getWorkouts({ limit: 2 }),
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
 export function useCompleteWorkoutHistory(params?: { days?: number }) {
   return useQuery({
     queryKey: [...workoutKeys.list(params ?? {}), 'complete'],
@@ -271,6 +280,13 @@ export function prefetchDashboardQueries(qc: QueryClient) {
   qc.prefetchQuery({
     queryKey: [...workoutKeys.all, 'dates', 61],
     queryFn: () => getWorkoutDates({ days: 61 }),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // 3. Recent workout pair (progress dial) — two most recent full workouts
+  qc.prefetchQuery({
+    queryKey: [...workoutKeys.list({ limit: 2 }), 'recent-pair'],
+    queryFn: () => getWorkouts({ limit: 2 }),
     staleTime: 5 * 60 * 1000,
   });
 }

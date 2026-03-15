@@ -1,4 +1,4 @@
-import type { MuscleStats, AnalysisResponse } from '../types/api.types';
+import type { MuscleStats, AnalysisResponse, WorkoutLogResponse } from '../types/api.types';
 import { getStimulusLevel } from '../lib/utils';
 
 /**
@@ -20,29 +20,23 @@ export function musclesToStimulusLevels(
  */
 export function computeDashboardDials(analysis: AnalysisResponse): {
   stimulus: number;
-  fatigue: number;
   recovery: number;
 } {
-  const { total_sets, muscles_trained, total_muscles } = analysis.summary;
-  const activeMuscles = analysis.muscles.filter((muscle) => muscle.net_stimulus > 0);
-  const avgRawStimulus = activeMuscles.length
-    ? activeMuscles.reduce((sum, muscle) => sum + muscle.stimulus, 0) / activeMuscles.length
-    : 0;
+  const { muscles_trained, total_muscles } = analysis.summary;
   const meaningfullyTrainedMuscles = analysis.muscles.filter((muscle) => muscle.net_stimulus >= 1);
   const weightedStimulusScore = meaningfullyTrainedMuscles.length
     ? meaningfullyTrainedMuscles.reduce((sum, muscle) => {
         const totalContributionSets = muscle.prime_sets + muscle.secondary_sets + muscle.tertiary_sets;
         const primeShare = totalContributionSets > 0 ? muscle.prime_sets / totalContributionSets : 0;
-        const focusWeight = 1 + primeShare * 0.5;
+        const focusWeight = 1 + primeShare * 0.35;
         return sum + muscle.net_stimulus * focusWeight;
       }, 0) /
       meaningfullyTrainedMuscles.reduce((sum, muscle) => {
         const totalContributionSets = muscle.prime_sets + muscle.secondary_sets + muscle.tertiary_sets;
         const primeShare = totalContributionSets > 0 ? muscle.prime_sets / totalContributionSets : 0;
-        return sum + (1 + primeShare * 0.5);
+        return sum + (1 + primeShare * 0.35);
       }, 0)
     : 0;
-  const workloadDensity = Math.min(1, total_sets / 18);
   const coverage = total_muscles > 0 ? muscles_trained / total_muscles : 0;
   const recoveryReserve = analysis.muscles.length
     ? analysis.muscles.reduce((sum, muscle) => {
@@ -51,29 +45,99 @@ export function computeDashboardDials(analysis: AnalysisResponse): {
       }, 0) / analysis.muscles.length
     : 1;
   const meaningfulCoverage = meaningfullyTrainedMuscles.length;
-  const coverageScore = Math.min(1, meaningfulCoverage / 18);
-  const stimulusQuality = Math.min(1, weightedStimulusScore / 2.4);
-  const specializationBonus = meaningfulCoverage >= 14 ? 1 : meaningfulCoverage >= 10 ? 0.92 : 0.8;
-  const undercoveragePenalty = meaningfulCoverage >= 18 ? 1 : meaningfulCoverage >= 12 ? 0.96 : 0.85;
+  const coverageScore = Math.min(1, meaningfulCoverage / 20);
+  const stimulusQuality = Math.min(1, weightedStimulusScore / 3.2);
 
-  // Stimulus: score the muscles that are actually being trained well, then
-  // reward strong target-region quality and let 18-20 well-trained regions
-  // score highly without demanding all 29 regions be emphasized equally.
+  // Stimulus: average quality of meaningfully trained regions, blended with
+  // coverage so well-rounded splits score higher but specialization is not
+  // punished severely. The /3.2 target means a strong split with ~3.0 avg
+  // weighted net stimulus scores near 100.
   const stimulus = Math.round(
-    Math.min(100, (stimulusQuality * 0.7 + coverageScore * 0.3) * specializationBonus * undercoveragePenalty * 100),
-  );
-
-  // Fatigue: session workload density + raw per-muscle stress + body coverage.
-  // This reflects "how much stress was imposed" rather than simply mirroring recovery.
-  const fatigue = Math.round(
-    Math.min(100, (workloadDensity * 0.45 + Math.min(1, avgRawStimulus / 5) * 0.4 + coverage * 0.15) * 100),
+    Math.min(100, (stimulusQuality * 0.75 + coverageScore * 0.25) * 100),
   );
 
   // Recovery: remaining headroom from current net stimulus across the whole body.
-  // Muscles with little or no unresolved net stimulus stay close to fully recovered.
   const recovery = Math.round(Math.min(100, recoveryReserve * 100));
 
-  return { stimulus, fatigue, recovery };
+  return { stimulus, recovery };
+}
+
+/**
+ * Compute a 0-100 progress score from recent workout history.
+ *
+ * Compares overlapping exercises between the two most recent workouts to
+ * measure how many exercises improved and by how much. Uses estimated 1RM
+ * as the comparison metric to combine weight and reps into one number.
+ *
+ * Outliers are clamped so a single exercise swap or massive jump/drop
+ * doesn't dominate the score.
+ */
+export function computeProgressDial(workouts: WorkoutLogResponse[]): number {
+  if (workouts.length < 2) return 0;
+
+  // Sort descending by completed_at so [0] is most recent
+  const sorted = [...workouts].sort(
+    (a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime(),
+  );
+
+  const recent = sorted[0];
+  const previous = sorted[1];
+
+  // Build exercise -> best estimated 1RM maps
+  const recentBest = bestE1rmByExercise(recent);
+  const previousBest = bestE1rmByExercise(previous);
+
+  // Find overlapping exercises
+  const commonExercises = Object.keys(recentBest).filter((name) => name in previousBest);
+  if (commonExercises.length === 0) return 0;
+
+  // Compute per-exercise progress ratios, clamped to avoid outliers
+  const MAX_RATIO = 1.15; // cap at +15% per exercise
+  const MIN_RATIO = 0.85; // cap at -15% per exercise
+  let totalRatio = 0;
+  let improved = 0;
+
+  for (const name of commonExercises) {
+    const prev = previousBest[name];
+    if (prev <= 0) continue;
+    const raw = recentBest[name] / prev;
+    const clamped = Math.max(MIN_RATIO, Math.min(MAX_RATIO, raw));
+    totalRatio += clamped;
+    if (clamped > 1.005) improved++;
+  }
+
+  if (commonExercises.length === 0) return 0;
+
+  const avgRatio = totalRatio / commonExercises.length;
+  const improvedShare = improved / commonExercises.length;
+
+  // Map to 0-100 where 1.0 ratio = 50 (maintained), >1 = progress, <1 = regression
+  // avgRatio contribution: 1.0 -> 50, 1.15 -> 100, 0.85 -> 0
+  const ratioScore = Math.min(100, Math.max(0, ((avgRatio - 0.85) / 0.30) * 100));
+  // Improved share bonus: what fraction of exercises improved
+  const improvedScore = improvedShare * 100;
+
+  return Math.round(ratioScore * 0.7 + improvedScore * 0.3);
+}
+
+function bestE1rmByExercise(workout: WorkoutLogResponse): Record<string, number> {
+  const result: Record<string, number> = {};
+  for (const ex of workout.exercises) {
+    let best = 0;
+    for (let i = 0; i < ex.reps.length; i++) {
+      const reps = ex.reps[i];
+      const weight = ex.weight[i];
+      if (reps > 0 && weight > 0) {
+        // Brzycki estimated 1RM
+        const e1rm = reps === 1 ? weight : weight * (36 / (37 - reps));
+        if (e1rm > best) best = e1rm;
+      }
+    }
+    if (best > 0) {
+      result[ex.exercise_name.toLowerCase()] = best;
+    }
+  }
+  return result;
 }
 
 /**

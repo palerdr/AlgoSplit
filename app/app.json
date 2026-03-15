@@ -30,7 +30,10 @@
       "bundler": "metro"
     },
     "extra": {
-      "apiUrl": "http://localhost:8000"
+      "apiUrl": "http://localhost:8000",
+      "eas": {
+        "projectId": "algosplit"
+      }
     },
     "plugins": [
       "expo-router",
