@@ -2,8 +2,8 @@ import { View, Text, ScrollView, TouchableOpacity, StyleSheet, useWindowDimensio
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
-const CRIMSON = '#dc2626';
-const CRIMSON_HOVER = '#ef4444';
+const ACCENT = '#4ADE80';
+const ACCENT_DARK = '#22C55E';
 const IRON = '#0a0a0b';
 const CHARCOAL = '#121214';
 const STEEL = '#1a1a1e';
@@ -28,7 +28,7 @@ function FeatureCard({ icon, title, description }: {
   return (
     <View style={styles.featureCard}>
       <View style={styles.featureIconWrap}>
-        <Ionicons name={icon} size={20} color={CRIMSON} />
+        <Ionicons name={icon} size={20} color={ACCENT} />
       </View>
       <Text style={styles.featureTitle}>{title}</Text>
       <Text style={styles.featureDesc}>{description}</Text>
@@ -87,7 +87,7 @@ export default function LandingPage() {
         <View style={styles.navInner}>
           <View style={styles.navLeft}>
             <View style={styles.logoBox}>
-              <Ionicons name="pulse" size={16} color="#fff" />
+              <Ionicons name="pulse" size={16} color="#111" />
             </View>
             <Text style={styles.logoText}>AlgoSplit</Text>
           </View>
@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 6,
-    backgroundColor: CRIMSON,
+    backgroundColor: ACCENT,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -221,13 +221,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   navCta: {
-    backgroundColor: CRIMSON,
+    backgroundColor: ACCENT,
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 6,
   },
   navCtaText: {
-    color: '#fff',
+    color: '#111',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
   heroAccent: {
-    color: CRIMSON,
+    color: ACCENT,
   },
   heroSub: {
     color: SECONDARY,
@@ -279,13 +279,13 @@ const styles = StyleSheet.create({
     marginTop: 28,
   },
   primaryBtn: {
-    backgroundColor: CRIMSON,
+    backgroundColor: ACCENT,
     paddingHorizontal: 24,
     paddingVertical: 14,
     borderRadius: 6,
   },
   primaryBtnText: {
-    color: '#fff',
+    color: '#111',
     fontSize: 15,
     fontWeight: '700',
   },
@@ -366,7 +366,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 8,
-    backgroundColor: 'rgba(220, 38, 38, 0.1)',
+    backgroundColor: 'rgba(74, 222, 128, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
