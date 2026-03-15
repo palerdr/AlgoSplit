@@ -140,7 +140,7 @@ function SetRowMobile({
           }}
           selectTextOnFocus
         />
-        <DeltaBadge delta={deltas.rir} invert />
+        <DeltaBadge delta={deltas.rir} />
       </View>
 
       <TouchableOpacity

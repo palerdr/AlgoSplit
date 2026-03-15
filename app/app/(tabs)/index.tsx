@@ -135,7 +135,7 @@ export default function DashboardScreen() {
     bodyHeight = Math.round(Math.min(screenHeight - 120, 800));
     bodyWidth = Math.round(Math.max(bodyHeight / 1.8, screenWidth * 0.22));
   } else {
-    bodyWidth = Math.round(screenWidth * 0.55);
+    bodyWidth = Math.round(screenWidth * 0.56);
     bodyHeight = Math.round(bodyWidth * 1.9);
   }
   const dialSize = isDesktop ? 110 : 90;
@@ -366,11 +366,12 @@ const styles = StyleSheet.create({
   },
   dialsRowMobile: {
     flexDirection: 'row',
-    justifyContent: 'space-evenly',
+    justifyContent: 'center',
     alignItems: 'center',
-    width: '100%',
+    alignSelf: 'center',
     marginTop: 16,
-    paddingHorizontal: 12,
+    gap: 12,
+    marginLeft: 10,
   },
   dialGap: {
     height: 16,

@@ -12,6 +12,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { isAxiosError } from 'axios';
+import { useQueryClient } from '@tanstack/react-query';
+import { prefetchPreviousWorkoutData } from '../../../src/hooks/useWorkouts';
 import {
   useSplit,
   useSplitAnalysis,
@@ -119,6 +121,7 @@ export default function SplitDetailScreen() {
   const id = Array.isArray(raw) ? raw[0] : raw;
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const queryClient = useQueryClient();
   const { data: split, isLoading: splitLoading } = useSplit(id);
   const { data: analysis, isLoading: analysisLoading, error: analysisError } = useSplitAnalysis(id);
   const deleteMutation = useDeleteSplit();
@@ -399,6 +402,7 @@ export default function SplitDetailScreen() {
   const handleStartWorkout = useCallback(
     (session: SessionResponse) => {
       const doStart = () => {
+        prefetchPreviousWorkoutData(queryClient, session.name);
         const exercises = session.exercises.map((ex) => ({
           name: ex.exercise_name,
           sets: ex.sets,

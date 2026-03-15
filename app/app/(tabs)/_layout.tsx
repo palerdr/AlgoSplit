@@ -16,7 +16,7 @@ import * as Haptics from 'expo-haptics';
 import { triggerExpandTransition } from '../../src/utils/workoutTransition';
 import { useWorkoutStore } from '../../src/stores/workoutStore';
 import { useAuth } from '../../src/hooks/useAuth';
-import { prefetchDashboardQueries, prefetchHistoryQueries } from '../../src/hooks/useWorkouts';
+import { prefetchDashboardQueries, prefetchHistoryQueries, prefetchPreviousWorkoutData } from '../../src/hooks/useWorkouts';
 import { prefetchSplitsQueries } from '../../src/hooks/useSplits';
 import { Spinner } from '../../src/components/ui';
 import StartWorkoutSheet from '../../src/components/workout/StartWorkoutSheet';
@@ -200,9 +200,10 @@ export default function TabLayout() {
     sessionId?: string,
     splitId?: string,
   ) => {
+    prefetchPreviousWorkoutData(queryClient, sessionName);
     useWorkoutStore.getState().startWorkoutFromSession(sessionName, exercises, undefined, sessionId, splitId);
     triggerExpandTransition();
-  }, []);
+  }, [queryClient]);
 
   if (!isLoading && !isAuthenticated) return <Redirect href="/(auth)/login" />;
 

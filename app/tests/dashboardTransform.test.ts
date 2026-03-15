@@ -1,3 +1,9 @@
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  setItem: jest.fn(),
+  getItem: jest.fn(),
+  removeItem: jest.fn(),
+}));
+
 import {
   musclesToStimulusLevels,
   computeDashboardDials,
@@ -54,7 +60,7 @@ describe('musclesToStimulusLevels', () => {
     expect(musclesToStimulusLevels([])).toEqual({});
   });
 
-  it('maps region_id to net_stimulus', () => {
+  it('maps region_id to heatmap stimulus levels', () => {
     const muscles = [
       makeMuscle({ region_id: 'sternocostal', net_stimulus: 3.2 }),
       makeMuscle({ region_id: 'clavicular', net_stimulus: 2.1 }),
@@ -62,8 +68,8 @@ describe('musclesToStimulusLevels', () => {
     ];
     const levels = musclesToStimulusLevels(muscles);
     expect(levels).toEqual({
-      sternocostal: 3.2,
-      clavicular: 2.1,
+      sternocostal: 5,
+      clavicular: 4,
       vasti: 0,
     });
   });
@@ -76,30 +82,42 @@ describe('computeDashboardDials', () => {
     const dials = computeDashboardDials(makeAnalysis());
     expect(dials.stimulus).toBe(0);
     expect(dials.fatigue).toBe(0);
-    // Recovery with 0 coverage + 100% inverse fatigue → 40
-    expect(dials.recovery).toBe(40);
+    expect(dials.recovery).toBe(100);
   });
 
-  it('computes stimulus dial from avg_net_stimulus', () => {
+  it('computes stimulus dial from meaningfully trained muscles', () => {
     const analysis = makeAnalysis({
+      muscles: [
+        makeMuscle({ region_id: 'sternocostal', net_stimulus: 3.5, prime_sets: 6, secondary_sets: 0, tertiary_sets: 0 }),
+        makeMuscle({ region_id: 'clavicular', net_stimulus: 3.0, prime_sets: 5, secondary_sets: 1, tertiary_sets: 0 }),
+        makeMuscle({ region_id: 'vasti', net_stimulus: 0.4, prime_sets: 0, secondary_sets: 3, tertiary_sets: 2 }),
+      ],
       summary: {
         total_sets: 20,
-        muscles_trained: 10,
+        muscles_trained: 3,
         total_muscles: 29,
-        avg_net_stimulus: 3.5,
+        avg_net_stimulus: 2.3,
         avg_sets_per_muscle: 2,
       },
     });
     const dials = computeDashboardDials(analysis);
-    // stimulus = (3.5 / 7) * 100 = 50
     expect(dials.stimulus).toBe(50);
   });
 
   it('caps stimulus at 100', () => {
     const analysis = makeAnalysis({
+      muscles: Array.from({ length: 22 }, (_, index) =>
+        makeMuscle({
+          region_id: `region-${index}`,
+          net_stimulus: 6,
+          prime_sets: 8,
+          secondary_sets: 0,
+          tertiary_sets: 0,
+        }),
+      ),
       summary: {
         total_sets: 60,
-        muscles_trained: 29,
+        muscles_trained: 22,
         total_muscles: 29,
         avg_net_stimulus: 10,
         avg_sets_per_muscle: 2,
@@ -111,6 +129,10 @@ describe('computeDashboardDials', () => {
 
   it('computes fatigue dial from total_sets', () => {
     const analysis = makeAnalysis({
+      muscles: [
+        makeMuscle({ net_stimulus: 3, stimulus: 4.2 }),
+        makeMuscle({ region_id: 'clavicular', net_stimulus: 2.5, stimulus: 3.5 }),
+      ],
       summary: {
         total_sets: 30,
         muscles_trained: 10,
@@ -120,8 +142,7 @@ describe('computeDashboardDials', () => {
       },
     });
     const dials = computeDashboardDials(analysis);
-    // fatigue = (30 / 60) * 100 = 50
-    expect(dials.fatigue).toBe(50);
+    expect(dials.fatigue).toBe(81);
   });
 });
 

@@ -337,6 +337,8 @@ function InteractiveBody({
         bodyDataRef.current = bodyData;
 
         const group = bodyData.group;
+        group.position.x = BODY_3D_CONFIG.model.offsetX;
+        group.position.y = BODY_3D_CONFIG.model.offsetY;
         group.rotation.x = BODY_3D_CONFIG.model.tiltX;
         group.rotation.y = rotationRef.current;
         groupRef.current = group;
@@ -356,6 +358,8 @@ function InteractiveBody({
 
           // Always sync rotation from ref (covers both drag + inertia)
           if (groupRef.current) {
+            groupRef.current.position.x = BODY_3D_CONFIG.model.offsetX;
+            groupRef.current.position.y = BODY_3D_CONFIG.model.offsetY;
             groupRef.current.rotation.x = BODY_3D_CONFIG.model.tiltX;
             groupRef.current.rotation.y = rotationRef.current;
           }

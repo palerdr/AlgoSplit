@@ -14,8 +14,10 @@ export const BODY_3D_CONFIG = {
     position: [0, 0, 5] as const,
   },
   model: {
-    maxDimension: 2.55,
+    maxDimension: 2.56,
     tiltX: 0.08,
+    offsetX: -0.03,
+    offsetY: 0.03,
   },
   render: {
     clearColorHex: 0x0d0d0d,

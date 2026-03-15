@@ -25,11 +25,22 @@ export function computeDashboardDials(analysis: AnalysisResponse): {
 } {
   const { total_sets, muscles_trained, total_muscles } = analysis.summary;
   const activeMuscles = analysis.muscles.filter((muscle) => muscle.net_stimulus > 0);
-  const avgActiveStimulus = activeMuscles.length
-    ? activeMuscles.reduce((sum, muscle) => sum + muscle.net_stimulus, 0) / activeMuscles.length
-    : 0;
   const avgRawStimulus = activeMuscles.length
     ? activeMuscles.reduce((sum, muscle) => sum + muscle.stimulus, 0) / activeMuscles.length
+    : 0;
+  const meaningfullyTrainedMuscles = analysis.muscles.filter((muscle) => muscle.net_stimulus >= 1);
+  const weightedStimulusScore = meaningfullyTrainedMuscles.length
+    ? meaningfullyTrainedMuscles.reduce((sum, muscle) => {
+        const totalContributionSets = muscle.prime_sets + muscle.secondary_sets + muscle.tertiary_sets;
+        const primeShare = totalContributionSets > 0 ? muscle.prime_sets / totalContributionSets : 0;
+        const focusWeight = 1 + primeShare * 0.5;
+        return sum + muscle.net_stimulus * focusWeight;
+      }, 0) /
+      meaningfullyTrainedMuscles.reduce((sum, muscle) => {
+        const totalContributionSets = muscle.prime_sets + muscle.secondary_sets + muscle.tertiary_sets;
+        const primeShare = totalContributionSets > 0 ? muscle.prime_sets / totalContributionSets : 0;
+        return sum + (1 + primeShare * 0.5);
+      }, 0)
     : 0;
   const workloadDensity = Math.min(1, total_sets / 18);
   const coverage = total_muscles > 0 ? muscles_trained / total_muscles : 0;
@@ -39,11 +50,18 @@ export function computeDashboardDials(analysis: AnalysisResponse): {
         return sum + (1 - unresolved);
       }, 0) / analysis.muscles.length
     : 1;
+  const meaningfulCoverage = meaningfullyTrainedMuscles.length;
+  const coverageScore = Math.min(1, meaningfulCoverage / 18);
+  const stimulusQuality = Math.min(1, weightedStimulusScore / 2.4);
+  const specializationBonus = meaningfulCoverage >= 14 ? 1 : meaningfulCoverage >= 10 ? 0.92 : 0.8;
+  const undercoveragePenalty = meaningfulCoverage >= 18 ? 1 : meaningfulCoverage >= 12 ? 0.96 : 0.85;
 
-  // Stimulus: average active-muscle stimulus normalized to the same 0-4 scale
-  // used by the body heatmap buckets. This avoids diluting a fresh split
-  // across every muscle in the body.
-  const stimulus = Math.round(Math.min(100, (avgActiveStimulus / 4) * 100));
+  // Stimulus: score the muscles that are actually being trained well, then
+  // reward strong target-region quality and let 18-20 well-trained regions
+  // score highly without demanding all 29 regions be emphasized equally.
+  const stimulus = Math.round(
+    Math.min(100, (stimulusQuality * 0.7 + coverageScore * 0.3) * specializationBonus * undercoveragePenalty * 100),
+  );
 
   // Fatigue: session workload density + raw per-muscle stress + body coverage.
   // This reflects "how much stress was imposed" rather than simply mirroring recovery.

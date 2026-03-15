@@ -118,6 +118,26 @@ export function useDeleteWorkout() {
   });
 }
 
+type PreviousExerciseMap = Record<string, { reps: number[]; weight: number[]; rir?: (number | null)[] }>;
+
+async function fetchPreviousWorkoutData(sessionName: string): Promise<PreviousExerciseMap | null> {
+  const history = await getWorkouts({ limit: 50 });
+  const match = history.workouts.find(
+    (w) => w.session_name.toLowerCase() === sessionName.toLowerCase(),
+  );
+  if (!match) return null;
+
+  const result: PreviousExerciseMap = {};
+  for (const ex of match.exercises) {
+    result[ex.exercise_name] = {
+      reps: ex.reps,
+      weight: ex.weight,
+      rir: ex.rir ?? undefined,
+    };
+  }
+  return result;
+}
+
 /**
  * Fetch the most recent workout for a given session name.
  * Returns previous exercise data in the shape the store expects.
@@ -125,25 +145,20 @@ export function useDeleteWorkout() {
 export function usePreviousWorkoutData(sessionName: string | undefined) {
   return useQuery({
     queryKey: [...workoutKeys.all, 'previous', sessionName],
-    queryFn: async () => {
-      if (!sessionName) return null;
-      const history = await getWorkouts({ limit: 50 });
-      const match = history.workouts.find(
-        (w) => w.session_name.toLowerCase() === sessionName.toLowerCase(),
-      );
-      if (!match) return null;
-
-      const result: Record<string, { reps: number[]; weight: number[]; rir?: (number | null)[] }> = {};
-      for (const ex of match.exercises) {
-        result[ex.exercise_name] = {
-          reps: ex.reps,
-          weight: ex.weight,
-          rir: ex.rir ?? undefined,
-        };
-      }
-      return result;
-    },
+    queryFn: () => fetchPreviousWorkoutData(sessionName!),
     enabled: !!sessionName,
+    staleTime: 10 * 60 * 1000,
+  });
+}
+
+/**
+ * Prefetch previous workout data for a session so it is warm in the
+ * React Query cache before the workout screen mounts.
+ */
+export function prefetchPreviousWorkoutData(qc: QueryClient, sessionName: string) {
+  qc.prefetchQuery({
+    queryKey: [...workoutKeys.all, 'previous', sessionName],
+    queryFn: () => fetchPreviousWorkoutData(sessionName),
     staleTime: 10 * 60 * 1000,
   });
 }
