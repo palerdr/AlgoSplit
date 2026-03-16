@@ -1,18 +1,595 @@
-import { View, Text, StyleSheet } from 'react-native';
+import { useState, useMemo, useCallback } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  FlatList,
+  ScrollView,
+  Alert,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import {
+  useCustomExercises,
+  useCreateCustomExercise,
+  useDeleteCustomExercise,
+} from '../../../src/hooks/useCustomExercises';
+import { colors, borders } from '../../../src/theme';
+import type { CustomExerciseResponse, CustomExerciseCreate } from '../../../src/types/api.types';
+
+// ─── Canonical muscle regions grouped for the picker ─────────────
+
+const MUSCLE_GROUPS: Array<{ group: string; regions: Array<{ id: string; label: string }> }> = [
+  {
+    group: 'Chest',
+    regions: [
+      { id: 'clavicular', label: 'Clavicular (Upper)' },
+      { id: 'sternocostal', label: 'Sternocostal (Mid/Lower)' },
+    ],
+  },
+  {
+    group: 'Back',
+    regions: [
+      { id: 'thoracic_lats', label: 'Upper Lats' },
+      { id: 'iliac_lats', label: 'Lower Lats' },
+      { id: 'trapezius', label: 'Trapezius' },
+      { id: 'rhomboids', label: 'Rhomboids' },
+      { id: 'spinal_erectors', label: 'Spinal Erectors' },
+    ],
+  },
+  {
+    group: 'Shoulders',
+    regions: [
+      { id: 'anterior_deltoid', label: 'Front Delt' },
+      { id: 'lateral_deltoid', label: 'Side Delt' },
+      { id: 'posterior_deltoid', label: 'Rear Delt' },
+    ],
+  },
+  {
+    group: 'Arms',
+    regions: [
+      { id: 'biceps_brachii', label: 'Biceps' },
+      { id: 'brachialis', label: 'Brachialis' },
+      { id: 'triceps_long_head', label: 'Triceps Long Head' },
+      { id: 'triceps_lateral_medial', label: 'Triceps Lat/Med' },
+      { id: 'brachioradialis', label: 'Brachioradialis' },
+      { id: 'wrist_flexors', label: 'Wrist Flexors' },
+      { id: 'wrist_extensors', label: 'Wrist Extensors' },
+    ],
+  },
+  {
+    group: 'Core',
+    regions: [
+      { id: 'anterior_core', label: 'Anterior Core' },
+      { id: 'lateral_core', label: 'Lateral Core' },
+    ],
+  },
+  {
+    group: 'Glutes & Hips',
+    regions: [
+      { id: 'glute_max', label: 'Glute Max' },
+      { id: 'glute_med_min', label: 'Glute Med/Min' },
+      { id: 'hip_adductors', label: 'Hip Adductors' },
+    ],
+  },
+  {
+    group: 'Legs',
+    regions: [
+      { id: 'rectus_femoris', label: 'Rectus Femoris' },
+      { id: 'vasti', label: 'Vasti (Quads)' },
+      { id: 'hip_extensors', label: 'Hip Extensors' },
+      { id: 'knee_flexors', label: 'Knee Flexors' },
+      { id: 'gastrocnemius', label: 'Gastrocnemius' },
+      { id: 'soleus', label: 'Soleus' },
+    ],
+  },
+];
+
+const ALL_REGIONS = MUSCLE_GROUPS.flatMap((g) => g.regions);
+
+const RESISTANCE_PROFILES: Array<{ key: CustomExerciseCreate['resistance_profile']; label: string }> = [
+  { key: 'ascending', label: 'Ascending' },
+  { key: 'mid', label: 'Mid-Range' },
+  { key: 'descending', label: 'Descending' },
+];
+
+const TIERS = ['prime', 'secondary', 'tertiary', 'quaternary'] as const;
+type Tier = typeof TIERS[number];
+
+const TIER_LABELS: Record<Tier, string> = {
+  prime: 'Prime Movers',
+  secondary: 'Secondary',
+  tertiary: 'Tertiary',
+  quaternary: 'Stabilizers',
+};
+
+interface TargetRow {
+  regionId: string;
+  weight: string;
+}
+
+type TierTargets = Record<Tier, TargetRow[]>;
+
+function emptyTiers(): TierTargets {
+  return { prime: [], secondary: [], tertiary: [], quaternary: [] };
+}
+
+function tiersToPayload(tiers: TierTargets): Pick<
+  CustomExerciseCreate,
+  'prime_targets' | 'secondary_targets' | 'tertiary_targets' | 'quaternary_targets'
+> {
+  const convert = (rows: TargetRow[]): Record<string, number> => {
+    const result: Record<string, number> = {};
+    for (const row of rows) {
+      const w = parseFloat(row.weight);
+      if (row.regionId && !isNaN(w) && w > 0) result[row.regionId] = w;
+    }
+    return result;
+  };
+  return {
+    prime_targets: convert(tiers.prime),
+    secondary_targets: convert(tiers.secondary),
+    tertiary_targets: convert(tiers.tertiary),
+    quaternary_targets: convert(tiers.quaternary),
+  };
+}
+
+function computeWeightSum(tiers: TierTargets): number {
+  let sum = 0;
+  for (const tier of TIERS) {
+    for (const row of tiers[tier]) {
+      const w = parseFloat(row.weight);
+      if (!isNaN(w)) sum += w;
+    }
+  }
+  return Math.round(sum * 1000) / 1000;
+}
+
+// ─── Main screen ─────────────────────────────────────────────────
 
 export default function ExercisesScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { data, isLoading } = useCustomExercises();
+  const createMutation = useCreateCustomExercise();
+  const deleteMutation = useDeleteCustomExercise();
+
+  const [showForm, setShowForm] = useState(false);
+  const [name, setName] = useState('');
+  const [tiers, setTiers] = useState<TierTargets>(emptyTiers);
+  const [axialLoad, setAxialLoad] = useState('0');
+  const [resistanceProfile, setResistanceProfile] = useState<CustomExerciseCreate['resistance_profile']>('mid');
+  const [isBilateral, setIsBilateral] = useState(true);
+  const [expandedTier, setExpandedTier] = useState<Tier | null>('prime');
+
+  const exercises = data?.exercises ?? [];
+  const weightSum = useMemo(() => computeWeightSum(tiers), [tiers]);
+  const isValidSum = Math.abs(weightSum - 1.0) < 0.015;
+
+  const resetForm = useCallback(() => {
+    setName('');
+    setTiers(emptyTiers());
+    setAxialLoad('0');
+    setResistanceProfile('mid');
+    setIsBilateral(true);
+    setExpandedTier('prime');
+  }, []);
+
+  const handleCreate = useCallback(() => {
+    if (!name.trim()) { Alert.alert('Error', 'Exercise name is required.'); return; }
+    if (!isValidSum) { Alert.alert('Error', `Muscle weights must sum to 1.0 (currently ${weightSum}).`); return; }
+
+    const payload: CustomExerciseCreate = {
+      exercise_name: name.trim(),
+      ...tiersToPayload(tiers),
+      axial_load: Math.max(0, Math.min(1, parseFloat(axialLoad) || 0)),
+      resistance_profile: resistanceProfile,
+      is_bilateral: isBilateral,
+    };
+
+    createMutation.mutate(payload, {
+      onSuccess: () => {
+        resetForm();
+        setShowForm(false);
+      },
+      onError: (err) => {
+        const msg = (err as Error).message ?? 'Failed to create exercise.';
+        Alert.alert('Error', msg);
+      },
+    });
+  }, [name, tiers, axialLoad, resistanceProfile, isBilateral, weightSum, isValidSum, createMutation, resetForm]);
+
+  const handleDelete = useCallback((ex: CustomExerciseResponse) => {
+    Alert.alert('Delete Exercise', `Delete "${ex.exercise_name}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: () => deleteMutation.mutate(ex.id) },
+    ]);
+  }, [deleteMutation]);
+
+  const addTargetRow = useCallback((tier: Tier) => {
+    setTiers((prev) => ({
+      ...prev,
+      [tier]: [...prev[tier], { regionId: '', weight: '' }],
+    }));
+  }, []);
+
+  const updateTargetRow = useCallback((tier: Tier, index: number, field: 'regionId' | 'weight', value: string) => {
+    setTiers((prev) => {
+      const rows = [...prev[tier]];
+      rows[index] = { ...rows[index], [field]: value };
+      return { ...prev, [tier]: rows };
+    });
+  }, []);
+
+  const removeTargetRow = useCallback((tier: Tier, index: number) => {
+    setTiers((prev) => ({
+      ...prev,
+      [tier]: prev[tier].filter((_, i) => i !== index),
+    }));
+  }, []);
+
+  // ── Render exercise list item ──
+
+  const renderExercise = useCallback(({ item }: { item: CustomExerciseResponse }) => {
+    const primeNames = Object.keys(item.prime_targets)
+      .map((id) => ALL_REGIONS.find((r) => r.id === id)?.label ?? id)
+      .join(', ');
+
+    return (
+      <View style={styles.exerciseRow}>
+        <View style={styles.exerciseInfo}>
+          <Text style={styles.exerciseName}>{item.exercise_name}</Text>
+          <Text style={styles.exerciseMeta} numberOfLines={1}>
+            {primeNames || 'No targets'} · {item.resistance_profile} · {item.is_bilateral ? 'Bilateral' : 'Unilateral'}
+          </Text>
+        </View>
+        <TouchableOpacity onPress={() => handleDelete(item)} hitSlop={8}>
+          <Ionicons name="trash-outline" size={16} color={colors.textDim} />
+        </TouchableOpacity>
+      </View>
+    );
+  }, [handleDelete]);
+
+  // ── Create form ──
+
+  if (showForm) {
+    return (
+      <KeyboardAvoidingView
+        style={[styles.container, { paddingTop: insets.top }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => { resetForm(); setShowForm(false); }} hitSlop={8}>
+            <Ionicons name="chevron-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>New Exercise</Text>
+          <TouchableOpacity onPress={handleCreate} disabled={createMutation.isPending}>
+            <Text style={[styles.saveText, createMutation.isPending && { opacity: 0.5 }]}>
+              {createMutation.isPending ? 'Saving...' : 'Save'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
+          {/* Name */}
+          <Text style={styles.fieldLabel}>Exercise Name</Text>
+          <TextInput
+            style={styles.textInput}
+            placeholder="e.g. Cable Crossover"
+            placeholderTextColor={colors.textDim}
+            value={name}
+            onChangeText={setName}
+          />
+
+          {/* Muscle Targets */}
+          <View style={styles.sumRow}>
+            <Text style={styles.fieldLabel}>Muscle Targets</Text>
+            <Text style={[styles.sumBadge, isValidSum ? styles.sumValid : styles.sumInvalid]}>
+              Sum: {weightSum.toFixed(2)} / 1.00
+            </Text>
+          </View>
+
+          {TIERS.map((tier) => (
+            <View key={tier} style={styles.tierBlock}>
+              <TouchableOpacity
+                style={styles.tierHeader}
+                onPress={() => setExpandedTier(expandedTier === tier ? null : tier)}
+              >
+                <Text style={styles.tierTitle}>{TIER_LABELS[tier]}</Text>
+                <View style={styles.tierRight}>
+                  {tiers[tier].length > 0 && (
+                    <Text style={styles.tierCount}>{tiers[tier].length}</Text>
+                  )}
+                  <Ionicons
+                    name={expandedTier === tier ? 'chevron-up' : 'chevron-down'}
+                    size={16}
+                    color={colors.textMuted}
+                  />
+                </View>
+              </TouchableOpacity>
+
+              {expandedTier === tier && (
+                <View style={styles.tierBody}>
+                  {tiers[tier].map((row, i) => (
+                    <View key={i} style={styles.targetRow}>
+                      <TouchableOpacity
+                        style={styles.regionPicker}
+                        onPress={() => {
+                          // Cycle through regions on tap for simplicity
+                          const usedIds = new Set(
+                            TIERS.flatMap((t) => tiers[t].map((r) => r.regionId)),
+                          );
+                          const available = ALL_REGIONS.filter((r) => !usedIds.has(r.id) || r.id === row.regionId);
+                          const currentIdx = available.findIndex((r) => r.id === row.regionId);
+                          const next = available[(currentIdx + 1) % available.length];
+                          if (next) updateTargetRow(tier, i, 'regionId', next.id);
+                        }}
+                      >
+                        <Text style={styles.regionText} numberOfLines={1}>
+                          {ALL_REGIONS.find((r) => r.id === row.regionId)?.label || 'Select muscle...'}
+                        </Text>
+                        <Ionicons name="chevron-down" size={14} color={colors.textMuted} />
+                      </TouchableOpacity>
+                      <TextInput
+                        style={styles.weightInput}
+                        keyboardType="decimal-pad"
+                        placeholder="0.0"
+                        placeholderTextColor={colors.textDim}
+                        value={row.weight}
+                        onChangeText={(v) => updateTargetRow(tier, i, 'weight', v)}
+                      />
+                      <TouchableOpacity onPress={() => removeTargetRow(tier, i)} hitSlop={6}>
+                        <Ionicons name="close-circle" size={18} color={colors.textDim} />
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                  <TouchableOpacity style={styles.addTargetBtn} onPress={() => addTargetRow(tier)}>
+                    <Ionicons name="add" size={14} color={colors.green} />
+                    <Text style={styles.addTargetText}>Add Muscle</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          ))}
+
+          {/* Axial Load */}
+          <Text style={styles.fieldLabel}>Axial Load (0-1)</Text>
+          <TextInput
+            style={styles.textInput}
+            keyboardType="decimal-pad"
+            placeholder="0.0"
+            placeholderTextColor={colors.textDim}
+            value={axialLoad}
+            onChangeText={setAxialLoad}
+          />
+
+          {/* Resistance Profile */}
+          <Text style={styles.fieldLabel}>Resistance Profile</Text>
+          <View style={styles.segmented}>
+            {RESISTANCE_PROFILES.map((rp) => {
+              const active = rp.key === resistanceProfile;
+              return (
+                <TouchableOpacity
+                  key={rp.key}
+                  style={[styles.segment, active && styles.segmentActive]}
+                  onPress={() => setResistanceProfile(rp.key)}
+                >
+                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                    {rp.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Bilateral Toggle */}
+          <TouchableOpacity style={styles.toggleRow} onPress={() => setIsBilateral(!isBilateral)}>
+            <Text style={styles.fieldLabel}>Bilateral</Text>
+            <View style={[styles.toggle, isBilateral && styles.toggleActive]}>
+              <View style={[styles.toggleKnob, isBilateral && styles.toggleKnobActive]} />
+            </View>
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
+  }
+
+  // ── Exercise list view ──
+
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <Text style={styles.title}>Custom Exercises</Text>
-      <Text style={styles.subtitle}>Exercise editor coming soon</Text>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} hitSlop={8}>
+          <Ionicons name="chevron-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Custom Exercises</Text>
+        <TouchableOpacity onPress={() => setShowForm(true)} hitSlop={8}>
+          <Ionicons name="add-circle-outline" size={24} color={colors.green} />
+        </TouchableOpacity>
+      </View>
+
+      {isLoading ? (
+        <View style={styles.centered}>
+          <Text style={styles.emptyText}>Loading...</Text>
+        </View>
+      ) : exercises.length === 0 ? (
+        <View style={styles.centered}>
+          <Ionicons name="barbell-outline" size={48} color={colors.textMuted} />
+          <Text style={styles.emptyTitle}>No Custom Exercises</Text>
+          <Text style={styles.emptySubtitle}>
+            Create your own movements with custom muscle targets, resistance profiles, and more.
+          </Text>
+          <TouchableOpacity style={styles.createBtn} onPress={() => setShowForm(true)}>
+            <Text style={styles.createBtnText}>Create Exercise</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <FlatList
+          data={exercises}
+          keyExtractor={(item) => item.id}
+          renderItem={renderExercise}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
     </View>
   );
 }
 
+// ─── Styles ──────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0D0D0D', alignItems: 'center', justifyContent: 'center' },
-  title: { color: '#E8E8E8', fontSize: 22, fontWeight: '700', marginBottom: 8 },
-  subtitle: { color: '#666', fontSize: 14 },
+  container: { flex: 1, backgroundColor: colors.bg },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  headerTitle: { color: colors.text, fontSize: 18, fontWeight: '700' },
+  saveText: { color: colors.green, fontSize: 15, fontWeight: '700' },
+  list: { paddingHorizontal: 16, paddingBottom: 40 },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40 },
+  emptyTitle: { color: colors.text, fontSize: 20, fontWeight: '700', marginTop: 16, marginBottom: 8 },
+  emptySubtitle: { color: colors.textSecondary, fontSize: 14, textAlign: 'center', marginBottom: 24, lineHeight: 20 },
+  emptyText: { color: colors.textMuted, fontSize: 14 },
+  createBtn: {
+    backgroundColor: colors.green,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  createBtnText: { color: colors.bg, fontSize: 15, fontWeight: '700' },
+
+  // Exercise row
+  exerciseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    borderWidth: 0.5,
+    borderColor: colors.border,
+    padding: 14,
+    marginBottom: 8,
+  },
+  exerciseInfo: { flex: 1, marginRight: 12 },
+  exerciseName: { color: colors.text, fontSize: 15, fontWeight: '700' },
+  exerciseMeta: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+
+  // Form
+  formContent: { paddingHorizontal: 16, paddingBottom: 60, gap: 12 },
+  fieldLabel: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
+  textInput: {
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+    borderWidth: 0.5,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: colors.text,
+    fontSize: 15,
+  },
+
+  // Weight sum badge
+  sumRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  sumBadge: { fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'], paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, overflow: 'hidden' },
+  sumValid: { backgroundColor: 'rgba(74, 222, 128, 0.15)', color: colors.green },
+  sumInvalid: { backgroundColor: 'rgba(239, 68, 68, 0.15)', color: colors.red },
+
+  // Tier
+  tierBlock: {
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+    borderWidth: 0.5,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  tierHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  tierTitle: { color: colors.text, fontSize: 14, fontWeight: '600' },
+  tierRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  tierCount: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
+  tierBody: { paddingHorizontal: 14, paddingBottom: 12, gap: 8 },
+
+  // Target row
+  targetRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  regionPicker: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderWidth: 0.5,
+    borderColor: colors.border,
+  },
+  regionText: { color: colors.text, fontSize: 13, flex: 1 },
+  weightInput: {
+    width: 60,
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 8,
+    borderWidth: 0.5,
+    borderColor: colors.border,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    color: colors.text,
+    fontSize: 13,
+    textAlign: 'center',
+    fontVariant: ['tabular-nums'],
+  },
+  addTargetBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+  },
+  addTargetText: { color: colors.green, fontSize: 13, fontWeight: '600' },
+
+  // Segmented control
+  segmented: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderRadius: 10,
+    borderWidth: 0.5,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  segment: { flex: 1, paddingVertical: 10, alignItems: 'center' },
+  segmentActive: { backgroundColor: colors.green },
+  segmentText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
+  segmentTextActive: { color: colors.bg, fontWeight: '700' },
+
+  // Toggle
+  toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
+  toggle: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: 0.5,
+    borderColor: colors.border,
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  toggleActive: { backgroundColor: colors.green, borderColor: colors.green },
+  toggleKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.textMuted,
+  },
+  toggleKnobActive: { backgroundColor: '#fff', alignSelf: 'flex-end' },
 });

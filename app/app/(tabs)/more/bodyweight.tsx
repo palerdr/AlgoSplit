@@ -302,7 +302,7 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 16,
     paddingBottom: 40,
-    gap: 10,
+    gap: 16,
   },
   inputCard: {
     flexDirection: 'row',
@@ -340,7 +340,7 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
   },
   statCard: {
     flex: 1,
@@ -348,7 +348,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 0.5,
     borderColor: colors.border,
-    paddingVertical: 10,
+    paddingVertical: 14,
     alignItems: 'center',
   },
   statValue: {
@@ -366,13 +366,13 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 13,
     fontWeight: '600',
-    marginTop: 6,
+    marginTop: 4,
   },
   entryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderBottomWidth: 0.5,
     borderBottomColor: colors.border,
   },

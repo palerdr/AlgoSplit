@@ -65,6 +65,13 @@ export default function SplitsScreen() {
         <View style={styles.headerActions}>
           <TouchableOpacity
             style={styles.compareBtn}
+            onPress={() => router.push('/(tabs)/more/exercises')}
+          >
+            <Ionicons name="create-outline" size={16} color={colors.text} />
+            <Text style={styles.compareBtnText}>Exercises</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.compareBtn}
             onPress={() => router.push('/(tabs)/splits/compare')}
           >
             <Ionicons name="git-compare-outline" size={16} color={colors.text} />
