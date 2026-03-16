@@ -20,6 +20,11 @@ export default function SettingsScreen() {
   const setStimulusDuration = useSettingsStore((s) => s.setStimulusDuration);
   const setMaintenanceVolume = useSettingsStore((s) => s.setMaintenanceVolume);
   const setDataset = useSettingsStore((s) => s.setDataset);
+  const restDuration = useSettingsStore((s) => s.restDuration);
+  const setRestDuration = useSettingsStore((s) => s.setRestDuration);
+  const restMin = Math.floor(restDuration / 60);
+  const restSec = restDuration % 60;
+  const restDisplay = `${restMin}:${String(restSec).padStart(2, '0')}`;
 
   const handleLogout = () => {
     setShowLogoutConfirm(true);
@@ -81,8 +86,43 @@ export default function SettingsScreen() {
 
         <Card style={styles.card}>
           <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Rest Timer</Text>
+            <Text style={styles.sectionHint}>Default rest duration after completing a set.</Text>
+          </View>
+          <View style={styles.controlBlock}>
+            <View style={styles.controlHeader}>
+              <Text style={styles.controlTitle}>Duration</Text>
+              <Text style={styles.controlValue}>{restDisplay}</Text>
+            </View>
+            <View style={styles.stepperRow}>
+              <TouchableOpacity
+                style={styles.stepperButton}
+                onPress={() => setRestDuration(restDuration - 15)}
+              >
+                <Text style={styles.stepperButtonText}>-15s</Text>
+              </TouchableOpacity>
+              <View style={styles.stepperTrack}>
+                <View
+                  style={[
+                    styles.stepperFill,
+                    { width: `${Math.min(100, ((restDuration - 30) / (600 - 30)) * 100)}%` },
+                  ]}
+                />
+              </View>
+              <TouchableOpacity
+                style={styles.stepperButton}
+                onPress={() => setRestDuration(restDuration + 15)}
+              >
+                <Text style={styles.stepperButtonText}>+15s</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Card>
+
+        <Card style={styles.card}>
+          <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Live Analysis Defaults</Text>
-            <Text style={styles.sectionHint}>These settings drive the dashboard’s live stimulus scoring.</Text>
+            <Text style={styles.sectionHint}>These settings drive the dashboard's live stimulus scoring.</Text>
           </View>
 
           <View style={styles.controlBlock}>

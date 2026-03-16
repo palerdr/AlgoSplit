@@ -35,7 +35,11 @@ interface RestTimerState {
   exerciseId: string | null;
 }
 
-const DEFAULT_REST_DURATION = 90;
+import { useSettingsStore } from './settingsStore';
+
+function getRestDuration(): number {
+  return useSettingsStore.getState().restDuration;
+}
 
 function generateId(): string {
   return Math.random().toString(36).substring(2, 9);
@@ -109,7 +113,7 @@ export const useWorkoutStore = create<WorkoutState>()(
       activeWorkout: null,
       selectedWorkoutDate: null,
       currentExerciseIndex: 0,
-      restTimer: { isRunning: false, duration: DEFAULT_REST_DURATION, remaining: 0, exerciseId: null },
+      restTimer: { isRunning: false, duration: getRestDuration(), remaining: 0, exerciseId: null },
 
       setCurrentExerciseIndex: (index) => {
         set({ currentExerciseIndex: index });
@@ -165,7 +169,7 @@ export const useWorkoutStore = create<WorkoutState>()(
         set({
           activeWorkout: null,
           currentExerciseIndex: 0,
-          restTimer: { isRunning: false, duration: DEFAULT_REST_DURATION, remaining: 0, exerciseId: null },
+          restTimer: { isRunning: false, duration: getRestDuration(), remaining: 0, exerciseId: null },
         });
       },
 
@@ -265,7 +269,7 @@ export const useWorkoutStore = create<WorkoutState>()(
             }),
           },
         });
-        if (!wasCompleted) startRestTimer(DEFAULT_REST_DURATION, exerciseId);
+        if (!wasCompleted) startRestTimer(getRestDuration(), exerciseId);
         else stopRestTimer();
       },
 
@@ -315,12 +319,12 @@ export const useWorkoutStore = create<WorkoutState>()(
       },
 
       startRestTimer: (duration, exerciseId) => {
-        const d = duration ?? DEFAULT_REST_DURATION;
+        const d = duration ?? getRestDuration();
         set({ restTimer: { isRunning: true, duration: d, remaining: d, exerciseId: exerciseId ?? null } });
       },
 
       stopRestTimer: () => {
-        set({ restTimer: { isRunning: false, duration: DEFAULT_REST_DURATION, remaining: 0, exerciseId: null } });
+        set({ restTimer: { isRunning: false, duration: getRestDuration(), remaining: 0, exerciseId: null } });
       },
 
       tickRestTimer: () => {

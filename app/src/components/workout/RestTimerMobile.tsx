@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useWorkoutStore } from '../../stores/workoutStore';
+import { useSettingsStore } from '../../stores/settingsStore';
 import { colors } from '../../theme';
 
 export default function RestTimerMobile() {
@@ -10,6 +11,7 @@ export default function RestTimerMobile() {
   const tickRestTimer = useWorkoutStore((s) => s.tickRestTimer);
   const stopRestTimer = useWorkoutStore((s) => s.stopRestTimer);
   const startRestTimer = useWorkoutStore((s) => s.startRestTimer);
+  const restDuration = useSettingsStore((s) => s.restDuration);
   const wasRunning = useRef(false);
 
   useEffect(() => {
@@ -55,7 +57,7 @@ export default function RestTimerMobile() {
         </View>
         <View style={styles.actions}>
           {isExpired ? (
-            <TouchableOpacity onPress={() => startRestTimer(90)} style={styles.actionBtn} hitSlop={6}>
+            <TouchableOpacity onPress={() => startRestTimer(restDuration)} style={styles.actionBtn} hitSlop={6}>
               <Ionicons name="play" size={18} color={colors.textSecondary} />
             </TouchableOpacity>
           ) : (

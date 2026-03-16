@@ -9,9 +9,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors, borders, spacing } from '../../theme';
 import { EXERCISE_DATABASE, findExercise } from '../../data/exercises';
+import { useCustomExercises } from '../../hooks/useCustomExercises';
 import type { ExerciseInput } from '../../types/api.types';
 
-const ALL_EXERCISE_NAMES = [
+const STATIC_EXERCISE_NAMES = [
   ...new Set(EXERCISE_DATABASE.flatMap((cat) => cat.exercises.map((e) => e.name))),
 ];
 
@@ -39,8 +40,14 @@ export default function ExerciseRowMobile({
   drag,
   isActive = false,
 }: Props) {
+  const { data: customData } = useCustomExercises();
   const [query, setQuery] = useState(exercise.name);
   const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const allExerciseNames = useMemo(() => {
+    const customNames = customData?.exercises.map((e) => e.exercise_name) ?? [];
+    return [...new Set([...customNames, ...STATIC_EXERCISE_NAMES])];
+  }, [customData]);
 
   useEffect(() => {
     setQuery(exercise.name);
@@ -49,8 +56,8 @@ export default function ExerciseRowMobile({
   const suggestions = useMemo(() => {
     if (!query || query.length < 2) return [];
     const lower = query.toLowerCase();
-    return ALL_EXERCISE_NAMES.filter((n) => n.toLowerCase().includes(lower)).slice(0, 5);
-  }, [query]);
+    return allExerciseNames.filter((n) => n.toLowerCase().includes(lower)).slice(0, 5);
+  }, [query, allExerciseNames]);
 
   const handleSelect = useCallback(
     (name: string) => {

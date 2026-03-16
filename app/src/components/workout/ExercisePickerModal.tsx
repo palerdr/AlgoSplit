@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { EXERCISE_DATABASE } from '../../data/exercises';
+import { useCustomExercises } from '../../hooks/useCustomExercises';
 import { colors } from '../../theme';
 
 interface ExercisePickerModalProps {
@@ -32,12 +33,25 @@ const UNIQUE_EXERCISES = ALL_EXERCISES.filter(
 
 export default function ExercisePickerModal({ visible, onSelect, onClose }: ExercisePickerModalProps) {
   const [search, setSearch] = useState('');
+  const { data: customData } = useCustomExercises();
+
+  const allExercises = useMemo(() => {
+    const customEntries = (customData?.exercises ?? []).map((ex) => ({
+      name: ex.exercise_name,
+      category: 'My Exercises',
+      unilateral: !ex.is_bilateral,
+    }));
+    const combined = [...customEntries, ...UNIQUE_EXERCISES];
+    return combined.filter(
+      (ex, i, arr) => arr.findIndex((e) => e.name.toLowerCase() === ex.name.toLowerCase()) === i,
+    );
+  }, [customData]);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return UNIQUE_EXERCISES.slice(0, 80);
+    if (!search.trim()) return allExercises.slice(0, 80);
     const q = search.toLowerCase();
-    return UNIQUE_EXERCISES.filter((ex) => ex.name.toLowerCase().includes(q)).slice(0, 50);
-  }, [search]);
+    return allExercises.filter((ex) => ex.name.toLowerCase().includes(q)).slice(0, 50);
+  }, [search, allExercises]);
 
   const handleSelect = (name: string) => {
     setSearch('');
