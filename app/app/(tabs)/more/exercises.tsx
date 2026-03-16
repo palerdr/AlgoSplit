@@ -98,14 +98,13 @@ const RESISTANCE_PROFILES: Array<{ key: CustomExerciseCreate['resistance_profile
   { key: 'descending', label: 'Descending' },
 ];
 
-const TIERS = ['prime', 'secondary', 'tertiary', 'quaternary'] as const;
+const TIERS = ['prime', 'secondary', 'tertiary'] as const;
 type Tier = typeof TIERS[number];
 
 const TIER_LABELS: Record<Tier, string> = {
   prime: 'Prime Movers',
   secondary: 'Secondary',
   tertiary: 'Tertiary',
-  quaternary: 'Stabilizers',
 };
 
 interface TargetRow {
@@ -116,7 +115,7 @@ interface TargetRow {
 type TierTargets = Record<Tier, TargetRow[]>;
 
 function emptyTiers(): TierTargets {
-  return { prime: [], secondary: [], tertiary: [], quaternary: [] };
+  return { prime: [], secondary: [], tertiary: [] };
 }
 
 function tiersToPayload(tiers: TierTargets): Pick<
@@ -135,7 +134,7 @@ function tiersToPayload(tiers: TierTargets): Pick<
     prime_targets: convert(tiers.prime),
     secondary_targets: convert(tiers.secondary),
     tertiary_targets: convert(tiers.tertiary),
-    quaternary_targets: convert(tiers.quaternary),
+    quaternary_targets: {},
   };
 }
 
