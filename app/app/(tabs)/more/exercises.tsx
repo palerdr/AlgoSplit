@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -149,6 +149,101 @@ function computeWeightSum(tiers: TierTargets): number {
   return Math.round(sum * 1000) / 1000;
 }
 
+interface MuscleRegionInputProps {
+  regionId: string;
+  takenRegionIds: Set<string>;
+  onChangeRegion: (regionId: string) => void;
+}
+
+function MuscleRegionInput({ regionId, takenRegionIds, onChangeRegion }: MuscleRegionInputProps) {
+  const selectedLabel = useMemo(
+    () => ALL_REGIONS.find((r) => r.id === regionId)?.label ?? '',
+    [regionId],
+  );
+  const [query, setQuery] = useState(selectedLabel);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  useEffect(() => {
+    setQuery(selectedLabel);
+  }, [selectedLabel]);
+
+  const suggestions = useMemo(() => {
+    const lower = query.trim().toLowerCase();
+    if (lower.length < 2) return [];
+    return ALL_REGIONS
+      .filter((r) => !takenRegionIds.has(r.id) || r.id === regionId)
+      .filter((r) => r.label.toLowerCase().includes(lower) || r.id.includes(lower))
+      .slice(0, 6);
+  }, [query, takenRegionIds, regionId]);
+
+  const handleSelect = useCallback(
+    (region: { id: string; label: string }) => {
+      onChangeRegion(region.id);
+      setQuery(region.label);
+      setShowSuggestions(false);
+    },
+    [onChangeRegion],
+  );
+
+  const handleBlur = useCallback(() => {
+    setTimeout(() => {
+      const trimmed = query.trim();
+      if (!trimmed) {
+        onChangeRegion('');
+        setShowSuggestions(false);
+        return;
+      }
+
+      const exact = ALL_REGIONS.find(
+        (r) => r.label.toLowerCase() === trimmed.toLowerCase() || r.id === trimmed.toLowerCase(),
+      );
+
+      if (exact && (!takenRegionIds.has(exact.id) || exact.id === regionId)) {
+        onChangeRegion(exact.id);
+        setQuery(exact.label);
+      } else {
+        setQuery(selectedLabel);
+      }
+
+      setShowSuggestions(false);
+    }, 150);
+  }, [query, onChangeRegion, takenRegionIds, regionId, selectedLabel]);
+
+  return (
+    <View style={styles.regionFieldWrap}>
+      <View style={styles.regionInputShell}>
+        <TextInput
+          style={styles.regionInput}
+          placeholder="Select muscle..."
+          placeholderTextColor={colors.textDim}
+          value={query}
+          onChangeText={(text) => {
+            setQuery(text);
+            setShowSuggestions(true);
+          }}
+          onFocus={() => query.trim().length >= 2 && setShowSuggestions(true)}
+          onBlur={handleBlur}
+        />
+        <Ionicons name="chevron-down" size={14} color={colors.textMuted} />
+      </View>
+
+      {showSuggestions && suggestions.length > 0 && (
+        <View style={styles.regionSuggestions}>
+          {suggestions.map((region) => (
+            <TouchableOpacity
+              key={region.id}
+              style={styles.regionSuggestionItem}
+              onPress={() => handleSelect(region)}
+            >
+              <Text style={styles.regionSuggestionText}>{region.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
 // ─── Main screen ─────────────────────────────────────────────────
 
 export default function ExercisesScreen() {
@@ -169,6 +264,10 @@ export default function ExercisesScreen() {
   const exercises = data?.exercises ?? [];
   const weightSum = useMemo(() => computeWeightSum(tiers), [tiers]);
   const isValidSum = Math.abs(weightSum - 1.0) < 0.015;
+  const selectedRegionIds = useMemo(
+    () => new Set(TIERS.flatMap((tier) => tiers[tier].map((row) => row.regionId).filter(Boolean))),
+    [tiers],
+  );
 
   const resetForm = useCallback(() => {
     setName('');
@@ -316,24 +415,11 @@ export default function ExercisesScreen() {
                 <View style={styles.tierBody}>
                   {tiers[tier].map((row, i) => (
                     <View key={i} style={styles.targetRow}>
-                      <TouchableOpacity
-                        style={styles.regionPicker}
-                        onPress={() => {
-                          // Cycle through regions on tap for simplicity
-                          const usedIds = new Set(
-                            TIERS.flatMap((t) => tiers[t].map((r) => r.regionId)),
-                          );
-                          const available = ALL_REGIONS.filter((r) => !usedIds.has(r.id) || r.id === row.regionId);
-                          const currentIdx = available.findIndex((r) => r.id === row.regionId);
-                          const next = available[(currentIdx + 1) % available.length];
-                          if (next) updateTargetRow(tier, i, 'regionId', next.id);
-                        }}
-                      >
-                        <Text style={styles.regionText} numberOfLines={1}>
-                          {ALL_REGIONS.find((r) => r.id === row.regionId)?.label || 'Select muscle...'}
-                        </Text>
-                        <Ionicons name="chevron-down" size={14} color={colors.textMuted} />
-                      </TouchableOpacity>
+                      <MuscleRegionInput
+                        regionId={row.regionId}
+                        takenRegionIds={selectedRegionIds}
+                        onChangeRegion={(nextRegionId) => updateTargetRow(tier, i, 'regionId', nextRegionId)}
+                      />
                       <TextInput
                         style={styles.weightInput}
                         keyboardType="decimal-pad"
@@ -403,7 +489,7 @@ export default function ExercisesScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.replace('/(tabs)/splits')} hitSlop={8}>
+        <TouchableOpacity onPress={() => router.replace('/splits')} hitSlop={8}>
           <Ionicons name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Custom Exercises</Text>
@@ -522,9 +608,11 @@ const styles = StyleSheet.create({
   tierBody: { paddingHorizontal: 14, paddingBottom: 12, gap: 8 },
 
   // Target row
-  targetRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  regionPicker: {
+  targetRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  regionFieldWrap: {
     flex: 1,
+  },
+  regionInputShell: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -535,7 +623,31 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: colors.border,
   },
-  regionText: { color: colors.text, fontSize: 13, flex: 1 },
+  regionInput: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 13,
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+  },
+  regionSuggestions: {
+    marginTop: 4,
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 8,
+    borderWidth: 0.5,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  regionSuggestionItem: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 0.5,
+    borderBottomColor: colors.border,
+  },
+  regionSuggestionText: {
+    color: colors.text,
+    fontSize: 13,
+  },
   weightInput: {
     width: 60,
     backgroundColor: colors.surfaceElevated,
