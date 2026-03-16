@@ -225,38 +225,34 @@ export default function BodyweightScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Stats grid */}
+            {/* Stats row */}
             {stats && (
-              <View style={styles.statsGrid}>
-                <View style={styles.statsRow}>
-                  <View style={styles.statCard}>
-                    <Text style={styles.statValue}>
-                      {stats.current.toFixed(1)}
-                    </Text>
-                    <Text style={styles.statLabel}>Current ({weightUnit})</Text>
-                  </View>
-                  <View style={styles.statCard}>
-                    <Text
-                      style={[
-                        styles.statValue,
-                        { color: stats.change > 0 ? colors.blue : stats.change < 0 ? colors.green : colors.text },
-                      ]}
-                    >
-                      {stats.change > 0 ? '+' : ''}
-                      {stats.change.toFixed(1)}
-                    </Text>
-                    <Text style={styles.statLabel}>Change ({weightUnit})</Text>
-                  </View>
+              <View style={styles.statsRow}>
+                <View style={styles.statCard}>
+                  <Text style={styles.statValue}>
+                    {stats.current.toFixed(1)}
+                  </Text>
+                  <Text style={styles.statLabel}>Current ({weightUnit})</Text>
                 </View>
-                <View style={styles.statsRow}>
-                  <View style={styles.statCard}>
-                    <Text style={styles.statValue}>{stats.avg7Day.toFixed(1)}</Text>
-                    <Text style={styles.statLabel}>7-Day Avg</Text>
-                  </View>
-                  <View style={styles.statCard}>
-                    <Text style={styles.statValue}>{stats.count}</Text>
-                    <Text style={styles.statLabel}>Entries</Text>
-                  </View>
+                <View style={styles.statCard}>
+                  <Text
+                    style={[
+                      styles.statValue,
+                      { color: stats.change > 0 ? colors.blue : stats.change < 0 ? colors.green : colors.text },
+                    ]}
+                  >
+                    {stats.change > 0 ? '+' : ''}
+                    {stats.change.toFixed(1)}
+                  </Text>
+                  <Text style={styles.statLabel}>Change ({weightUnit})</Text>
+                </View>
+                <View style={styles.statCard}>
+                  <Text style={styles.statValue}>{stats.avg7Day.toFixed(1)}</Text>
+                  <Text style={styles.statLabel}>7-Day Avg</Text>
+                </View>
+                <View style={styles.statCard}>
+                  <Text style={styles.statValue}>{stats.count}</Text>
+                  <Text style={styles.statLabel}>Entries</Text>
                 </View>
               </View>
             )}
@@ -342,32 +338,30 @@ const styles = StyleSheet.create({
   logBtnTextDisabled: {
     color: colors.textDim,
   },
-  statsGrid: {
-    gap: 12,
-  },
   statsRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
   },
   statCard: {
     flex: 1,
     backgroundColor: colors.surface,
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 0.5,
     borderColor: colors.border,
-    paddingVertical: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
     alignItems: 'center',
   },
   statValue: {
     color: colors.text,
-    fontSize: 20,
+    fontSize: 15,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
   statLabel: {
     color: colors.textMuted,
-    fontSize: 11,
-    marginTop: 4,
+    fontSize: 9,
+    marginTop: 3,
   },
   sectionTitle: {
     color: colors.textSecondary,
