@@ -163,7 +163,7 @@ export default function ExercisesScreen() {
   const [tiers, setTiers] = useState<TierTargets>(emptyTiers);
   const [axialLoad, setAxialLoad] = useState('0');
   const [resistanceProfile, setResistanceProfile] = useState<CustomExerciseCreate['resistance_profile']>('mid');
-  const [isBilateral, setIsBilateral] = useState(true);
+  const [isUnilateral, setIsUnilateral] = useState(false);
   const [expandedTier, setExpandedTier] = useState<Tier | null>('prime');
 
   const exercises = data?.exercises ?? [];
@@ -175,7 +175,7 @@ export default function ExercisesScreen() {
     setTiers(emptyTiers());
     setAxialLoad('0');
     setResistanceProfile('mid');
-    setIsBilateral(true);
+    setIsUnilateral(false);
     setExpandedTier('prime');
   }, []);
 
@@ -188,7 +188,7 @@ export default function ExercisesScreen() {
       ...tiersToPayload(tiers),
       axial_load: Math.max(0, Math.min(1, parseFloat(axialLoad) || 0)),
       resistance_profile: resistanceProfile,
-      is_bilateral: isBilateral,
+      is_bilateral: !isUnilateral,
     };
 
     createMutation.mutate(payload, {
@@ -201,7 +201,7 @@ export default function ExercisesScreen() {
         Alert.alert('Error', msg);
       },
     });
-  }, [name, tiers, axialLoad, resistanceProfile, isBilateral, weightSum, isValidSum, createMutation, resetForm]);
+  }, [name, tiers, axialLoad, resistanceProfile, isUnilateral, weightSum, isValidSum, createMutation, resetForm]);
 
   const handleDelete = useCallback((ex: CustomExerciseResponse) => {
     Alert.alert('Delete Exercise', `Delete "${ex.exercise_name}"?`, [
@@ -386,11 +386,11 @@ export default function ExercisesScreen() {
             })}
           </View>
 
-          {/* Bilateral Toggle */}
-          <TouchableOpacity style={styles.toggleRow} onPress={() => setIsBilateral(!isBilateral)}>
-            <Text style={styles.fieldLabel}>Bilateral</Text>
-            <View style={[styles.toggle, isBilateral && styles.toggleActive]}>
-              <View style={[styles.toggleKnob, isBilateral && styles.toggleKnobActive]} />
+          {/* Unilateral Toggle */}
+          <TouchableOpacity style={styles.toggleRow} onPress={() => setIsUnilateral(!isUnilateral)}>
+            <Text style={styles.fieldLabel}>Unilateral</Text>
+            <View style={[styles.toggle, isUnilateral && styles.toggleActive]}>
+              <View style={[styles.toggleKnob, isUnilateral && styles.toggleKnobActive]} />
             </View>
           </TouchableOpacity>
         </ScrollView>

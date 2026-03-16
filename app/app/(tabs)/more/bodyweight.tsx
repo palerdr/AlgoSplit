@@ -17,7 +17,7 @@ import { colors } from '../../../src/theme';
 import { convertLbToDisplay } from '../../../src/utils/unitConversion';
 import type { BodyweightEntryResponse } from '../../../src/types/api.types';
 
-const CHART_HEIGHT = 200;
+const CHART_HEIGHT = 240;
 const CHART_PAD = { top: 12, right: 16, bottom: 24, left: 40 };
 
 function WeightChart({ data }: { data: Array<{ date: Date; weight: number }> }) {
@@ -225,34 +225,38 @@ export default function BodyweightScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Stats row */}
+            {/* Stats grid */}
             {stats && (
-              <View style={styles.statsRow}>
-                <View style={styles.statCard}>
-                  <Text style={styles.statValue}>
-                    {stats.current.toFixed(1)}
-                  </Text>
-                  <Text style={styles.statLabel}>Current ({weightUnit})</Text>
+              <View style={styles.statsGrid}>
+                <View style={styles.statsRow}>
+                  <View style={styles.statCard}>
+                    <Text style={styles.statValue}>
+                      {stats.current.toFixed(1)}
+                    </Text>
+                    <Text style={styles.statLabel}>Current ({weightUnit})</Text>
+                  </View>
+                  <View style={styles.statCard}>
+                    <Text
+                      style={[
+                        styles.statValue,
+                        { color: stats.change > 0 ? colors.blue : stats.change < 0 ? colors.green : colors.text },
+                      ]}
+                    >
+                      {stats.change > 0 ? '+' : ''}
+                      {stats.change.toFixed(1)}
+                    </Text>
+                    <Text style={styles.statLabel}>Change ({weightUnit})</Text>
+                  </View>
                 </View>
-                <View style={styles.statCard}>
-                  <Text
-                    style={[
-                      styles.statValue,
-                      { color: stats.change > 0 ? colors.blue : stats.change < 0 ? colors.green : colors.text },
-                    ]}
-                  >
-                    {stats.change > 0 ? '+' : ''}
-                    {stats.change.toFixed(1)}
-                  </Text>
-                  <Text style={styles.statLabel}>Change ({weightUnit})</Text>
-                </View>
-                <View style={styles.statCard}>
-                  <Text style={styles.statValue}>{stats.avg7Day.toFixed(1)}</Text>
-                  <Text style={styles.statLabel}>7-Day Avg</Text>
-                </View>
-                <View style={styles.statCard}>
-                  <Text style={styles.statValue}>{stats.count}</Text>
-                  <Text style={styles.statLabel}>Entries</Text>
+                <View style={styles.statsRow}>
+                  <View style={styles.statCard}>
+                    <Text style={styles.statValue}>{stats.avg7Day.toFixed(1)}</Text>
+                    <Text style={styles.statLabel}>7-Day Avg</Text>
+                  </View>
+                  <View style={styles.statCard}>
+                    <Text style={styles.statValue}>{stats.count}</Text>
+                    <Text style={styles.statLabel}>Entries</Text>
+                  </View>
                 </View>
               </View>
             )}
@@ -312,20 +316,20 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     backgroundColor: colors.surface,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 0.5,
     borderColor: colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     color: colors.text,
-    fontSize: 15,
+    fontSize: 16,
     fontVariant: ['tabular-nums'],
   },
   logBtn: {
     backgroundColor: colors.green,
-    borderRadius: 10,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    borderRadius: 12,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
   },
   logBtnDisabled: {
     backgroundColor: colors.surfaceElevated,
@@ -338,6 +342,9 @@ const styles = StyleSheet.create({
   logBtnTextDisabled: {
     color: colors.textDim,
   },
+  statsGrid: {
+    gap: 12,
+  },
   statsRow: {
     flexDirection: 'row',
     gap: 12,
@@ -345,22 +352,22 @@ const styles = StyleSheet.create({
   statCard: {
     flex: 1,
     backgroundColor: colors.surface,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 0.5,
     borderColor: colors.border,
-    paddingVertical: 16,
+    paddingVertical: 18,
     alignItems: 'center',
   },
   statValue: {
     color: colors.text,
-    fontSize: 16,
+    fontSize: 20,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
   statLabel: {
     color: colors.textMuted,
-    fontSize: 10,
-    marginTop: 2,
+    fontSize: 11,
+    marginTop: 4,
   },
   sectionTitle: {
     color: colors.textSecondary,
