@@ -74,6 +74,8 @@ export default function BodyweightWidget() {
   const { stats, chartData, isLoading, weightUnit, logWeight, isLogging } =
     useBodyweight();
   const [input, setInput] = useState('');
+  const parsedValue = parseFloat(input);
+  const canLog = !isNaN(parsedValue) && parsedValue > 0 && !isLogging;
 
   const recentData = useMemo(() => chartData.slice(-14), [chartData]);
 
@@ -102,51 +104,49 @@ export default function BodyweightWidget() {
   if (isLoading) return null;
 
   return (
-    <TouchableOpacity
-      style={styles.card}
-      activeOpacity={0.7}
-      onPress={() => router.push('/more/bodyweight')}
-    >
-      {/* Header row */}
-      <View style={styles.headerRow}>
-        <View style={styles.titleRow}>
-          <Ionicons name="scale-outline" size={14} color={colors.textMuted} />
-          <Text style={styles.title}>Bodyweight</Text>
-        </View>
-        {stats && (
-          <View style={styles.currentRow}>
-            <Text style={styles.currentWeight}>
-              {stats.current.toFixed(1)} {weightUnit}
-            </Text>
-            <Ionicons name={trendIcon} size={14} color={trendColor} />
+    <View style={styles.card}>
+      <TouchableOpacity activeOpacity={0.7} onPress={() => router.push('/more/bodyweight')}>
+        {/* Header row */}
+        <View style={styles.headerRow}>
+          <View style={styles.titleRow}>
+            <Ionicons name="scale-outline" size={14} color={colors.textMuted} />
+            <Text style={styles.title}>Bodyweight</Text>
           </View>
-        )}
-      </View>
-
-      {/* Chart or empty state */}
-      {recentData.length >= 2 ? (
-        <View style={styles.chartRow}>
-          <MiniTrendLine data={recentData} />
           {stats && (
-            <View style={styles.changeCol}>
-              <Text
-                style={[
-                  styles.changeValue,
-                  { color: stats.change > 0 ? colors.blue : stats.change < 0 ? colors.green : colors.textMuted },
-                ]}
-              >
-                {stats.change > 0 ? '+' : ''}
-                {stats.change.toFixed(1)} {weightUnit}
+            <View style={styles.currentRow}>
+              <Text style={styles.currentWeight}>
+                {stats.current.toFixed(1)} {weightUnit}
               </Text>
-              <Text style={styles.changeLabel}>total</Text>
+              <Ionicons name={trendIcon} size={14} color={trendColor} />
             </View>
           )}
         </View>
-      ) : (
-        <Text style={styles.emptyText}>
-          {recentData.length === 1 ? 'Log more to see trend' : 'No entries yet'}
-        </Text>
-      )}
+
+        {/* Chart or empty state */}
+        {recentData.length >= 2 ? (
+          <View style={styles.chartRow}>
+            <MiniTrendLine data={recentData} />
+            {stats && (
+              <View style={styles.changeCol}>
+                <Text
+                  style={[
+                    styles.changeValue,
+                    { color: stats.change > 0 ? colors.blue : stats.change < 0 ? colors.green : colors.textMuted },
+                  ]}
+                >
+                  {stats.change > 0 ? '+' : ''}
+                  {stats.change.toFixed(1)} {weightUnit}
+                </Text>
+                <Text style={styles.changeLabel}>total</Text>
+              </View>
+            )}
+          </View>
+        ) : (
+          <Text style={styles.emptyText}>
+            {recentData.length === 1 ? 'Log more to see trend' : 'No entries yet'}
+          </Text>
+        )}
+      </TouchableOpacity>
 
       {/* Quick log input */}
       <View style={styles.inputRow}>
@@ -161,18 +161,18 @@ export default function BodyweightWidget() {
           onSubmitEditing={handleLog}
         />
         <TouchableOpacity
-          style={[styles.logBtn, (!input || isLogging) && styles.logBtnDisabled]}
+          style={[styles.logBtn, !canLog && styles.logBtnDisabled]}
           onPress={handleLog}
-          disabled={!input || isLogging}
+          disabled={!canLog}
         >
           <Ionicons
             name="add"
             size={18}
-            color={!input || isLogging ? colors.textDim : colors.bg}
+            color={!canLog ? colors.textDim : colors.bg}
           />
         </TouchableOpacity>
       </View>
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -183,12 +183,12 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: colors.border,
     padding: 14,
-    gap: 10,
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 10,
   },
   titleRow: {
     flexDirection: 'row',
@@ -215,6 +215,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 10,
   },
   changeCol: {
     alignItems: 'flex-end',
@@ -232,6 +233,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12,
     paddingVertical: 4,
+    marginBottom: 10,
   },
   inputRow: {
     flexDirection: 'row',

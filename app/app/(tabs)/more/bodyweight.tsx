@@ -2,11 +2,9 @@ import { useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   FlatList,
   StyleSheet,
-  Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -143,17 +141,7 @@ const chartStyles = StyleSheet.create({
 export default function BodyweightScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { entries, stats, chartData, isLoading, weightUnit, logWeight, isLogging, deleteEntry } =
-    useBodyweight();
-  const [input, setInput] = useState('');
-
-  const handleLog = useCallback(() => {
-    const value = parseFloat(input);
-    if (isNaN(value) || value <= 0) return;
-    logWeight(value);
-    setInput('');
-    Keyboard.dismiss();
-  }, [input, logWeight]);
+  const { entries, stats, chartData, isLoading, weightUnit, deleteEntry } = useBodyweight();
 
   const reversedEntries = useMemo(() => [...entries].reverse(), [entries]);
 
@@ -202,29 +190,6 @@ export default function BodyweightScreen() {
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
           <View style={styles.headerContent}>
-            {/* Input card */}
-            <View style={styles.inputCard}>
-              <TextInput
-                style={styles.input}
-                placeholder={`Weight (${weightUnit})`}
-                placeholderTextColor={colors.textDim}
-                keyboardType="decimal-pad"
-                returnKeyType="done"
-                value={input}
-                onChangeText={setInput}
-                onSubmitEditing={handleLog}
-              />
-              <TouchableOpacity
-                style={[styles.logBtn, (!input || isLogging) && styles.logBtnDisabled]}
-                onPress={handleLog}
-                disabled={!input || isLogging}
-              >
-                <Text style={[styles.logBtnText, (!input || isLogging) && styles.logBtnTextDisabled]}>
-                  Log
-                </Text>
-              </TouchableOpacity>
-            </View>
-
             {/* Stats row */}
             {stats && (
               <View style={styles.statsRow}>
@@ -269,7 +234,7 @@ export default function BodyweightScreen() {
                 <Ionicons name="scale-outline" size={32} color={colors.textMuted} />
                 <Text style={styles.emptyTitle}>No Entries Yet</Text>
                 <Text style={styles.emptyText}>
-                  Log your weight to start tracking your trend over time.
+                  Log your weight from the dashboard widget to start tracking your trend over time.
                 </Text>
               </View>
             )}
@@ -304,40 +269,6 @@ const styles = StyleSheet.create({
   },
   headerContent: {
     gap: 14,
-  },
-  inputCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  input: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    borderWidth: 0.5,
-    borderColor: colors.border,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: colors.text,
-    fontSize: 16,
-    fontVariant: ['tabular-nums'],
-  },
-  logBtn: {
-    backgroundColor: colors.green,
-    borderRadius: 12,
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-  },
-  logBtnDisabled: {
-    backgroundColor: colors.surfaceElevated,
-  },
-  logBtnText: {
-    color: colors.bg,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  logBtnTextDisabled: {
-    color: colors.textDim,
   },
   statsRow: {
     flexDirection: 'row',
