@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   FlatList,
-  ScrollView,
   StyleSheet,
   Keyboard,
 } from 'react-native';
@@ -228,10 +227,10 @@ export default function BodyweightScreen() {
 
             {/* Stats row */}
             {stats && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsRow}>
+              <View style={styles.statsRow}>
                 <View style={styles.statCard}>
                   <Text style={styles.statValue}>{stats.current.toFixed(1)}</Text>
-                  <Text style={styles.statLabel}>Current ({weightUnit})</Text>
+                  <Text style={styles.statLabel}>Current</Text>
                 </View>
                 <View style={styles.statCard}>
                   <Text
@@ -243,17 +242,17 @@ export default function BodyweightScreen() {
                     {stats.change > 0 ? '+' : ''}
                     {stats.change.toFixed(1)}
                   </Text>
-                  <Text style={styles.statLabel}>Change ({weightUnit})</Text>
+                  <Text style={styles.statLabel}>Change</Text>
                 </View>
                 <View style={styles.statCard}>
                   <Text style={styles.statValue}>{stats.avg7Day.toFixed(1)}</Text>
-                  <Text style={styles.statLabel}>7-Day Avg</Text>
+                  <Text style={styles.statLabel}>7D Avg</Text>
                 </View>
                 <View style={styles.statCard}>
                   <Text style={styles.statValue}>{stats.count}</Text>
                   <Text style={styles.statLabel}>Entries</Text>
                 </View>
-              </ScrollView>
+              </View>
             )}
 
             {/* Chart */}
@@ -342,17 +341,17 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: 'row',
-    gap: 8,
-    paddingRight: 2,
+    gap: 6,
   },
   statCard: {
-    width: 96,
+    flex: 1,
+    minWidth: 0,
     backgroundColor: colors.surface,
     borderRadius: 10,
     borderWidth: 0.5,
     borderColor: colors.border,
-    paddingVertical: 12,
-    paddingHorizontal: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 2,
     alignItems: 'center',
   },
   statValue: {
@@ -363,8 +362,9 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     color: colors.textMuted,
-    fontSize: 9,
+    fontSize: 8,
     marginTop: 3,
+    textAlign: 'center',
   },
   sectionTitle: {
     color: colors.textSecondary,
