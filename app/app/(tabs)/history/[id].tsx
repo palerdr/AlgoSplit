@@ -29,7 +29,7 @@ export default function WorkoutDetailScreen() {
     try {
       await deleteMutation.mutateAsync(id);
       setShowDeleteConfirm(false);
-      router.back();
+      router.replace('/(tabs)/history');
     } catch {
       Alert.alert('Error', 'Failed to delete workout.');
     }
@@ -56,7 +56,7 @@ export default function WorkoutDetailScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={8}>
+        <TouchableOpacity onPress={() => router.replace('/(tabs)/history')} hitSlop={8}>
           <Ionicons name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>{workout.session_name}</Text>
