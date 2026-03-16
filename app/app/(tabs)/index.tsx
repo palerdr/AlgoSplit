@@ -15,6 +15,7 @@ import {
   computeProgressDial,
   generateInsights,
 } from '../../src/utils/analysisTransform';
+import BodyweightWidget from '../../src/components/bodyweight/BodyweightWidget';
 
 // Breakpoint: above this = desktop layout (body left, dials right)
 const DESKTOP_BREAKPOINT = 600;
@@ -301,6 +302,10 @@ export default function DashboardScreen() {
             ))}
           </View>
         )}
+
+        <View style={[styles.bodyweightSection, isDesktop && styles.insightsDesktop]}>
+          <BodyweightWidget />
+        </View>
       </ScrollView>
 
       <Modal
@@ -397,6 +402,10 @@ const styles = StyleSheet.create({
   },
   insightsSection: {
     paddingHorizontal: 20,
+  },
+  bodyweightSection: {
+    paddingHorizontal: 20,
+    marginTop: 4,
   },
   insightsDesktop: {
     paddingHorizontal: 24,
