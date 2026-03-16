@@ -5,6 +5,7 @@ import {
   TextInput,
   TouchableOpacity,
   FlatList,
+  ScrollView,
   StyleSheet,
   Keyboard,
 } from 'react-native';
@@ -201,7 +202,7 @@ export default function BodyweightScreen() {
         renderItem={renderEntry}
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
-          <>
+          <View style={styles.headerContent}>
             {/* Input card */}
             <View style={styles.inputCard}>
               <TextInput
@@ -227,11 +228,9 @@ export default function BodyweightScreen() {
 
             {/* Stats row */}
             {stats && (
-              <View style={styles.statsRow}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsRow}>
                 <View style={styles.statCard}>
-                  <Text style={styles.statValue}>
-                    {stats.current.toFixed(1)}
-                  </Text>
+                  <Text style={styles.statValue}>{stats.current.toFixed(1)}</Text>
                   <Text style={styles.statLabel}>Current ({weightUnit})</Text>
                 </View>
                 <View style={styles.statCard}>
@@ -254,7 +253,7 @@ export default function BodyweightScreen() {
                   <Text style={styles.statValue}>{stats.count}</Text>
                   <Text style={styles.statLabel}>Entries</Text>
                 </View>
-              </View>
+              </ScrollView>
             )}
 
             {/* Chart */}
@@ -275,7 +274,7 @@ export default function BodyweightScreen() {
                 </Text>
               </View>
             )}
-          </>
+          </View>
         }
       />
     </View>
@@ -303,6 +302,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 40,
     gap: 20,
+  },
+  headerContent: {
+    gap: 14,
   },
   inputCard: {
     flexDirection: 'row',
@@ -341,9 +343,10 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: 'row',
     gap: 8,
+    paddingRight: 2,
   },
   statCard: {
-    flex: 1,
+    width: 96,
     backgroundColor: colors.surface,
     borderRadius: 10,
     borderWidth: 0.5,
