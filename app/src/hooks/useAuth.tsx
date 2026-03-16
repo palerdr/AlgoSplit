@@ -1,10 +1,13 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQueryClient } from '@tanstack/react-query';
 import * as authApi from '../api/auth.api';
 import { tokenStore, onAuthLogout, getErrorMessage } from '../api/client';
 import type { UserInfo } from '../types/api.types';
+
+// Refresh the token 5 minutes before it expires
+const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
 const USER_CACHE_KEY = 'algosplit_user';
 
@@ -54,6 +57,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isAuthenticated: false,
     isLoading: true,
   });
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleRefresh = useCallback((expiresIn: number) => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    const delay = Math.max(10_000, expiresIn * 1000 - REFRESH_BUFFER_MS);
+    refreshTimerRef.current = setTimeout(async () => {
+      try {
+        const rt = await tokenStore.getRefreshToken();
+        if (!rt) return;
+        const res = await authApi.refreshToken(rt);
+        if (res.access_token) await tokenStore.setToken(res.access_token);
+        if (res.refresh_token) await tokenStore.setRefreshToken(res.refresh_token);
+        scheduleRefresh(res.expires_in);
+      } catch {
+        // Refresh failed — interceptor will handle 401 on next request
+      }
+    }, delay);
+  }, []);
 
   // Check existing session on mount
   useEffect(() => {
@@ -95,27 +116,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await authApi.login({ email, password });
-    const persistToken = res.access_token
-      ? tokenStore.setToken(res.access_token)
-      : Promise.resolve();
-    const persistUser = setCachedUser(res.user);
+    const promises: Promise<void>[] = [setCachedUser(res.user)];
+    if (res.access_token) promises.push(tokenStore.setToken(res.access_token));
+    if (res.refresh_token) promises.push(tokenStore.setRefreshToken(res.refresh_token));
     setState({ user: res.user, isAuthenticated: true, isLoading: false });
     queryClient.clear();
-    await Promise.all([persistToken, persistUser]);
-  }, [queryClient]);
+    await Promise.all(promises);
+    scheduleRefresh(res.expires_in);
+  }, [queryClient, scheduleRefresh]);
 
   const signup = useCallback(async (email: string, password: string) => {
     const res = await authApi.signup({ email, password });
-    const persistToken = res.access_token
-      ? tokenStore.setToken(res.access_token)
-      : Promise.resolve();
-    const persistUser = setCachedUser(res.user);
+    const promises: Promise<void>[] = [setCachedUser(res.user)];
+    if (res.access_token) promises.push(tokenStore.setToken(res.access_token));
+    if (res.refresh_token) promises.push(tokenStore.setRefreshToken(res.refresh_token));
     setState({ user: res.user, isAuthenticated: true, isLoading: false });
     queryClient.clear();
-    await Promise.all([persistToken, persistUser]);
-  }, [queryClient]);
+    await Promise.all(promises);
+    scheduleRefresh(res.expires_in);
+  }, [queryClient, scheduleRefresh]);
 
   const logout = useCallback(async () => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     try {
       await authApi.logout();
     } catch {

@@ -118,6 +118,7 @@ describe('useAuth', () => {
     jest.mocked(authApi.getCurrentUser).mockRejectedValue(new Error('unauthenticated'));
     jest.mocked(authApi.login).mockResolvedValue({
       access_token: 'token-123',
+      refresh_token: 'refresh-123',
       token_type: 'bearer',
       expires_in: 3600,
       user: { id: 'user-2', email: 'login@example.com' },

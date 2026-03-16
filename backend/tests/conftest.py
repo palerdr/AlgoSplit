@@ -43,7 +43,7 @@ class FakeAuthResponse:
         self.session = type(
             "Session",
             (),
-            {"access_token": token, "expires_in": 3600},
+            {"access_token": token, "refresh_token": f"refresh-{token}", "expires_in": 3600},
         )()
 
 
@@ -76,6 +76,10 @@ class FakeSupabaseAuth:
         if not user or user["password"] != payload["password"]:
             raise Exception("invalid credentials")
         return FakeAuthResponse(user_id=user["id"], email=user["email"], token=f"token-{user['id']}")
+
+    def refresh_session(self, refresh_token: str) -> FakeAuthResponse:
+        # Accept any refresh token in tests and return a new session
+        return FakeAuthResponse(user_id="user-refreshed", email="refreshed@example.com", token="token-refreshed")
 
     def sign_out(self) -> None:
         self.sign_out_called = True

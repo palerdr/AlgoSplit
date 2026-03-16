@@ -13,6 +13,7 @@ const API_BASE_URL =
   'http://localhost:8000';
 
 const TOKEN_KEY = 'algosplit_access_token';
+const REFRESH_KEY = 'algosplit_refresh_token';
 const CSRF_KEY = 'algosplit_csrf_token';
 const LEGACY_TOKEN_KEY = 'splitai_access_token';
 const LEGACY_CSRF_KEY = 'splitai_csrf_token';
@@ -86,12 +87,39 @@ export const tokenStore = {
     if (Platform.OS === 'web') {
       clearWebStorage(TOKEN_KEY);
       clearWebStorage(LEGACY_TOKEN_KEY);
+      clearWebStorage(REFRESH_KEY);
       return;
     }
     try {
       await SecureStore.deleteItemAsync(TOKEN_KEY);
+      await SecureStore.deleteItemAsync(REFRESH_KEY);
     } catch {
       // ignore
+    }
+  },
+  async getRefreshToken(): Promise<string | null> {
+    if (Platform.OS === 'web') {
+      return readWebStorage(REFRESH_KEY);
+    }
+    try {
+      return await SecureStore.getItemAsync(REFRESH_KEY);
+    } catch {
+      return null;
+    }
+  },
+  async setRefreshToken(token: string): Promise<void> {
+    if (Platform.OS === 'web') {
+      try {
+        localStorage.setItem(REFRESH_KEY, token);
+      } catch {
+        // noop
+      }
+      return;
+    }
+    try {
+      await SecureStore.setItemAsync(REFRESH_KEY, token);
+    } catch {
+      // SecureStore not available
     }
   },
 };
@@ -132,11 +160,51 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor - handle 401
+// Response interceptor — attempt silent token refresh on 401 before logging out.
+// This prevents mid-session logouts when the access token expires during a
+// long workout (Supabase JWTs expire after 60 min by default).
+let _refreshPromise: Promise<boolean> | null = null;
+
+async function attemptTokenRefresh(): Promise<boolean> {
+  const refreshToken = await tokenStore.getRefreshToken();
+  if (!refreshToken) return false;
+  try {
+    const res = await axios.post<{ access_token: string; refresh_token: string }>(
+      `${API_BASE_URL}/auth/refresh`,
+      { refresh_token: refreshToken },
+    );
+    if (res.data.access_token) {
+      await tokenStore.setToken(res.data.access_token);
+    }
+    if (res.data.refresh_token) {
+      await tokenStore.setRefreshToken(res.data.refresh_token);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
-    if (error.response?.status === 401) {
+    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+      originalRequest._retry = true;
+      // Deduplicate concurrent refresh attempts
+      if (!_refreshPromise) {
+        _refreshPromise = attemptTokenRefresh().finally(() => { _refreshPromise = null; });
+      }
+      const refreshed = await _refreshPromise;
+      if (refreshed) {
+        // Retry the original request with the new token
+        const newToken = await tokenStore.getToken();
+        if (newToken) {
+          originalRequest.headers['Authorization'] = `Bearer ${newToken}`;
+        }
+        return apiClient(originalRequest);
+      }
+      // Refresh failed — force logout
       await tokenStore.clearToken();
       emitAuthLogout();
     }

@@ -42,10 +42,17 @@ class LoginRequest(BaseModel):
     }
 
 
+class RefreshRequest(BaseModel):
+    """Request body for token refresh"""
+
+    refresh_token: str = Field(..., description="Supabase refresh token")
+
+
 class AuthResponse(BaseModel):
     """Response for successful authentication"""
 
     access_token: str = Field(..., description="JWT access token")
+    refresh_token: str = Field(default="", description="Refresh token for obtaining new access tokens")
     token_type: str = Field(default="bearer", description="Token type")
     expires_in: int = Field(..., description="Token expiration time in seconds")
     user: "UserInfo" = Field(..., description="User information")
@@ -55,6 +62,7 @@ class AuthResponse(BaseModel):
             "examples": [
                 {
                     "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+                    "refresh_token": "v1.refresh-token-string...",
                     "token_type": "bearer",
                     "expires_in": 3600,
                     "user": {

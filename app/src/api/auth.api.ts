@@ -21,6 +21,11 @@ export async function getCurrentUser(): Promise<UserInfo> {
   return response.data;
 }
 
+export async function refreshToken(refresh_token: string): Promise<AuthResponse> {
+  const response = await apiClient.post<AuthResponse>('/auth/refresh', { refresh_token });
+  return response.data;
+}
+
 export async function logout(): Promise<void> {
   await apiClient.post('/auth/logout');
 }

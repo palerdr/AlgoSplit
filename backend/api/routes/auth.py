@@ -11,6 +11,7 @@ from db.supabase import get_supabase_client, get_supabase_client_with_token
 from schemas.auth import (
     SignUpRequest,
     LoginRequest,
+    RefreshRequest,
     AuthResponse,
     UserInfo,
     ErrorResponse,
@@ -68,11 +69,13 @@ async def signup(request: SignUpRequest, http_response: Response):
 
         # Return authentication response
         access_token = sign_up_response.session.access_token if sign_up_response.session else ""
+        refresh_token = sign_up_response.session.refresh_token if sign_up_response.session else ""
         expires_in = sign_up_response.session.expires_in if sign_up_response.session else 3600
         if access_token:
             set_auth_cookies(http_response, access_token, expires_in)
         return AuthResponse(
             access_token=access_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
+            refresh_token=refresh_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
             token_type="bearer",
             expires_in=expires_in,
             user=UserInfo(
@@ -162,6 +165,7 @@ async def login(request: LoginRequest, http_response: Response):
         )
         return AuthResponse(
             access_token=login_response.session.access_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
+            refresh_token=login_response.session.refresh_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
             token_type="bearer",
             expires_in=login_response.session.expires_in,
             user=UserInfo(
@@ -220,6 +224,55 @@ async def get_user(current_user: AuthUser = Depends(get_current_user)):
         id=current_user.id,
         email=current_user.email,
     )
+
+
+@router.post(
+    "/refresh",
+    response_model=AuthResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "Invalid or expired refresh token"},
+    },
+    summary="Refresh access token",
+    description="Exchange a refresh token for a new access token",
+)
+async def refresh(request: RefreshRequest, http_response: Response):
+    """
+    Refresh an expired access token using a Supabase refresh token.
+    """
+    try:
+        supabase = get_supabase_client()
+        session_response = supabase.auth.refresh_session(request.refresh_token)
+
+        if not session_response.user or not session_response.session:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired refresh token",
+            )
+
+        set_auth_cookies(
+            http_response,
+            session_response.session.access_token,
+            session_response.session.expires_in,
+        )
+        return AuthResponse(
+            access_token=session_response.session.access_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
+            refresh_token=session_response.session.refresh_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
+            token_type="bearer",
+            expires_in=session_response.session.expires_in,
+            user=UserInfo(
+                id=session_response.user.id,
+                email=session_response.user.email,
+            ),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("Token refresh failed: %s", str(e))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Failed to refresh token",
+        )
 
 
 @router.post(

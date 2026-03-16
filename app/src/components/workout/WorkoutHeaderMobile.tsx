@@ -28,8 +28,12 @@ export default function WorkoutHeaderMobile({
     return () => clearInterval(id);
   }, [startedAt]);
 
-  const m = Math.floor(elapsed / 60);
+  const h = Math.floor(elapsed / 3600);
+  const m = Math.floor((elapsed % 3600) / 60);
   const s = elapsed % 60;
+  const timeStr = h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`;
 
   return (
     <View style={styles.header}>
@@ -39,7 +43,7 @@ export default function WorkoutHeaderMobile({
 
       <View style={styles.center}>
         <Text style={styles.title} numberOfLines={1}>{sessionName}</Text>
-        <Text style={styles.timer}>{m}:{String(s).padStart(2, '0')}</Text>
+        <Text style={styles.timer}>{timeStr}</Text>
       </View>
 
       <View style={styles.right}>

@@ -41,8 +41,12 @@ function ActiveWorkoutWidget() {
 
   if (!workout) return null;
 
-  const m = Math.floor(elapsed / 60);
+  const h = Math.floor(elapsed / 3600);
+  const m = Math.floor((elapsed % 3600) / 60);
   const s = elapsed % 60;
+  const timeStr = h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`;
 
   const handlePressIn = () => {
     Animated.timing(pressScale, { toValue: 0.97, duration: 100, useNativeDriver: true }).start();
@@ -72,7 +76,7 @@ function ActiveWorkoutWidget() {
       />
       <View style={{ flex: 1 }}>
         <Text style={styles.widgetTitle}>{workout.sessionName}</Text>
-        <Text style={styles.widgetTime}>{m}:{s.toString().padStart(2, '0')} elapsed</Text>
+        <Text style={styles.widgetTime}>{timeStr} elapsed</Text>
       </View>
       <Text style={styles.widgetAction}>Continue</Text>
       <Ionicons name="chevron-forward" size={14} color="#666" />
