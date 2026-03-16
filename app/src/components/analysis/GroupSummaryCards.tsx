@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { colors, borders, spacing } from '../../theme';
 import type { MuscleGroupSummary } from '../../types/api.types';
 
@@ -20,15 +20,6 @@ const GROUP_COLORS: Record<string, string> = {
   abs: '#F43F5E',
 };
 
-function getRating(net: number): { label: string; color: string } {
-  if (net >= 5) return { label: 'Excellent', color: '#22C55E' };
-  if (net >= 4) return { label: 'Great', color: '#10B981' };
-  if (net >= 3) return { label: 'Good', color: '#14B8A6' };
-  if (net >= 2) return { label: 'Moderate', color: '#EAB308' };
-  if (net >= 1) return { label: 'Low', color: '#F97316' };
-  return { label: 'Minimal', color: '#EF4444' };
-}
-
 function formatGroupName(group: string): string {
   return group
     .split('_')
@@ -41,22 +32,59 @@ interface Props {
 }
 
 export default function GroupSummaryCards({ groups }: Props) {
-  const sorted = [...groups].sort((a, b) => b.total_net_stimulus - a.total_net_stimulus);
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+
+  const sorted = useMemo(
+    () => [...groups].sort((a, b) => b.total_net_stimulus - a.total_net_stimulus),
+    [groups],
+  );
+  const maxStimulus = useMemo(
+    () => Math.max(...sorted.map((g) => g.total_net_stimulus), 1),
+    [sorted],
+  );
+
+  if (sorted.length === 0) {
+    return (
+      <View style={styles.emptyState}>
+        <Text style={styles.emptyText}>No group data available yet.</Text>
+      </View>
+    );
+  }
 
   return (
-    <View style={styles.grid}>
+    <View style={styles.chartCard}>
       {sorted.map((g) => {
-        const borderColor = GROUP_COLORS[g.group] ?? colors.textMuted;
-        const rating = getRating(g.total_net_stimulus);
+        const barColor = GROUP_COLORS[g.group] ?? colors.textMuted;
+        const widthPct = Math.max((g.total_net_stimulus / maxStimulus) * 100, 3);
+        const isActive = activeGroup === g.group;
+
         return (
-          <View key={g.group} style={[styles.card, { borderLeftColor: borderColor }]}>
-            <Text style={styles.groupName}>{formatGroupName(g.group)}</Text>
-            <Text style={styles.stimulus}>{g.total_net_stimulus.toFixed(1)}</Text>
-            <Text style={[styles.rating, { color: rating.color }]}>{rating.label}</Text>
-            <Text style={styles.subtitle}>
-              {g.total_sets} sets | {g.regions.length} regions
-            </Text>
-          </View>
+          <Pressable
+            key={g.group}
+            style={styles.row}
+            onHoverIn={() => setActiveGroup(g.group)}
+            onHoverOut={() => setActiveGroup((current) => (current === g.group ? null : current))}
+            onPressIn={() => setActiveGroup(g.group)}
+            onPressOut={() => setActiveGroup((current) => (current === g.group ? null : current))}
+          >
+            <View style={styles.rowHeader}>
+              <Text style={styles.groupName} numberOfLines={1}>
+                {formatGroupName(g.group)}
+              </Text>
+              <Text style={styles.meta}>
+                {g.total_sets} sets
+              </Text>
+            </View>
+
+            <View style={styles.track}>
+              <View style={[styles.fill, { width: `${widthPct}%`, backgroundColor: barColor }]} />
+              {isActive ? (
+                <View style={styles.valuePill}>
+                  <Text style={styles.valueText}>{g.total_net_stimulus.toFixed(1)}</Text>
+                </View>
+              ) : null}
+            </View>
+          </Pressable>
         );
       })}
     </View>
@@ -64,39 +92,78 @@ export default function GroupSummaryCards({ groups }: Props) {
 }
 
 const styles = StyleSheet.create({
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  card: {
-    width: '47%',
+  chartCard: {
     backgroundColor: colors.surface,
     borderRadius: borders.radius.lg,
     borderWidth: borders.width.thin,
     borderColor: colors.border,
-    borderLeftWidth: 3,
-    padding: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    gap: 10,
+  },
+  row: {
+    gap: 6,
+  },
+  rowHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   groupName: {
     color: colors.text,
     fontSize: 13,
     fontWeight: '700',
-    marginBottom: 4,
+    flex: 1,
   },
-  stimulus: {
-    color: colors.text,
-    fontSize: 22,
-    fontWeight: '800',
-  },
-  rating: {
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  subtitle: {
+  meta: {
     color: colors.textMuted,
     fontSize: 11,
-    marginTop: 4,
+    fontWeight: '600',
+  },
+  track: {
+    height: 16,
+    borderRadius: 999,
+    backgroundColor: colors.surfaceElevated,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+    overflow: 'hidden',
+    justifyContent: 'center',
+  },
+  fill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 999,
+  },
+  valuePill: {
+    position: 'absolute',
+    right: 4,
+    height: 20,
+    paddingHorizontal: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(10, 12, 16, 0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+  },
+  valueText: {
+    color: colors.text,
+    fontSize: 11,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  emptyState: {
+    backgroundColor: colors.surface,
+    borderRadius: borders.radius.lg,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+    padding: spacing.md,
+  },
+  emptyText: {
+    color: colors.textMuted,
+    fontSize: 12,
   },
 });
