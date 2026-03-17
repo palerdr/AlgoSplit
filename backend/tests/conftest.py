@@ -328,8 +328,8 @@ def client(monkeypatch: pytest.MonkeyPatch, fake_supabase: FakeSupabaseClient, a
     monkeypatch.setattr(splits_routes, "get_supabase_client_with_token", lambda _token: fake_supabase)
     monkeypatch.setattr(
         splits_routes,
-        "move_match",
-        lambda _name: type("Movement", (), {"name": "mock_pattern"})(),
+        "move_match_with_overrides",
+        lambda _name, _user_id=None: type("Movement", (), {"name": "mock_pattern"})(),
     )
 
     app.dependency_overrides[get_current_user] = lambda: auth_user

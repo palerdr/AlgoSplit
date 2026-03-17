@@ -151,3 +151,37 @@ def test_analyze_saved_split_passes_include_breakdowns_query(monkeypatch, client
     assert response.status_code == 200
     assert response.json()["include_breakdowns"] is True
     assert captured["include_breakdowns"] is True
+
+
+def test_batch_update_exercise_accepts_custom_exercise_name(monkeypatch, client):
+    create_resp = client.post("/api/splits", json=_create_payload("Custom Exercise Update"))
+    assert create_resp.status_code == 201
+    created = create_resp.json()
+    split_id = created["id"]
+    exercise_id = created["sessions"][0]["exercises"][0]["id"]
+
+    def fake_match(name: str, user_id: str | None = None):
+        if name == "My Custom Cable Fly" and user_id == "user-123":
+            return type("Movement", (), {"name": "custom:my_custom_cable_fly"})()
+        return None
+
+    monkeypatch.setattr(splits_routes, "move_match_with_overrides", fake_match)
+
+    resp = client.put(
+        f"/api/splits/{split_id}/exercises/batch",
+        json={
+            "updates": [
+                {
+                    "id": exercise_id,
+                    "name": "My Custom Cable Fly",
+                }
+            ]
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["updated"] == 1
+
+    split_resp = client.get(f"/api/splits/{split_id}")
+    assert split_resp.status_code == 200
+    assert split_resp.json()["sessions"][0]["exercises"][0]["exercise_name"] == "My Custom Cable Fly"

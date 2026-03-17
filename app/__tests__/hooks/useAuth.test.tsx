@@ -8,8 +8,10 @@ import * as authApi from '../../src/api/auth.api';
 
 
 const mockSetToken = jest.fn();
+const mockSetRefreshToken = jest.fn();
 const mockClearToken = jest.fn();
 const mockGetToken = jest.fn().mockResolvedValue(null);
+const mockGetRefreshToken = jest.fn().mockResolvedValue(null);
 const mockStorageGetItem = jest.fn().mockResolvedValue(null);
 const mockStorageSetItem = jest.fn().mockResolvedValue(undefined);
 const mockStorageRemoveItem = jest.fn().mockResolvedValue(undefined);
@@ -24,7 +26,9 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 jest.mock('../../src/api/client', () => ({
   tokenStore: {
     getToken: (...args: unknown[]) => mockGetToken(...args),
+    getRefreshToken: (...args: unknown[]) => mockGetRefreshToken(...args),
     setToken: (...args: unknown[]) => mockSetToken(...args),
+    setRefreshToken: (...args: unknown[]) => mockSetRefreshToken(...args),
     clearToken: (...args: unknown[]) => mockClearToken(...args),
   },
   onAuthLogout: jest.fn((listener: () => void) => {
@@ -72,6 +76,7 @@ describe('useAuth', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockGetToken.mockResolvedValue(null);
+    mockGetRefreshToken.mockResolvedValue(null);
     mockStorageGetItem.mockResolvedValue(null);
     latestAuth = null;
     authLogoutListener = null;
@@ -138,6 +143,7 @@ describe('useAuth', () => {
       expect(screen.getByTestId('auth-status').props.children).toBe('authed');
     });
     expect(mockSetToken).toHaveBeenCalledWith('token-123');
+    expect(mockSetRefreshToken).toHaveBeenCalledWith('refresh-123');
     expect(latestAuth?.user?.email).toBe('login@example.com');
   });
 
