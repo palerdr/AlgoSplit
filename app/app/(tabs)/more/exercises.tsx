@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   useCustomExercises,
   useCreateCustomExercise,
+  useUpdateCustomExercise,
   useDeleteCustomExercise,
 } from '../../../src/hooks/useCustomExercises';
 import { colors, borders } from '../../../src/theme';
@@ -149,6 +150,13 @@ function computeWeightSum(tiers: TierTargets): number {
   return Math.round(sum * 1000) / 1000;
 }
 
+function targetsToRows(targets: Record<string, number>): TargetRow[] {
+  return Object.entries(targets).map(([regionId, weight]) => ({
+    regionId,
+    weight: String(weight),
+  }));
+}
+
 interface MuscleRegionInputProps {
   regionId: string;
   takenRegionIds: Set<string>;
@@ -261,9 +269,11 @@ export default function ExercisesScreen() {
   const router = useRouter();
   const { data, isLoading } = useCustomExercises();
   const createMutation = useCreateCustomExercise();
+  const updateMutation = useUpdateCustomExercise();
   const deleteMutation = useDeleteCustomExercise();
 
   const [showForm, setShowForm] = useState(false);
+  const [editingExerciseId, setEditingExerciseId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [tiers, setTiers] = useState<TierTargets>(emptyTiers);
   const [axialLoad, setAxialLoad] = useState('0');
@@ -284,6 +294,7 @@ export default function ExercisesScreen() {
   );
 
   const resetForm = useCallback(() => {
+    setEditingExerciseId(null);
     setName('');
     setTiers(emptyTiers());
     setAxialLoad('0');
@@ -292,7 +303,22 @@ export default function ExercisesScreen() {
     setExpandedTiers({ prime: true, secondary: false, tertiary: false });
   }, []);
 
-  const handleCreate = useCallback(() => {
+  const startEditExercise = useCallback((exercise: CustomExerciseResponse) => {
+    setEditingExerciseId(exercise.id);
+    setName(exercise.exercise_name);
+    setTiers({
+      prime: targetsToRows(exercise.prime_targets),
+      secondary: targetsToRows(exercise.secondary_targets),
+      tertiary: targetsToRows(exercise.tertiary_targets),
+    });
+    setAxialLoad(String(exercise.axial_load));
+    setResistanceProfile(exercise.resistance_profile);
+    setIsUnilateral(!exercise.is_bilateral);
+    setExpandedTiers({ prime: true, secondary: true, tertiary: true });
+    setShowForm(true);
+  }, []);
+
+  const handleSaveExercise = useCallback(() => {
     if (!name.trim()) { Alert.alert('Error', 'Exercise name is required.'); return; }
     if (!isValidSum) { Alert.alert('Error', `Muscle weights must sum to 1.0 (currently ${weightSum}).`); return; }
 
@@ -304,17 +330,35 @@ export default function ExercisesScreen() {
       is_bilateral: !isUnilateral,
     };
 
-    createMutation.mutate(payload, {
-      onSuccess: () => {
-        resetForm();
-        setShowForm(false);
-      },
-      onError: (err) => {
-        const msg = (err as Error).message ?? 'Failed to create exercise.';
-        Alert.alert('Error', msg);
-      },
-    });
-  }, [name, tiers, axialLoad, resistanceProfile, isUnilateral, weightSum, isValidSum, createMutation, resetForm]);
+    const onSuccess = () => {
+      resetForm();
+      setShowForm(false);
+    };
+    const onError = (err: unknown) => {
+      const fallback = editingExerciseId ? 'Failed to update exercise.' : 'Failed to create exercise.';
+      const msg = (err as Error).message ?? fallback;
+      Alert.alert('Error', msg);
+    };
+
+    if (editingExerciseId) {
+      updateMutation.mutate({ id: editingExerciseId, data: payload }, { onSuccess, onError });
+      return;
+    }
+
+    createMutation.mutate(payload, { onSuccess, onError });
+  }, [
+    name,
+    tiers,
+    axialLoad,
+    resistanceProfile,
+    isUnilateral,
+    weightSum,
+    isValidSum,
+    createMutation,
+    updateMutation,
+    editingExerciseId,
+    resetForm,
+  ]);
 
   const handleDelete = useCallback((ex: CustomExerciseResponse) => {
     Alert.alert('Delete Exercise', `Delete "${ex.exercise_name}"?`, [
@@ -360,12 +404,15 @@ export default function ExercisesScreen() {
             {primeNames || 'No targets'} · {item.resistance_profile} · {item.is_bilateral ? 'Bilateral' : 'Unilateral'}
           </Text>
         </View>
+        <TouchableOpacity onPress={() => startEditExercise(item)} hitSlop={8} style={styles.rowIconBtn}>
+          <Ionicons name="create-outline" size={16} color={colors.textSecondary} />
+        </TouchableOpacity>
         <TouchableOpacity onPress={() => handleDelete(item)} hitSlop={8}>
           <Ionicons name="trash-outline" size={16} color={colors.textDim} />
         </TouchableOpacity>
       </View>
     );
-  }, [handleDelete]);
+  }, [handleDelete, startEditExercise]);
 
   // ── Create form ──
 
@@ -379,10 +426,10 @@ export default function ExercisesScreen() {
           <TouchableOpacity onPress={() => { resetForm(); setShowForm(false); }} hitSlop={8}>
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>New Exercise</Text>
-          <TouchableOpacity onPress={handleCreate} disabled={createMutation.isPending}>
-            <Text style={[styles.saveText, createMutation.isPending && { opacity: 0.5 }]}>
-              {createMutation.isPending ? 'Saving...' : 'Save'}
+          <Text style={styles.headerTitle}>{editingExerciseId ? 'Edit Exercise' : 'New Exercise'}</Text>
+          <TouchableOpacity onPress={handleSaveExercise} disabled={createMutation.isPending || updateMutation.isPending}>
+            <Text style={[styles.saveText, (createMutation.isPending || updateMutation.isPending) && { opacity: 0.5 }]}>
+              {createMutation.isPending || updateMutation.isPending ? (editingExerciseId ? 'Updating...' : 'Saving...') : 'Save'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -512,7 +559,7 @@ export default function ExercisesScreen() {
           <Ionicons name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Custom Exercises</Text>
-        <TouchableOpacity onPress={() => setShowForm(true)} hitSlop={8}>
+        <TouchableOpacity onPress={() => { resetForm(); setShowForm(true); }} hitSlop={8}>
           <Ionicons name="add-circle-outline" size={24} color={colors.green} />
         </TouchableOpacity>
       </View>
@@ -528,7 +575,7 @@ export default function ExercisesScreen() {
           <Text style={styles.emptySubtitle}>
             Create your own movements with custom muscle targets, resistance profiles, and more.
           </Text>
-          <TouchableOpacity style={styles.createBtn} onPress={() => setShowForm(true)}>
+          <TouchableOpacity style={styles.createBtn} onPress={() => { resetForm(); setShowForm(true); }}>
             <Text style={styles.createBtnText}>Create Exercise</Text>
           </TouchableOpacity>
         </View>
@@ -585,6 +632,7 @@ const styles = StyleSheet.create({
   exerciseInfo: { flex: 1, marginRight: 12 },
   exerciseName: { color: colors.text, fontSize: 15, fontWeight: '700' },
   exerciseMeta: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+  rowIconBtn: { marginRight: 10 },
 
   // Form
   formContent: { paddingHorizontal: 16, paddingBottom: 60, gap: 12 },
