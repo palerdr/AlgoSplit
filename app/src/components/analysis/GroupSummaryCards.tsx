@@ -43,7 +43,6 @@ export default function GroupSummaryCards({ muscles }: Props) {
         const barColor = getStimulusColor(g.net_stimulus, maxStimulus);
         const widthPct = Math.max((g.net_stimulus / maxStimulus) * 100, 3);
         const isActive = activeRegion === g.region_id;
-        const totalSets = g.prime_sets + g.secondary_sets + g.tertiary_sets;
 
         return (
           <Pressable
@@ -58,7 +57,7 @@ export default function GroupSummaryCards({ muscles }: Props) {
               <Text style={styles.groupName} numberOfLines={1}>
                 {g.display_name}
               </Text>
-              <Text style={styles.meta}>{totalSets.toFixed(1)} sets</Text>
+              <Text style={styles.meta}>{g.net_stimulus.toFixed(2)}</Text>
             </View>
 
             <View style={styles.track}>
