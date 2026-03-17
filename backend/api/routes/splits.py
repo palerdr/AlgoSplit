@@ -22,7 +22,7 @@ from schemas.splits import (
 )
 from schemas.auth import ErrorResponse
 from api.dependencies import get_current_user, AuthUser
-from core.movementMatching import move_match
+from core.exerciseMatching import move_match_with_overrides
 
 router = APIRouter(prefix="/api/splits", tags=["Splits"])
 
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/api/splits", tags=["Splits"])
 # Helper Functions
 # ============================================================================
 
-def validate_exercises(exercises: List[dict]) -> List[str]:
+def validate_exercises(exercises: List[dict], user_id: str) -> List[str]:
     """
     Validate that all exercises can be classified
 
@@ -44,8 +44,7 @@ def validate_exercises(exercises: List[dict]) -> List[str]:
     unrecognized = []
     for exercise in exercises:
         name = exercise["name"]
-        result = move_match(name)
-        # move_match returns a Movement object if recognized, None otherwise
+        result = move_match_with_overrides(name, user_id)
         if result is None:
             logger.debug("Unrecognized exercise: %s", name)
             unrecognized.append(name)
@@ -309,7 +308,7 @@ async def create_split(
             for exercise in session.exercises:
                 all_exercises.append({"name": exercise.name})
 
-        unrecognized = validate_exercises(all_exercises)
+        unrecognized = validate_exercises(all_exercises, current_user.id)
         if unrecognized:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -613,7 +612,7 @@ async def replace_split(
             for exercise in session.exercises:
                 all_exercises.append({"name": exercise.name})
 
-        unrecognized = validate_exercises(all_exercises)
+        unrecognized = validate_exercises(all_exercises, current_user.id)
         if unrecognized:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -763,7 +762,7 @@ async def batch_update_exercises(
             row = {"id": update.id}
 
             if update.name is not None:
-                movement = move_match(update.name)
+                movement = move_match_with_overrides(update.name, current_user.id)
                 if movement is None:
                     unrecognized.append(update.name)
                 else:
