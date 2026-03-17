@@ -1,45 +1,31 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { colors, borders, spacing } from '../../theme';
-import type { MuscleGroupSummary } from '../../types/api.types';
+import type { MuscleStats } from '../../types/api.types';
 
-const GROUP_COLORS: Record<string, string> = {
-  chest: '#EF4444',
-  shoulders: '#F97316',
-  upper_back: '#EAB308',
-  lats: '#84CC16',
-  lower_back: '#22C55E',
-  biceps: '#06B6D4',
-  triceps: '#14B8A6',
-  forearms: '#0EA5E9',
-  quads: '#3B82F6',
-  hamstrings: '#6366F1',
-  glutes: '#8B5CF6',
-  calves: '#A855F7',
-  adductors: '#EC4899',
-  abs: '#F43F5E',
-};
-
-function formatGroupName(group: string): string {
-  return group
-    .split('_')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
+function getStimulusColor(value: number, maxValue: number): string {
+  if (maxValue <= 0) return '#4B5563';
+  const pct = Math.max(0, Math.min(1, value / maxValue));
+  if (pct >= 0.8) return '#22C55E';
+  if (pct >= 0.6) return '#4ADE80';
+  if (pct >= 0.4) return '#86EFAC';
+  if (pct >= 0.2) return '#F59E0B';
+  return '#EF4444';
 }
 
 interface Props {
-  groups: MuscleGroupSummary[];
+  muscles: MuscleStats[];
 }
 
-export default function GroupSummaryCards({ groups }: Props) {
-  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+export default function GroupSummaryCards({ muscles }: Props) {
+  const [activeRegion, setActiveRegion] = useState<string | null>(null);
 
   const sorted = useMemo(
-    () => [...groups].sort((a, b) => b.total_net_stimulus - a.total_net_stimulus),
-    [groups],
+    () => [...muscles].sort((a, b) => b.net_stimulus - a.net_stimulus),
+    [muscles],
   );
   const maxStimulus = useMemo(
-    () => Math.max(...sorted.map((g) => g.total_net_stimulus), 1),
+    () => Math.max(...sorted.map((m) => m.net_stimulus), 1),
     [sorted],
   );
 
@@ -54,33 +40,32 @@ export default function GroupSummaryCards({ groups }: Props) {
   return (
     <View style={styles.chartCard}>
       {sorted.map((g) => {
-        const barColor = GROUP_COLORS[g.group] ?? colors.textMuted;
-        const widthPct = Math.max((g.total_net_stimulus / maxStimulus) * 100, 3);
-        const isActive = activeGroup === g.group;
+        const barColor = getStimulusColor(g.net_stimulus, maxStimulus);
+        const widthPct = Math.max((g.net_stimulus / maxStimulus) * 100, 3);
+        const isActive = activeRegion === g.region_id;
+        const totalSets = g.prime_sets + g.secondary_sets + g.tertiary_sets;
 
         return (
           <Pressable
-            key={g.group}
+            key={g.region_id}
             style={styles.row}
-            onHoverIn={() => setActiveGroup(g.group)}
-            onHoverOut={() => setActiveGroup((current) => (current === g.group ? null : current))}
-            onPressIn={() => setActiveGroup(g.group)}
-            onPressOut={() => setActiveGroup((current) => (current === g.group ? null : current))}
+            onHoverIn={() => setActiveRegion(g.region_id)}
+            onHoverOut={() => setActiveRegion((current) => (current === g.region_id ? null : current))}
+            onPressIn={() => setActiveRegion(g.region_id)}
+            onPressOut={() => setActiveRegion((current) => (current === g.region_id ? null : current))}
           >
             <View style={styles.rowHeader}>
               <Text style={styles.groupName} numberOfLines={1}>
-                {formatGroupName(g.group)}
+                {g.display_name}
               </Text>
-              <Text style={styles.meta}>
-                {g.total_sets} sets
-              </Text>
+              <Text style={styles.meta}>{totalSets.toFixed(1)} sets</Text>
             </View>
 
             <View style={styles.track}>
               <View style={[styles.fill, { width: `${widthPct}%`, backgroundColor: barColor }]} />
               {isActive ? (
                 <View style={styles.valuePill}>
-                  <Text style={styles.valueText}>{g.total_net_stimulus.toFixed(1)}</Text>
+                  <Text style={styles.valueText}>{g.net_stimulus.toFixed(2)}</Text>
                 </View>
               ) : null}
             </View>
