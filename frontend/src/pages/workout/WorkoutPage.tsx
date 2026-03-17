@@ -155,18 +155,22 @@ export function WorkoutPage() {
 
       let previousData: Record<string, { reps: number[]; weight: number[]; rir?: (number | null)[] }> | undefined;
       try {
-        const history = await getWorkouts({ limit: 20, days: 90 });
-        const previousWorkout = history.workouts.find(
+        const history = await getWorkouts({ limit: 50, days: 90 });
+        const matchingWorkouts = history.workouts.filter(
           (w) => w.session_name === session.display_name
         );
-        if (previousWorkout) {
+        if (matchingWorkouts.length > 0) {
           previousData = {};
-          for (const ex of previousWorkout.exercises) {
-            previousData[ex.exercise_name] = {
-              reps: ex.reps,
-              weight: ex.weight,
-              rir: ex.rir ?? undefined,
-            };
+          for (const workout of matchingWorkouts) {
+            for (const ex of workout.exercises) {
+              if (!(ex.exercise_name in previousData)) {
+                previousData[ex.exercise_name] = {
+                  reps: ex.reps,
+                  weight: ex.weight,
+                  rir: ex.rir ?? undefined,
+                };
+              }
+            }
           }
         }
       } catch {
@@ -198,18 +202,22 @@ export function WorkoutPage() {
 
       let previousData: Record<string, { reps: number[]; weight: number[]; rir?: (number | null)[] }> | undefined;
       try {
-        const history = await getWorkouts({ limit: 20, days: 90 });
-        const previousWorkout = history.workouts.find(
+        const history = await getWorkouts({ limit: 50, days: 90 });
+        const matchingWorkouts = history.workouts.filter(
           (w) => w.session_name === session.name
         );
-        if (previousWorkout) {
+        if (matchingWorkouts.length > 0) {
           previousData = {};
-          for (const ex of previousWorkout.exercises) {
-            previousData[ex.exercise_name] = {
-              reps: ex.reps,
-              weight: ex.weight,
-              rir: ex.rir ?? undefined,
-            };
+          for (const workout of matchingWorkouts) {
+            for (const ex of workout.exercises) {
+              if (!(ex.exercise_name in previousData)) {
+                previousData[ex.exercise_name] = {
+                  reps: ex.reps,
+                  weight: ex.weight,
+                  rir: ex.rir ?? undefined,
+                };
+              }
+            }
           }
         }
       } catch {

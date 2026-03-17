@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQueryClient } from '@tanstack/react-query';
 import * as authApi from '../api/auth.api';
@@ -76,6 +76,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, delay);
   }, []);
 
+  // Proactively refresh the token, e.g. on bootstrap or app foreground.
+  // This avoids relying solely on the 401 interceptor for long sessions.
+  const refreshNow = useCallback(async () => {
+    try {
+      const rt = await tokenStore.getRefreshToken();
+      if (!rt) return;
+      const res = await authApi.refreshToken(rt);
+      if (res.access_token) await tokenStore.setToken(res.access_token);
+      if (res.refresh_token) await tokenStore.setRefreshToken(res.refresh_token);
+      scheduleRefresh(res.expires_in);
+    } catch {
+      // Refresh failed — interceptor will handle 401 on next request
+    }
+  }, [scheduleRefresh]);
+
   // Check existing session on mount
   useEffect(() => {
     let cancelled = false;
@@ -97,14 +112,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const user = await authApi.getCurrentUser();
         await setCachedUser(user);
-        if (!cancelled) setState({ user, isAuthenticated: true, isLoading: false });
+        if (!cancelled) {
+          setState({ user, isAuthenticated: true, isLoading: false });
+          // Schedule proactive refresh on bootstrap so long sessions stay alive
+          refreshNow();
+        }
       } catch {
         await clearCachedUser();
         if (!cancelled) setState({ user: null, isAuthenticated: false, isLoading: false });
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [refreshNow]);
+
+  // Refresh token when app returns from background (mobile)
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && state.isAuthenticated) {
+        refreshNow();
+      }
+    });
+    return () => subscription.remove();
+  }, [refreshNow, state.isAuthenticated]);
 
   // Listen for 401 auto-logout from interceptor
   useEffect(() => {

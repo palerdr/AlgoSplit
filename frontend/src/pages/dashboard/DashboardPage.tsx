@@ -93,21 +93,26 @@ export function DashboardPage() {
         unilateral: ex.unilateral,
       }));
 
-      // Fetch previous workout data for this session name
+      // Fetch previous workout data for this session name — scan history
+      // per-exercise so skipped exercises still show their last logged values
       let previousData: Record<string, { reps: number[]; weight: number[]; rir?: (number | null)[] }> | undefined;
       try {
-        const history = await getWorkouts({ limit: 20, days: 90 });
-        const previousWorkout = history.workouts.find(
+        const history = await getWorkouts({ limit: 50, days: 90 });
+        const matchingWorkouts = history.workouts.filter(
           (w) => w.session_name === session.display_name
         );
-        if (previousWorkout) {
+        if (matchingWorkouts.length > 0) {
           previousData = {};
-          for (const ex of previousWorkout.exercises) {
-            previousData[ex.exercise_name] = {
-              reps: ex.reps,
-              weight: ex.weight,
-              rir: ex.rir ?? undefined,
-            };
+          for (const workout of matchingWorkouts) {
+            for (const ex of workout.exercises) {
+              if (!(ex.exercise_name in previousData)) {
+                previousData[ex.exercise_name] = {
+                  reps: ex.reps,
+                  weight: ex.weight,
+                  rir: ex.rir ?? undefined,
+                };
+              }
+            }
           }
         }
       } catch {
