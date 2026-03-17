@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -43,6 +43,8 @@ export default function ExerciseRowMobile({
   const { data: customData } = useCustomExercises();
   const [query, setQuery] = useState(exercise.name);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isSwapMode, setIsSwapMode] = useState(false);
+  const nameInputRef = useRef<TextInput | null>(null);
 
   const allExerciseNames = useMemo(() => {
     const customNames = customData?.exercises.map((e) => e.exercise_name) ?? [];
@@ -54,15 +56,19 @@ export default function ExerciseRowMobile({
   }, [exercise.name]);
 
   const suggestions = useMemo(() => {
+    if (isSwapMode && query.trim().length < 2) {
+      return allExerciseNames.slice(0, 8);
+    }
     if (!query || query.length < 2) return [];
     const lower = query.toLowerCase();
     return allExerciseNames.filter((n) => n.toLowerCase().includes(lower)).slice(0, 5);
-  }, [query, allExerciseNames]);
+  }, [query, allExerciseNames, isSwapMode]);
 
   const handleSelect = useCallback(
     (name: string) => {
       setQuery(name);
       setShowSuggestions(false);
+      setIsSwapMode(false);
       const found = findExercise(name);
       const uni = found?.unilateral ?? exercise.unilateral;
       onUpdate({ ...exercise, name, unilateral: uni || undefined });
@@ -72,12 +78,29 @@ export default function ExerciseRowMobile({
 
   const handleBlur = useCallback(() => {
     setTimeout(() => setShowSuggestions(false), 200);
+
+    if (isSwapMode && !query.trim()) {
+      setQuery(exercise.name);
+      setIsSwapMode(false);
+      return;
+    }
+
     if (query !== exercise.name) {
       const found = findExercise(query);
       const uni = found?.unilateral ?? exercise.unilateral;
       onUpdate({ ...exercise, name: query, unilateral: uni || undefined });
     }
-  }, [query, exercise, onUpdate]);
+    setIsSwapMode(false);
+  }, [query, exercise, onUpdate, isSwapMode]);
+
+  const handleSwapPress = useCallback(() => {
+    setIsSwapMode(true);
+    setQuery('');
+    setShowSuggestions(true);
+    requestAnimationFrame(() => {
+      nameInputRef.current?.focus();
+    });
+  }, []);
 
   const toggleUnilateral = () => {
     onUpdate({ ...exercise, unilateral: !exercise.unilateral });
@@ -99,6 +122,7 @@ export default function ExerciseRowMobile({
         </TouchableOpacity>
         <View style={styles.nameWrap}>
           <TextInput
+            ref={nameInputRef}
             style={styles.nameInput}
             placeholder="Exercise name"
             placeholderTextColor={colors.textMuted}
@@ -106,8 +130,9 @@ export default function ExerciseRowMobile({
             onChangeText={(text) => {
               setQuery(text);
               setShowSuggestions(true);
+              if (isSwapMode) setIsSwapMode(false);
             }}
-            onFocus={() => query.length >= 2 && setShowSuggestions(true)}
+            onFocus={() => (isSwapMode || query.length >= 2) && setShowSuggestions(true)}
             onBlur={handleBlur}
           />
         </View>
@@ -162,6 +187,10 @@ export default function ExerciseRowMobile({
             </TouchableOpacity>
           ))}
         </View>
+
+        <TouchableOpacity style={styles.swapBtn} onPress={handleSwapPress} hitSlop={6}>
+          <Ionicons name="ellipsis-horizontal" size={16} color={colors.textSecondary} />
+        </TouchableOpacity>
 
         <View style={styles.setsStepper}>
           <TouchableOpacity
@@ -280,6 +309,16 @@ const styles = StyleSheet.create({
   },
   resPillTextActive: {
     color: colors.blue,
+  },
+  swapBtn: {
+    width: 28,
+    height: 24,
+    borderRadius: borders.radius.sm,
+    backgroundColor: colors.surface,
+    borderWidth: 0.5,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   setsStepper: {
     flexDirection: 'row',

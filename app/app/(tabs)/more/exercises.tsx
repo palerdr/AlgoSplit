@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -156,6 +156,7 @@ interface MuscleRegionInputProps {
 }
 
 function MuscleRegionInput({ regionId, takenRegionIds, onChangeRegion }: MuscleRegionInputProps) {
+  const selectingSuggestionRef = useRef(false);
   const selectedLabel = useMemo(
     () => ALL_REGIONS.find((r) => r.id === regionId)?.label ?? '',
     [regionId],
@@ -178,15 +179,24 @@ function MuscleRegionInput({ regionId, takenRegionIds, onChangeRegion }: MuscleR
 
   const handleSelect = useCallback(
     (region: { id: string; label: string }) => {
+      selectingSuggestionRef.current = true;
       onChangeRegion(region.id);
       setQuery(region.label);
       setShowSuggestions(false);
+      setTimeout(() => {
+        selectingSuggestionRef.current = false;
+      }, 120);
     },
     [onChangeRegion],
   );
 
   const handleBlur = useCallback(() => {
     setTimeout(() => {
+      if (selectingSuggestionRef.current) {
+        setShowSuggestions(false);
+        return;
+      }
+
       const trimmed = query.trim();
       if (!trimmed) {
         onChangeRegion('');
@@ -233,7 +243,7 @@ function MuscleRegionInput({ regionId, takenRegionIds, onChangeRegion }: MuscleR
             <TouchableOpacity
               key={region.id}
               style={styles.regionSuggestionItem}
-              onPress={() => handleSelect(region)}
+              onPressIn={() => handleSelect(region)}
             >
               <Text style={styles.regionSuggestionText}>{region.label}</Text>
             </TouchableOpacity>
@@ -259,7 +269,11 @@ export default function ExercisesScreen() {
   const [axialLoad, setAxialLoad] = useState('0');
   const [resistanceProfile, setResistanceProfile] = useState<CustomExerciseCreate['resistance_profile']>('mid');
   const [isUnilateral, setIsUnilateral] = useState(false);
-  const [expandedTier, setExpandedTier] = useState<Tier | null>('prime');
+  const [expandedTiers, setExpandedTiers] = useState<Record<Tier, boolean>>({
+    prime: true,
+    secondary: false,
+    tertiary: false,
+  });
 
   const exercises = data?.exercises ?? [];
   const weightSum = useMemo(() => computeWeightSum(tiers), [tiers]);
@@ -275,7 +289,7 @@ export default function ExercisesScreen() {
     setAxialLoad('0');
     setResistanceProfile('mid');
     setIsUnilateral(false);
-    setExpandedTier('prime');
+    setExpandedTiers({ prime: true, secondary: false, tertiary: false });
   }, []);
 
   const handleCreate = useCallback(() => {
@@ -396,7 +410,12 @@ export default function ExercisesScreen() {
             <View key={tier} style={styles.tierBlock}>
               <TouchableOpacity
                 style={styles.tierHeader}
-                onPress={() => setExpandedTier(expandedTier === tier ? null : tier)}
+                onPress={() =>
+                  setExpandedTiers((prev) => ({
+                    ...prev,
+                    [tier]: !prev[tier],
+                  }))
+                }
               >
                 <Text style={styles.tierTitle}>{TIER_LABELS[tier]}</Text>
                 <View style={styles.tierRight}>
@@ -404,14 +423,14 @@ export default function ExercisesScreen() {
                     <Text style={styles.tierCount}>{tiers[tier].length}</Text>
                   )}
                   <Ionicons
-                    name={expandedTier === tier ? 'chevron-up' : 'chevron-down'}
+                    name={expandedTiers[tier] ? 'chevron-up' : 'chevron-down'}
                     size={16}
                     color={colors.textMuted}
                   />
                 </View>
               </TouchableOpacity>
 
-              {expandedTier === tier && (
+              {expandedTiers[tier] && (
                 <View style={styles.tierBody}>
                   {tiers[tier].map((row, i) => (
                     <View key={i} style={styles.targetRow}>
