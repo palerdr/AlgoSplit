@@ -108,7 +108,7 @@ export function SetRow({
             inputMode="decimal"
             value={data.weight || ''}
             onChange={handleWeightChange}
-            placeholder={previousSet?.weight.toString() || '0'}
+            placeholder={previousSet ? String(previousSet.weight) : ''}
             className={cn(
               'w-full h-9 px-2 bg-steel border border-white/8 rounded-sm text-center font-mono text-foreground tabular-nums',
               'focus:outline-none focus:border-crimson',
@@ -125,7 +125,7 @@ export function SetRow({
             inputMode="numeric"
             value={data.reps || ''}
             onChange={handleRepsChange}
-            placeholder={previousSet?.reps.toString() || '0'}
+            placeholder={previousSet ? String(previousSet.reps) : ''}
             className={cn(
               'w-full h-9 px-2 bg-steel border border-white/8 rounded-sm text-center font-mono text-foreground tabular-nums',
               'focus:outline-none focus:border-crimson',

@@ -84,9 +84,9 @@ function SetRowMobile({
           keyboardType="decimal-pad"
           value={weightInput}
           placeholder={
-            previousSet?.weight
+            previousSet?.weight != null
               ? String(convertLbToDisplay(previousSet.weight, weightUnit))
-              : '0'
+              : ''
           }
           placeholderTextColor={colors.textDim}
           onChangeText={(t) => {
@@ -115,7 +115,7 @@ function SetRowMobile({
           style={styles.input}
           keyboardType="number-pad"
           value={data.reps ? String(data.reps) : ''}
-          placeholder={previousSet?.reps ? String(previousSet.reps) : '0'}
+          placeholder={previousSet?.reps != null ? String(previousSet.reps) : ''}
           placeholderTextColor={colors.textDim}
           onChangeText={(t) => {
             const v = parseInt(t, 10);

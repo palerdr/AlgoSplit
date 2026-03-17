@@ -67,6 +67,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('auth:logout', handleLogout);
   }, []);
 
+  // Re-validate session when tab regains focus (prevents stale auth after
+  // long background periods where the cookie may have expired)
+  useEffect(() => {
+    let lastCheck = Date.now();
+    const handleVisibility = async () => {
+      if (document.visibilityState !== 'visible') return;
+      // Only re-check if hidden for > 10 minutes
+      if (Date.now() - lastCheck < 10 * 60 * 1000) return;
+      lastCheck = Date.now();
+      try {
+        const user = await authApi.getCurrentUser();
+        setState({ user, isAuthenticated: true, isLoading: false });
+      } catch {
+        setState({ user: null, isAuthenticated: false, isLoading: false });
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
+
   const login = async (email: string, password: string) => {
     clearUserData();
     const response = await authApi.login({ email, password });

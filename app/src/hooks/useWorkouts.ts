@@ -131,18 +131,26 @@ type PreviousExerciseMap = Record<string, { reps: number[]; weight: number[]; ri
 
 async function fetchPreviousWorkoutData(sessionName: string): Promise<PreviousExerciseMap | null> {
   const history = await getWorkouts({ limit: 50 });
-  const match = history.workouts.find(
+  // Scan through recent workouts for this session to build per-exercise
+  // previous data. If an exercise was skipped in the most recent workout,
+  // we look further back to find the last time it was actually logged.
+  const matchingWorkouts = history.workouts.filter(
     (w) => w.session_name.toLowerCase() === sessionName.toLowerCase(),
   );
-  if (!match) return null;
+  if (matchingWorkouts.length === 0) return null;
 
   const result: PreviousExerciseMap = {};
-  for (const ex of match.exercises) {
-    result[ex.exercise_name] = {
-      reps: ex.reps,
-      weight: ex.weight,
-      rir: ex.rir ?? undefined,
-    };
+  for (const workout of matchingWorkouts) {
+    for (const ex of workout.exercises) {
+      // Only use the first (most recent) occurrence of each exercise
+      if (!(ex.exercise_name in result)) {
+        result[ex.exercise_name] = {
+          reps: ex.reps,
+          weight: ex.weight,
+          rir: ex.rir ?? undefined,
+        };
+      }
+    }
   }
   return result;
 }
