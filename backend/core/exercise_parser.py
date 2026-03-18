@@ -1,13 +1,20 @@
 """
-Exercise Parser - Intelligent keyword-based exercise classification and parsing.
+DEPRECATED - Legacy exercise parser using movement_patterns.py (16-muscle model).
 
-This module provides:
-1. Intelligent exercise classification using keywords from movement_patterns.py
-2. Multi-format input parsing (3x Exercise, Exercise: 3, etc.)
-3. Legacy hardcoded mappings as fallback
-4. Fuzzy matching for typo tolerance
-5. User correction learning system
-6. Multi-week simulation utilities
+Superseded by backend/core/movementMatching.py which provides:
+- PatternMatcher: Token-based scored matching with alias expansion
+- move_match(): Main entry point for exercise -> granular pattern classification
+- Integration with granular_patterns.py (42 patterns, 29 muscle regions)
+
+This file imports from legacy baseClasses and movement_patterns. It is retained
+for historical reference and should NOT be imported in active code paths.
+
+Use backend.core.movementMatching.move_match() instead.
+
+Original description:
+Exercise Parser - Intelligent keyword-based exercise classification and parsing.
+Provided: keyword classification, multi-format input parsing, legacy hardcoded
+mappings, fuzzy matching, user correction learning, multi-week simulation.
 """
 
 from typing import Dict, List, Tuple, Optional

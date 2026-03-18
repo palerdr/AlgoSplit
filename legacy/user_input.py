@@ -1,5 +1,12 @@
 """
-User input processing for workout data entry.
+DEPRECATED - Legacy CLI-based user input processing.
+
+Superseded by:
+- backend/core/movementMatching.py (PatternMatcher for exercise classification)
+- backend/api/routes/ (REST API endpoints for all user interactions)
+- app/ (React Native mobile app UI)
+
+This file is retained for historical reference only. Do NOT import from here.
 """
 
 from exercise_parser import parse_exercise_name, parse_workout_list, calculate_adaptive_weeks

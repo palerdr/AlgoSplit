@@ -1,17 +1,25 @@
 """
-Movement Pattern Database for Net Weekly Stimulus Model
+DEPRECATED - Legacy 16-muscle movement pattern database.
 
+Superseded by backend/core/granular_patterns.py which provides:
+- 42 joint-action patterns (vs ~30 here) with explicit compound/isolation splits
+- 29 granular muscle regions (vs 16 flat muscles)
+- Tiered muscle targeting (prime/secondary/tertiary/quaternary)
+- Resistance profile metadata per pattern
+- Axial load values per pattern
+
+And backend/core/movementMatching.py which provides:
+- Token-based scored matching (vs substring matching)
+- Alias expansion, banned tokens, ambiguity detection
+- Persistent override store support
+
+This file is only imported by legacy/exercise_parser.py.
+Do NOT import from here in new code. Use granular_patterns.py + movementMatching.py instead.
+
+Original description:
+Movement Pattern Database for Net Weekly Stimulus Model.
 Based on biomechanical joint actions rather than specific exercises.
-
-This module contains:
-1. MOVEMENT_PATTERNS - Biomechanical patterns and muscle stimulus distribution
-2. Keyword databases for intelligent exercise classification
-3. Helper functions for pattern lookup and validation
-
-RULE: Every pattern delivers exactly 1.0 total stimulus per set
-- Single-joint: 1.0 goes entirely to primary muscle
-- Compound: 1.0 distributed across multiple muscles
-- Patterns with 'unilateral' in name get 50% reduced global CNS fatigue penalty
+RULE: Every pattern delivers exactly 1.0 total stimulus per set.
 """
 
 
