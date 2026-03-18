@@ -1,3 +1,13 @@
+"""
+DEPRECATED - Original 16-muscle anatomical model.
+
+Superseded by backend/core/MainClasses.py which uses a 29-region granular
+muscle model with tiered stimulus, leverage matching, and systemic fatigue.
+
+This file is retained for historical reference only. Do NOT import from here.
+Use backend.core.MainClasses instead.
+"""
+
 from collections import defaultdict
 from movement_patterns import get_pattern_targets, is_unilateral_pattern
 

@@ -29,6 +29,24 @@ from core.granular_patterns import (
 
 
 class Movement:
+    """
+    Represents a matched exercise with its movement pattern and muscle targeting data.
+
+    Created by move_match() after classifying an exercise name. Contains the canonical
+    pattern name, flattened muscle targets (for backward compatibility), resistance
+    profile, and lateral flags. Custom exercises may also carry tiered_targets and
+    axial_load overrides.
+
+    Attributes:
+        name: Canonical pattern name (e.g. 'squat_compound', 'elbow_flexion_isolation')
+        targets: Flat dict of {muscle_region: weight} summing to ~1.0
+        resistance_profile: 'ascending', 'mid', or 'descending'
+        unilateral: True if exercise is single-limb
+        tiered_targets: Optional dict with prime/secondary/tertiary/quaternary keys (custom exercises)
+        axial_load: Optional float 0-1 for custom spinal load override
+        is_custom: True if this is a user-defined custom exercise
+    """
+
     def __init__(
         self,
         name,
@@ -43,10 +61,9 @@ class Movement:
         self.targets = targets
         self.resistance_profile = resistance_profile
         self.unilateral = is_unilateral
-        # Extended properties for custom exercises
-        self.tiered_targets = tiered_targets  # Dict with prime/secondary/tertiary/quaternary keys
-        self.axial_load = axial_load  # Float 0-1 for custom axial load
-        self.is_custom = is_custom  # True if this is a user-defined custom exercise
+        self.tiered_targets = tiered_targets
+        self.axial_load = axial_load
+        self.is_custom = is_custom
 
 
 # ---------------------------------------------
@@ -455,6 +472,13 @@ class PatternMatcher:
     # Rule evaluation
     # -----------------------
     def _rule_matches(self, tokens: Set[str], rule: Rule) -> bool:
+        """
+        Check if a token set satisfies a Rule's required/any_of/banned constraints.
+
+        Returns True only when ALL required tokens are present, NONE of the banned
+        tokens are present, and (if any_of is non-empty) at least one any_of token
+        is present.
+        """
         if any(b in tokens for b in rule.banned):
             return False
         if not all(r in tokens for r in rule.required):

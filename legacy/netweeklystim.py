@@ -1,3 +1,14 @@
+"""
+DEPRECATED - Original net weekly stimulus calculation module.
+
+Superseded by backend/core/MainClasses.py (Split.simulate_split) which handles
+arbitrary cycle lengths, multi-week normalization, and the full modifier chain
+(leverage matching, CNS fatigue, consecutive day penalties, etc.).
+
+This file is retained for historical reference only. Do NOT import from here.
+Use backend.core.MainClasses.Split instead.
+"""
+
 from collections import defaultdict
 import bisect
 

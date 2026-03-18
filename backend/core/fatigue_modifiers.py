@@ -361,16 +361,23 @@ def calculate_cns_fatigue(global_set_number: int, axial_fatigue: float = 0.0) ->
     """
     Calculate CNS fatigue multiplier based on total sets in session.
 
-    Uses exponential decay formula:
-    g(x) = floor + (ceiling - floor) * exp(-rate * x)
+    Formula:
+        effective_sets = global_sets + (axial_fatigue * 2.5)
+        g(x) = 0.85 + 0.15 * exp(-0.06 * effective_sets)
+
+    The multiplier starts at ~1.0 (fresh) and asymptotically decays toward
+    0.85 as sets accumulate. Axial fatigue from heavy compounds (deadlifts,
+    squats) accelerates the decay by adding "virtual" set-equivalents.
 
     Args:
         global_set_number: Total sets performed so far in session
-        axial_fatigue: Accumulated axial fatigue (set-equivalents applied)
+        axial_fatigue: Accumulated axial fatigue (converted to set-equivalents
+            via AXIAL_FATIGUE_CNS_EQUIV_SETS=2.5)
 
     Returns:
         CNS multiplier between CNS_FLOOR (0.85) and CNS_CEILING (1.0)
     """
+    # effective_sets = real sets + axial penalty (1.0 axial ~ 2.5 extra sets)
     effective_sets = global_set_number + (axial_fatigue * AXIAL_FATIGUE_CNS_EQUIV_SETS)
     decay = math.exp(-CNS_DECAY_RATE * effective_sets)
     return CNS_FLOOR + (CNS_CEILING - CNS_FLOOR) * decay
@@ -507,13 +514,15 @@ def calculate_consecutive_day_penalty(
     if consecutive_days <= 1:
         return 1.0  # First training day or had rest - no penalty
 
-    # Base penalty from consecutive days
-    # Uses diminishing curve: day 2 = 8%, day 3 = 15%, day 4 = 21%, etc.
+    # Base penalty from consecutive days (diminishing curve)
+    # Formula: base = 0.08 * (days-1) * (1 - 0.06*(days-1))
+    # Day 2: 0.08*1*0.94 = ~7.5%,  Day 3: 0.08*2*0.88 = ~14%,  Day 4: 0.08*3*0.82 = ~20%
     days_factor = consecutive_days - 1
     base_penalty = CONSECUTIVE_DAY_BASE_RATE * days_factor * (1.0 - 0.06 * days_factor)
-    base_penalty = min(base_penalty, CONSECUTIVE_DAY_BASE_CAP)
+    base_penalty = min(base_penalty, CONSECUTIVE_DAY_BASE_CAP)  # cap at 40%
 
     # Axial fatigue modifier: heavy compounds from previous days compound fatigue
+    # Formula: axial_penalty = cumulative_axial * 0.12, capped at 30%
     # ~1.5 cumulative axial (one heavy squat+deadlift session) adds ~18%
     axial_penalty = min(
         cumulative_axial_fatigue * CONSECUTIVE_AXIAL_MULTIPLIER,
@@ -521,14 +530,14 @@ def calculate_consecutive_day_penalty(
     )
 
     # Bilateral compound volume modifier
+    # Formula: bilateral_penalty = bilateral_sets * 0.005, capped at 15%
     # 20 bilateral compound sets adds ~10%
     bilateral_penalty = min(
         cumulative_bilateral_sets * CONSECUTIVE_BILATERAL_RATE,
         CONSECUTIVE_BILATERAL_CAP
     )
 
-    # Combined penalty
+    # Combined: total = base + axial + bilateral, then multiplier = max(0.25, 1 - total)
     total_penalty = base_penalty + axial_penalty + bilateral_penalty
 
-    # Return multiplier (floor at 0.25 = 75% max penalty)
     return max(CONSECUTIVE_DAY_FLOOR, 1.0 - total_penalty)

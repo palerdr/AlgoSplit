@@ -265,7 +265,6 @@ def classify_volume_tier(
     return 'minimalistic'
 
 
-#muscle fiber region
 class MuscleRegion:
     """
     Granular muscle region with tiered stimulus tracking.
