@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Depends, status, Response
 
 logger = logging.getLogger("algosplit.auth")
-from db.supabase import get_supabase_client, get_supabase_client_with_token
+from db.supabase import get_supabase_client, get_supabase_admin, get_supabase_client_with_token
 from schemas.auth import (
     SignUpRequest,
     LoginRequest,
@@ -307,6 +307,41 @@ async def logout(
     except Exception:
         # Even if sign out fails server-side, clear browser cookies.
         pass
+
+    clear_auth_cookies(response)
+    return None
+
+
+@router.delete(
+    "/account",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+        500: {"model": ErrorResponse, "description": "Server error"},
+    },
+    summary="Delete the current user's account",
+    description="Permanently delete the authenticated user and all associated data",
+)
+async def delete_account(
+    response: Response,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """
+    Permanently delete the current user's account and all associated data.
+
+    Uses the Supabase admin client to remove the user from auth.users.
+    All user-owned rows (splits, workouts, bodyweight, etc.) are cascade-deleted
+    by the database foreign-key constraints.
+    """
+    try:
+        admin = get_supabase_admin()
+        admin.auth.admin.delete_user(current_user.id)
+    except Exception as e:
+        logger.exception("Failed to delete account for user %s", current_user.id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete account: {str(e)}",
+        )
 
     clear_auth_cookies(response)
     return None

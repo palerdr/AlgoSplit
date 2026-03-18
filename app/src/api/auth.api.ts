@@ -29,3 +29,7 @@ export async function refreshToken(refresh_token: string): Promise<AuthResponse>
 export async function logout(): Promise<void> {
   await apiClient.post('/auth/logout');
 }
+
+export async function deleteAccount(): Promise<void> {
+  await apiClient.delete('/auth/account');
+}
