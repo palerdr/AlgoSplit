@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { User, Ruler, Timer, Database, Info, ExternalLink, BarChart3 } from 'lucide-react';
+import { User, Ruler, Timer, Database, Info, ExternalLink, BarChart3, Loader2 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent, Button } from '@/components/ui';
 import { useAuth } from '@/features/auth';
+import { deleteAccount } from '@/api/auth.api';
 import { useSettingsStore, type Dataset } from '@/stores/settingsStore';
 import { cn } from '@/lib/utils';
 
@@ -61,6 +62,21 @@ export function SettingsPage() {
     dataset, setDataset,
   } = useSettingsStore();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDeleteAccount = async () => {
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteAccount();
+      await logout();
+    } catch {
+      setDeleteError('Failed to delete account. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const restOptions = [30, 60, 90, 120, 180, 300];
 
@@ -214,23 +230,36 @@ export function SettingsPage() {
           <div className="pt-4 border-t border-white/5">
             <p className="text-sm text-muted mb-2">Danger Zone</p>
             {showDeleteConfirm ? (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-red-400">Are you sure?</span>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setShowDeleteConfirm(false)}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="bg-red-600 hover:bg-red-700"
-                  disabled
-                >
-                  Delete Account
-                </Button>
+              <div className="space-y-2">
+                <p className="text-sm text-red-400">
+                  This will permanently delete your account and all your data (splits, workouts, exercises). This cannot be undone.
+                </p>
+                {deleteError && (
+                  <p className="text-sm text-red-500">{deleteError}</p>
+                )}
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => { setShowDeleteConfirm(false); setDeleteError(null); }}
+                    disabled={isDeleting}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="bg-red-600 hover:bg-red-700"
+                    onClick={handleDeleteAccount}
+                    disabled={isDeleting}
+                  >
+                    {isDeleting ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      'Delete Account'
+                    )}
+                  </Button>
+                </div>
               </div>
             ) : (
               <Button

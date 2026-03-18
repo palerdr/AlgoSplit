@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../../src/hooks/useAuth';
+import * as authApi from '../../src/api/auth.api';
+import { tokenStore } from '../../src/api/client';
 import { Card, Modal, Spinner } from '../../src/components/ui';
 import { useSettingsStore } from '../../src/stores/settingsStore';
 import { colors, borders, spacing, typography } from '../../src/theme';
@@ -12,6 +14,8 @@ export default function SettingsScreen() {
   const { user, logout, isLoading } = useAuth();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const weightUnit = useSettingsStore((s) => s.weightUnit);
   const stimulusDuration = useSettingsStore((s) => s.stimulusDuration);
   const maintenanceVolume = useSettingsStore((s) => s.maintenanceVolume);
@@ -34,6 +38,20 @@ export default function SettingsScreen() {
       Alert.alert('Error', 'Failed to log out. Please try again.');
     } finally {
       setIsLoggingOut(false);
+    }
+  };
+
+  const confirmDeleteAccount = async () => {
+    try {
+      setShowDeleteConfirm(false);
+      setIsDeleting(true);
+      await authApi.deleteAccount();
+      await tokenStore.clearToken();
+      await logout();
+    } catch {
+      Alert.alert('Error', 'Failed to delete account. Please try again.');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -185,6 +203,21 @@ export default function SettingsScreen() {
             </>
           )}
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.deleteButton, isDeleting && styles.logoutButtonDisabled]}
+          onPress={() => setShowDeleteConfirm(true)}
+          disabled={isDeleting}
+        >
+          {isDeleting ? (
+            <Spinner />
+          ) : (
+            <>
+              <Ionicons name="trash-outline" size={18} color={colors.red} />
+              <Text style={styles.logoutText}>Delete Account</Text>
+            </>
+          )}
+        </TouchableOpacity>
       </ScrollView>
 
       <Modal
@@ -207,6 +240,30 @@ export default function SettingsScreen() {
             onPress={confirmLogout}
           >
             <Text style={styles.confirmPrimaryText}>Log Out</Text>
+          </TouchableOpacity>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        title="Delete Account"
+      >
+        <Text style={styles.confirmBody}>
+          This will permanently delete your account and all your data (splits, workouts, exercises). This cannot be undone.
+        </Text>
+        <View style={styles.confirmActions}>
+          <TouchableOpacity
+            style={styles.confirmSecondary}
+            onPress={() => setShowDeleteConfirm(false)}
+          >
+            <Text style={styles.confirmSecondaryText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.confirmPrimary}
+            onPress={confirmDeleteAccount}
+          >
+            <Text style={styles.confirmPrimaryText}>Delete Account</Text>
           </TouchableOpacity>
         </View>
       </Modal>
@@ -393,6 +450,18 @@ const styles = StyleSheet.create({
   },
   logoutButtonDisabled: {
     opacity: 0.6,
+  },
+  deleteButton: {
+    marginTop: spacing.md,
+    minHeight: 52,
+    borderRadius: borders.radius.xl,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+    backgroundColor: 'rgba(239, 68, 68, 0.04)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
   },
   logoutText: {
     color: colors.red,
