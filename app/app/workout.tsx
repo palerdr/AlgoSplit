@@ -59,6 +59,25 @@ export default function WorkoutScreen() {
   const dragStartX = useRef(0);
   const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.25;
 
+  // Gate: ignore onViewableItemsChanged until the initial scroll has settled.
+  // Without this, the callback fires during FlatList layout before
+  // initialScrollIndex takes effect, overwriting the persisted index.
+  const hasInitialized = useRef(false);
+
+  // After mount, ensure FlatList is at the persisted index and enable tracking
+  useEffect(() => {
+    hasInitialized.current = false;
+    const target = Math.min(storedIndex, exerciseCount);
+    const timer = setTimeout(() => {
+      if (flatListRef.current && exerciseCount > 0 && target > 0) {
+        flatListRef.current.scrollToIndex({ index: target, animated: false });
+      }
+      hasInitialized.current = true;
+    }, 200);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run once on mount — store is already hydrated
+
   // Clamp currentIndex if exercises removed
   useEffect(() => {
     const max = exerciseCount; // summary page
@@ -86,6 +105,7 @@ export default function WorkoutScreen() {
 
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      if (!hasInitialized.current) return; // skip during initial scroll
       if (viewableItems.length > 0 && viewableItems[0].index != null) {
         setCurrentIndex(viewableItems[0].index);
       }
