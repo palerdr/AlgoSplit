@@ -2,10 +2,10 @@ import { useState } from 'react';
 import {
   View,
   Text,
+  ScrollView,
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
-import { ScrollView } from 'react-native-gesture-handler';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,7 +38,6 @@ export default function CreateSplitScreen() {
   const [maintenanceVolume, setMaintenanceVolume] = useState(String(defaultMaintenanceVolume));
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState('');
-  const [isDraggingExercises, setIsDraggingExercises] = useState(false);
 
   const updateSession = (index: number, session: SessionInput) => {
     const updated = [...sessions];
@@ -105,7 +104,7 @@ export default function CreateSplitScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        scrollEnabled={!isDraggingExercises}
+        scrollEnabled
       >
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -124,8 +123,6 @@ export default function CreateSplitScreen() {
             onUpdate={(s) => updateSession(i, s)}
             onRemove={() => removeSession(i)}
             canRemove={sessions.length > 1}
-            onDragStart={() => setIsDraggingExercises(true)}
-            onDragEnd={() => setIsDraggingExercises(false)}
           />
         ))}
 

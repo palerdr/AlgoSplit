@@ -28,6 +28,8 @@ interface Props {
   index: number;
   onUpdate: (ex: ExerciseInput) => void;
   onRemove: () => void;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
   drag?: () => void;
   isActive?: boolean;
 }
@@ -37,6 +39,8 @@ export default function ExerciseRowMobile({
   index: _index,
   onUpdate,
   onRemove,
+  onMoveUp,
+  onMoveDown,
   drag,
   isActive = false,
 }: Props) {
@@ -88,16 +92,26 @@ export default function ExerciseRowMobile({
 
   return (
     <View style={[styles.container, isActive && styles.containerActive]}>
-      {/* Row 1: Drag handle + Name + Remove */}
+      {/* Row 1: Reorder + Name + Remove */}
       <View style={styles.row1}>
-        <TouchableOpacity
-          style={styles.dragHandle}
-          onLongPress={drag}
-          delayLongPress={120}
-          hitSlop={8}
-        >
-          <Ionicons name="reorder-three-outline" size={18} color={colors.textSecondary} />
-        </TouchableOpacity>
+        <View style={styles.reorderButtons}>
+          <TouchableOpacity
+            onPress={onMoveUp}
+            disabled={!onMoveUp}
+            hitSlop={4}
+            style={styles.reorderBtn}
+          >
+            <Ionicons name="chevron-up" size={16} color={onMoveUp ? colors.textSecondary : colors.textDim} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={onMoveDown}
+            disabled={!onMoveDown}
+            hitSlop={4}
+            style={styles.reorderBtn}
+          >
+            <Ionicons name="chevron-down" size={16} color={onMoveDown ? colors.textSecondary : colors.textDim} />
+          </TouchableOpacity>
+        </View>
         <View style={styles.nameWrap}>
           <TextInput
             style={styles.nameInput}
@@ -200,9 +214,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  dragHandle: {
-    paddingHorizontal: 2,
-    paddingVertical: 4,
+  reorderButtons: {
+    alignItems: 'center',
+    gap: 0,
+  },
+  reorderBtn: {
+    padding: 1,
   },
   nameWrap: {
     flex: 1,

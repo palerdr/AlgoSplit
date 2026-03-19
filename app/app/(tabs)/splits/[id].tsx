@@ -2,12 +2,12 @@ import { useMemo, useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
+  ScrollView,
   TouchableOpacity,
   TextInput,
   StyleSheet,
   Alert,
 } from 'react-native';
-import { ScrollView } from 'react-native-gesture-handler';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -136,7 +136,7 @@ export default function SplitDetailScreen() {
 
   // Collapsible detailed analysis
   const [showDetailedAnalysis, setShowDetailedAnalysis] = useState(false);
-  const [isDraggingExercises, setIsDraggingExercises] = useState(false);
+
 
   // Advanced settings — always interactive, independent from edit mode
   const [advDataset, setAdvDataset] = useState<'schoenfeld' | 'pelland' | 'average'>('average');
@@ -488,7 +488,7 @@ export default function SplitDetailScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        scrollEnabled={!isDraggingExercises}
+        scrollEnabled
       >
         {isEditing ? (
           <>
@@ -509,8 +509,6 @@ export default function SplitDetailScreen() {
                 onUpdate={(s) => updateSession(i, s)}
                 onRemove={() => removeSession(i)}
                 canRemove={editSessions.length > 1}
-                onDragStart={() => setIsDraggingExercises(true)}
-                onDragEnd={() => setIsDraggingExercises(false)}
               />
             ))}
 
