@@ -75,55 +75,59 @@ export default function SessionEditorMobile({
     <View style={styles.container}>
       {/* Header */}
       <TouchableOpacity style={styles.header} onPress={() => setExpanded(!expanded)}>
-        <Ionicons
-          name={expanded ? 'chevron-down' : 'chevron-forward'}
-          size={16}
-          color={colors.textSecondary}
-        />
-        <View style={styles.dayPicker}>
-          <Text style={styles.dayLabel}>Day</Text>
-          <TouchableOpacity
-            onPress={(e) => {
-              e.stopPropagation();
-              onUpdate({ ...session, day: Math.max(1, session.day - 1) });
-            }}
-            hitSlop={8}
-          >
-            <Ionicons name="chevron-back" size={14} color={colors.textSecondary} />
-          </TouchableOpacity>
-          <Text style={styles.dayValue}>{session.day}</Text>
-          <TouchableOpacity
-            onPress={(e) => {
-              e.stopPropagation();
-              onUpdate({ ...session, day: session.day + 1 });
-            }}
-            hitSlop={8}
-          >
-            <Ionicons name="chevron-forward" size={14} color={colors.textSecondary} />
-          </TouchableOpacity>
+        {/* Top row: chevron, day picker, session name, trash */}
+        <View style={styles.headerTopRow}>
+          <Ionicons
+            name={expanded ? 'chevron-down' : 'chevron-forward'}
+            size={16}
+            color={colors.textSecondary}
+          />
+          <View style={styles.dayPicker}>
+            <Text style={styles.dayLabel}>Day</Text>
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                onUpdate({ ...session, day: Math.max(1, session.day - 1) });
+              }}
+              hitSlop={8}
+            >
+              <Ionicons name="chevron-back" size={14} color={colors.textSecondary} />
+            </TouchableOpacity>
+            <Text style={styles.dayValue}>{session.day}</Text>
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                onUpdate({ ...session, day: session.day + 1 });
+              }}
+              hitSlop={8}
+            >
+              <Ionicons name="chevron-forward" size={14} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+          <TextInput
+            style={styles.sessionNameInput}
+            placeholder="Session name"
+            placeholderTextColor={colors.textMuted}
+            value={session.name}
+            onChangeText={(name) => onUpdate({ ...session, name })}
+            onTouchStart={(e) => e.stopPropagation()}
+          />
+          {canRemove && (
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                onRemove();
+              }}
+              hitSlop={8}
+            >
+              <Ionicons name="trash-outline" size={16} color={colors.red} />
+            </TouchableOpacity>
+          )}
         </View>
-        <TextInput
-          style={styles.sessionNameInput}
-          placeholder="Session name"
-          placeholderTextColor={colors.textMuted}
-          value={session.name}
-          onChangeText={(name) => onUpdate({ ...session, name })}
-          onTouchStart={(e) => e.stopPropagation()}
-        />
+        {/* Bottom row: meta summary */}
         <Text style={styles.sessionMeta}>
-          {session.exercises.length} ex | {totalSets} sets
+          {session.exercises.length} exercise{session.exercises.length !== 1 ? 's' : ''} · {totalSets} sets
         </Text>
-        {canRemove && (
-          <TouchableOpacity
-            onPress={(e) => {
-              e.stopPropagation();
-              onRemove();
-            }}
-            hitSlop={8}
-          >
-            <Ionicons name="trash-outline" size={16} color={colors.red} />
-          </TouchableOpacity>
-        )}
       </TouchableOpacity>
 
       {/* Body */}
@@ -176,9 +180,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   header: {
+    padding: spacing.md,
+    gap: 4,
+  },
+  headerTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.md,
     gap: 8,
   },
   dayPicker: {
@@ -210,7 +217,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 11,
     fontWeight: '600',
-    flexShrink: 0,
+    marginLeft: 24, // align with session name (past chevron)
   },
   body: {
     paddingHorizontal: spacing.sm,
