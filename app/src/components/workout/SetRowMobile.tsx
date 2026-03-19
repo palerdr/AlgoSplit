@@ -203,7 +203,7 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: colors.border,
     color: colors.text,
-    fontSize: 14,
+    fontSize: 16, // >=16 prevents iOS Safari auto-zoom on focus
     fontVariant: ['tabular-nums'],
     textAlign: 'center',
     paddingHorizontal: 4,

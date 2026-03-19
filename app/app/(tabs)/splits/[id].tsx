@@ -2,12 +2,12 @@ import { useMemo, useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
   TextInput,
   StyleSheet,
   Alert,
 } from 'react-native';
+import { ScrollView } from 'react-native-gesture-handler';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -939,7 +939,7 @@ const styles = StyleSheet.create({
   },
   advTextInput: {
     color: colors.text,
-    fontSize: 14,
+    fontSize: 16,
     backgroundColor: colors.surfaceElevated,
     borderRadius: borders.radius.md,
     paddingVertical: 8,

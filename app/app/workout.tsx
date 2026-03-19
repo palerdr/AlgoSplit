@@ -274,6 +274,7 @@ export default function WorkoutScreen() {
             disableIntervalMomentum
             decelerationRate="fast"
             bounces={false}
+            directionalLockEnabled
             showsHorizontalScrollIndicator={false}
             onScrollBeginDrag={handleScrollBeginDrag}
             onScrollEndDrag={handleScrollEndDrag}

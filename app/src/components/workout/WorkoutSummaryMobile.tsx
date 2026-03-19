@@ -28,6 +28,7 @@ export default function WorkoutSummaryMobile({
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
+      nestedScrollEnabled
     >
       <View style={styles.banner}>
         <Text style={styles.bannerTitle}>{sessionName}</Text>

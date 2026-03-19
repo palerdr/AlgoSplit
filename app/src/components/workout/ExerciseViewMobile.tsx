@@ -49,7 +49,7 @@ function ExerciseViewMobile({ exercise, previousExerciseData }: ExerciseViewMobi
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled>
         {/* Column headers — cell Views match SetRowMobile layout exactly */}
         <View style={styles.colHeaders}>
           <View style={{ width: 28 }}><Text style={styles.colLabel}>Set</Text></View>
@@ -227,7 +227,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 10,
     color: colors.text,
-    fontSize: 13,
+    fontSize: 16, // >=16 prevents iOS Safari auto-zoom on focus
     minHeight: 60,
     textAlignVertical: 'top',
     marginBottom: 8,

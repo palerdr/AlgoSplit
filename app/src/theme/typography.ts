@@ -16,11 +16,11 @@ export const typography = {
     fontWeight: '700',
   } as TextStyle,
   body: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '400',
   } as TextStyle,
   bodyBold: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
   } as TextStyle,
   caption: {

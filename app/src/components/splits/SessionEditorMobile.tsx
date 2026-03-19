@@ -200,7 +200,7 @@ const styles = StyleSheet.create({
   sessionNameInput: {
     flex: 1,
     color: colors.text,
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '700',
     borderBottomWidth: 1,
     borderBottomColor: colors.borderLight,

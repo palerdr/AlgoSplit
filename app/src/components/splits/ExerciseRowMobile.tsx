@@ -209,7 +209,7 @@ const styles = StyleSheet.create({
   },
   nameInput: {
     color: colors.text,
-    fontSize: 14,
+    fontSize: 16,
     backgroundColor: colors.surface,
     borderRadius: borders.radius.sm,
     paddingVertical: 6,
