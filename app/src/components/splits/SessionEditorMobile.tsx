@@ -210,6 +210,7 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 11,
     fontWeight: '600',
+    flexShrink: 0,
   },
   body: {
     paddingHorizontal: spacing.sm,
