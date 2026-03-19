@@ -235,6 +235,7 @@ const styles = StyleSheet.create({
   row2: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexWrap: 'wrap',
     marginTop: 6,
     gap: 6,
   },

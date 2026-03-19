@@ -178,6 +178,7 @@ const styles = StyleSheet.create({
     borderWidth: borders.width.thin,
     borderColor: colors.border,
     marginBottom: spacing.md,
+    overflow: 'hidden',
   },
   header: {
     padding: spacing.md,
@@ -187,6 +188,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    overflow: 'hidden',
   },
   dayPicker: {
     flexDirection: 'row',
@@ -206,6 +208,7 @@ const styles = StyleSheet.create({
   },
   sessionNameInput: {
     flex: 1,
+    minWidth: 0, // allow flex shrink past intrinsic width
     color: colors.text,
     fontSize: 16,
     fontWeight: '700',
@@ -222,10 +225,8 @@ const styles = StyleSheet.create({
   body: {
     paddingHorizontal: spacing.sm,
     paddingBottom: spacing.md,
-    overflow: 'visible' as const,
   },
   listContainer: {
-    overflow: 'visible',
   },
   addExerciseBtn: {
     flexDirection: 'row',
