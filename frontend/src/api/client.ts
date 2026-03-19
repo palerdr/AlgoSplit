@@ -4,6 +4,23 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || '';
 const CSRF_COOKIE_NAME = import.meta.env.VITE_CSRF_COOKIE_NAME || 'algosplit_csrf_token';
 const AUTH_COOKIE_NAME = 'algosplit_access_token';
 
+// In-memory refresh token store (not persisted — cleared on page reload, which is fine
+// because cookies handle the normal auth flow; this is only for mid-session refresh)
+let _refreshToken: string | null = null;
+let _refreshPromise: Promise<boolean> | null = null;
+
+export function setRefreshToken(token: string) {
+  _refreshToken = token;
+}
+
+export function getRefreshToken(): string | null {
+  return _refreshToken;
+}
+
+export function clearRefreshToken() {
+  _refreshToken = null;
+}
+
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true,
@@ -48,15 +65,43 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor - handle 401
+// Attempt to refresh the access token using the stored refresh token.
+// Deduplicates concurrent refresh attempts so only one request is in-flight.
+function attemptTokenRefresh(): Promise<boolean> {
+  if (!_refreshToken) return Promise.resolve(false);
+  if (_refreshPromise) return _refreshPromise;
+
+  _refreshPromise = axios
+    .post(`${API_BASE_URL}/auth/refresh`, { refresh_token: _refreshToken }, { withCredentials: true })
+    .then((res) => {
+      if (res.data.refresh_token) _refreshToken = res.data.refresh_token;
+      window.dispatchEvent(new CustomEvent('auth:refreshed', {
+        detail: { expires_in: res.data.expires_in },
+      }));
+      return true;
+    })
+    .catch(() => false)
+    .finally(() => { _refreshPromise = null; });
+
+  return _refreshPromise;
+}
+
+// Response interceptor - handle 401 with retry
 // Note: Don't redirect here - let React Router's ProtectedRoute handle navigation
-// Hard redirects cause refresh loops when combined with auth state checks
 apiClient.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
-    if (error.response?.status === 401) {
-      console.warn('[AlgoSplit] 401 Unauthorized:', error.config?.method?.toUpperCase(), error.config?.url, getAuthDiagnostics());
-      // Dispatch custom event so AuthProvider can update state
+  async (error: AxiosError) => {
+    const config = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+    if (error.response?.status === 401 && config && !config._retry) {
+      config._retry = true;
+      console.warn('[AlgoSplit] 401 — attempting token refresh', config.method?.toUpperCase(), config.url);
+      const refreshed = await attemptTokenRefresh();
+      if (refreshed) {
+        // Retry the original request — cookies are now updated
+        return apiClient(config);
+      }
+      // Refresh failed — dispatch logout
+      console.warn('[AlgoSplit] Token refresh failed, logging out', getAuthDiagnostics());
       window.dispatchEvent(new CustomEvent('auth:logout'));
     }
     return Promise.reject(error);

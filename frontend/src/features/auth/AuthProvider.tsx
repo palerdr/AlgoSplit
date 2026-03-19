@@ -1,17 +1,23 @@
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import * as authApi from '@/api/auth.api';
+import { clearRefreshToken } from '@/api/client';
 import type { UserInfo } from '@/types/api.types';
 import { useAnalysisStore } from '@/stores/analysisStore';
 import { useCompareStore } from '@/stores/compareStore';
 import { useSplitCreateStore } from '@/stores/splitCreateStore';
+
+/** Refresh 5 minutes before token expires */
+const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
 interface AuthState {
   user: UserInfo | null;
@@ -35,6 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clearUserData = () => {
     useAnalysisStore.getState().reset();
@@ -42,6 +49,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     useSplitCreateStore.getState().reset();
     queryClient.clear();
   };
+
+  // Schedule a proactive token refresh before expiry
+  const scheduleRefresh = useCallback((expiresIn: number) => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    const delay = Math.max(10_000, expiresIn * 1000 - REFRESH_BUFFER_MS);
+    refreshTimerRef.current = setTimeout(async () => {
+      try {
+        const user = await authApi.getCurrentUser();
+        setState((prev) => ({ ...prev, user, isAuthenticated: true }));
+      } catch {
+        // 401 interceptor will handle refresh + retry
+      }
+    }, delay);
+  }, []);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    };
+  }, []);
 
   // Check for existing session on mount
   useEffect(() => {
@@ -60,12 +88,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Listen for auth:logout events from API interceptor
   useEffect(() => {
     const handleLogout = () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      clearRefreshToken();
       setState({ user: null, isAuthenticated: false, isLoading: false });
     };
 
     window.addEventListener('auth:logout', handleLogout);
     return () => window.removeEventListener('auth:logout', handleLogout);
   }, []);
+
+  // Listen for successful token refresh events (from 401 interceptor)
+  // to re-schedule the next proactive refresh
+  useEffect(() => {
+    const handleRefreshed = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.expires_in) {
+        scheduleRefresh(detail.expires_in);
+      }
+    };
+    window.addEventListener('auth:refreshed', handleRefreshed);
+    return () => window.removeEventListener('auth:refreshed', handleRefreshed);
+  }, [scheduleRefresh]);
 
   // Re-validate session when tab regains focus (prevents stale auth after
   // long background periods where the cookie may have expired)
@@ -91,6 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearUserData();
     const response = await authApi.login({ email, password });
     setState({ user: response.user, isAuthenticated: true, isLoading: false });
+    scheduleRefresh(response.expires_in);
     navigate('/dashboard');
   };
 
@@ -98,6 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearUserData();
     const response = await authApi.signup({ email, password });
     setState({ user: response.user, isAuthenticated: true, isLoading: false });
+    scheduleRefresh(response.expires_in);
     navigate('/dashboard');
   };
 
@@ -107,6 +152,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Ignore errors - logout anyway
     } finally {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      clearRefreshToken();
       clearUserData();
       setState({ user: null, isAuthenticated: false, isLoading: false });
       navigate('/login');

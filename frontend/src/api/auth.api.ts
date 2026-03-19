@@ -1,4 +1,4 @@
-import { apiClient } from './client';
+import { apiClient, setRefreshToken } from './client';
 import type {
   AuthResponse,
   LoginRequest,
@@ -8,11 +8,17 @@ import type {
 
 export async function login(data: LoginRequest): Promise<AuthResponse> {
   const response = await apiClient.post<AuthResponse>('/auth/login', data);
+  if (response.data.refresh_token) {
+    setRefreshToken(response.data.refresh_token);
+  }
   return response.data;
 }
 
 export async function signup(data: SignupRequest): Promise<AuthResponse> {
   const response = await apiClient.post<AuthResponse>('/auth/signup', data);
+  if (response.data.refresh_token) {
+    setRefreshToken(response.data.refresh_token);
+  }
   return response.data;
 }
 
