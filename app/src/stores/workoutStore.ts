@@ -16,6 +16,7 @@ export interface WorkoutExercise {
   sets: SetData[];
   notes: string;
   unilateral?: boolean;
+  templateExerciseId?: string;
 }
 
 interface ActiveWorkout {
@@ -65,10 +66,20 @@ function toWorkoutCompletionIso(workoutDate?: string): string | undefined {
   return date.toISOString();
 }
 
+function buildExerciseNotesKey(
+  splitId?: string,
+  sessionId?: string,
+  templateExerciseId?: string,
+): string | null {
+  if (!splitId || !sessionId || !templateExerciseId) return null;
+  return `${splitId}:${sessionId}:${templateExerciseId}`;
+}
+
 interface WorkoutState {
   activeWorkout: ActiveWorkout | null;
   selectedWorkoutDate: string | null;
   currentExerciseIndex: number;
+  exerciseNotesByKey: Record<string, string>;
   restTimer: RestTimerState;
 
   setCurrentExerciseIndex: (index: number) => void;
@@ -76,7 +87,7 @@ interface WorkoutState {
   startWorkout: (sessionName: string) => void;
   startWorkoutFromSession: (
     sessionName: string,
-    exercises: Array<{ name: string; sets: number; unilateral: boolean }>,
+    exercises: Array<{ name: string; sets: number; unilateral: boolean; templateExerciseId?: string }>,
     previousData?: ActiveWorkout['previousData'],
     sessionId?: string,
     splitId?: string,
@@ -113,6 +124,7 @@ export const useWorkoutStore = create<WorkoutState>()(
       activeWorkout: null,
       selectedWorkoutDate: null,
       currentExerciseIndex: 0,
+      exerciseNotesByKey: {},
       restTimer: { isRunning: false, duration: getRestDuration(), remaining: 0, exerciseId: null },
 
       setCurrentExerciseIndex: (index) => {
@@ -137,9 +149,11 @@ export const useWorkoutStore = create<WorkoutState>()(
       },
 
       startWorkoutFromSession: (sessionName, exercises, previousData, sessionId, splitId) => {
-        const { selectedWorkoutDate } = get();
+        const { selectedWorkoutDate, exerciseNotesByKey } = get();
         set({ currentExerciseIndex: 0 });
         const workoutExercises: WorkoutExercise[] = exercises.map((ex) => {
+          const noteKey = buildExerciseNotesKey(splitId, sessionId, ex.templateExerciseId);
+          const persistedNotes = noteKey ? (exerciseNotesByKey[noteKey] ?? '') : '';
           let sets: SetData[];
           if (ex.unilateral) {
             sets = [];
@@ -150,7 +164,14 @@ export const useWorkoutStore = create<WorkoutState>()(
           } else {
             sets = Array.from({ length: ex.sets }, () => ({ reps: 0, weight: 0, completed: false }));
           }
-          return { id: generateId(), name: ex.name, sets, notes: '', unilateral: ex.unilateral || undefined };
+          return {
+            id: generateId(),
+            name: ex.name,
+            sets,
+            notes: persistedNotes,
+            unilateral: ex.unilateral || undefined,
+            templateExerciseId: ex.templateExerciseId,
+          };
         });
         set({
           activeWorkout: {
@@ -274,13 +295,22 @@ export const useWorkoutStore = create<WorkoutState>()(
       },
 
       updateExerciseNotes: (exerciseId, notes) => {
-        const { activeWorkout } = get();
+        const { activeWorkout, exerciseNotesByKey } = get();
         if (!activeWorkout) return;
+        const exercise = activeWorkout.exercises.find((ex) => ex.id === exerciseId);
+        const noteKey = buildExerciseNotesKey(
+          activeWorkout.splitId,
+          activeWorkout.sessionId,
+          exercise?.templateExerciseId,
+        );
         set({
           activeWorkout: {
             ...activeWorkout,
             exercises: activeWorkout.exercises.map((ex) => (ex.id === exerciseId ? { ...ex, notes } : ex)),
           },
+          exerciseNotesByKey: noteKey
+            ? { ...exerciseNotesByKey, [noteKey]: notes }
+            : exerciseNotesByKey,
         });
       },
 
@@ -406,6 +436,7 @@ export const useWorkoutStore = create<WorkoutState>()(
         activeWorkout: state.activeWorkout,
         selectedWorkoutDate: state.selectedWorkoutDate,
         currentExerciseIndex: state.currentExerciseIndex,
+        exerciseNotesByKey: state.exerciseNotesByKey,
       }),
     },
   ),

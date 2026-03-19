@@ -200,7 +200,7 @@ export default function TabLayout() {
 
   const handleStartSession = useCallback((
     sessionName: string,
-    exercises: Array<{ name: string; sets: number; unilateral: boolean }>,
+    exercises: Array<{ name: string; sets: number; unilateral: boolean; templateExerciseId?: string }>,
     sessionId?: string,
     splitId?: string,
   ) => {

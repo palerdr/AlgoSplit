@@ -5,7 +5,6 @@ import {
   FlatList,
   StyleSheet,
   Dimensions,
-  type ViewToken,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
 } from 'react-native';
@@ -58,28 +57,35 @@ export default function WorkoutScreen() {
   const startedAt = activeWorkout?.startedAt ?? new Date().toISOString();
   const dragStartX = useRef(0);
   const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.25;
+  const isRestoringIndex = useRef(false);
+  const restoredWorkoutKey = useRef<string | null>(null);
 
-  // Gate: ignore onViewableItemsChanged until the initial scroll has settled.
-  // Without this, the callback fires during FlatList layout before
-  // initialScrollIndex takes effect, overwriting the persisted index.
-  const hasInitialized = useRef(false);
-
-  // After mount, ensure FlatList is at the persisted index and enable tracking
+  // Restore persisted page index once per active workout, after pager layout.
   useEffect(() => {
-    hasInitialized.current = false;
-    const target = Math.min(storedIndex, exerciseCount);
-    const timer = setTimeout(() => {
-      if (flatListRef.current && exerciseCount > 0 && target > 0) {
-        flatListRef.current.scrollToIndex({ index: target, animated: false });
-      }
-      hasInitialized.current = true;
-    }, 200);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Run once on mount — store is already hydrated
+    const workoutKey = activeWorkout?.startedAt;
+    if (!workoutKey) {
+      restoredWorkoutKey.current = null;
+      return;
+    }
+    if (restoredWorkoutKey.current === workoutKey) return;
+    if (exerciseCount === 0 || pagerHeight === 0) return;
+
+    const target = Math.min(useWorkoutStore.getState().currentExerciseIndex, exerciseCount);
+    isRestoringIndex.current = true;
+    restoredWorkoutKey.current = workoutKey;
+
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToIndex({ index: target, animated: false });
+      setCurrentIndex(target);
+      setTimeout(() => {
+        isRestoringIndex.current = false;
+      }, 120);
+    });
+  }, [activeWorkout?.startedAt, exerciseCount, pagerHeight, setCurrentIndex]);
 
   // Clamp currentIndex if exercises removed
   useEffect(() => {
+    if (exerciseCount === 0) return;
     const max = exerciseCount; // summary page
     if (currentIndex > max) setCurrentIndex(max);
   }, [exerciseCount, currentIndex, setCurrentIndex]);
@@ -103,21 +109,17 @@ export default function WorkoutScreen() {
     [],
   );
 
-  const onViewableItemsChanged = useRef(
-    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      if (!hasInitialized.current) return; // skip during initial scroll
-      if (viewableItems.length > 0 && viewableItems[0].index != null) {
-        setCurrentIndex(viewableItems[0].index);
+  const handleMomentumScrollEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (isRestoringIndex.current) return;
+      const nextIndex = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+      const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
+      if (clampedIndex !== currentIndex) {
+        setCurrentIndex(clampedIndex);
       }
     },
+    [currentIndex, exerciseCount, setCurrentIndex],
   );
-
-  const viewabilityConfigCallbackPairs = useRef([
-    {
-      viewabilityConfig: { viewAreaCoveragePercentThreshold: 50 },
-      onViewableItemsChanged: onViewableItemsChanged.current,
-    },
-  ]);
 
   const scrollToIndex = useCallback(
     (index: number) => {
@@ -278,13 +280,12 @@ export default function WorkoutScreen() {
             showsHorizontalScrollIndicator={false}
             onScrollBeginDrag={handleScrollBeginDrag}
             onScrollEndDrag={handleScrollEndDrag}
-            viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
+            onMomentumScrollEnd={handleMomentumScrollEnd}
             getItemLayout={(_, index) => ({
               length: SCREEN_WIDTH,
               offset: SCREEN_WIDTH * index,
               index,
             })}
-            initialScrollIndex={currentIndex}
             initialNumToRender={1}
             maxToRenderPerBatch={1}
             windowSize={3}

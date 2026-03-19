@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import DraggableFlatList from 'react-native-draggable-flatlist';
 import { colors, borders, spacing } from '../../theme';
 import ExerciseRowMobile from './ExerciseRowMobile';
 import { generateExerciseId } from '../../utils/splitEditHelpers';
@@ -12,6 +13,7 @@ interface Props {
   onRemove: () => void;
   canRemove: boolean;
   defaultExpanded?: boolean;
+  simultaneousHandlers?: React.Ref<any> | React.Ref<any>[];
   onDragStart?: () => void;
   onDragEnd?: () => void;
 }
@@ -22,6 +24,7 @@ export default function SessionEditorMobile({
   onRemove,
   canRemove,
   defaultExpanded = true,
+  simultaneousHandlers,
   onDragStart,
   onDragEnd,
 }: Props) {
@@ -132,25 +135,34 @@ export default function SessionEditorMobile({
       {/* Body */}
       {expanded && (
         <View style={styles.body}>
-          {session.exercises.map((item, index) => (
-            <ExerciseRowMobile
-              key={item.id ?? `exercise_${index}`}
-              exercise={item}
-              index={index}
-              onUpdate={(ex) => updateExercise(item.id, index, ex)}
-              onRemove={() => removeExercise(item.id, index)}
-              onMoveUp={index > 0 ? () => {
-                const exercises = [...session.exercises];
-                [exercises[index - 1], exercises[index]] = [exercises[index], exercises[index - 1]];
-                onUpdate({ ...session, exercises });
-              } : undefined}
-              onMoveDown={index < session.exercises.length - 1 ? () => {
-                const exercises = [...session.exercises];
-                [exercises[index], exercises[index + 1]] = [exercises[index + 1], exercises[index]];
-                onUpdate({ ...session, exercises });
-              } : undefined}
-            />
-          ))}
+          <DraggableFlatList
+            data={session.exercises}
+            keyExtractor={(item, index) => item.id ?? `exercise_${index}`}
+            renderItem={({ item, drag, isActive, getIndex }) => {
+              const index = getIndex() ?? 0;
+              return (
+                <ExerciseRowMobile
+                  exercise={item}
+                  index={index}
+                  onUpdate={(ex) => updateExercise(item.id, index, ex)}
+                  onRemove={() => removeExercise(item.id, index)}
+                  drag={drag}
+                  isActive={isActive}
+                />
+              );
+            }}
+            onDragBegin={() => onDragStart?.()}
+            onRelease={() => onDragEnd?.()}
+            onDragEnd={({ data }) => {
+              onUpdate({ ...session, exercises: data });
+              onDragEnd?.();
+            }}
+            scrollEnabled={false}
+            activationDistance={14}
+            keyboardShouldPersistTaps="handled"
+            containerStyle={styles.listContainer}
+            simultaneousHandlers={simultaneousHandlers}
+          />
           <TouchableOpacity style={styles.addExerciseBtn} onPress={addExercise}>
             <Ionicons name="add" size={16} color={colors.green} />
             <Text style={styles.addExerciseText}>Add Exercise</Text>
@@ -215,6 +227,9 @@ const styles = StyleSheet.create({
   body: {
     paddingHorizontal: spacing.sm,
     paddingBottom: spacing.md,
+  },
+  listContainer: {
+    overflow: 'visible',
   },
   addExerciseBtn: {
     flexDirection: 'row',

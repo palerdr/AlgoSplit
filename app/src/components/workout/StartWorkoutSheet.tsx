@@ -20,7 +20,7 @@ interface StartWorkoutSheetProps {
   onStartQuick: () => void;
   onStartSession: (
     sessionName: string,
-    exercises: Array<{ name: string; sets: number; unilateral: boolean }>,
+    exercises: Array<{ name: string; sets: number; unilateral: boolean; templateExerciseId?: string }>,
     sessionId?: string,
     splitId?: string,
   ) => void;
@@ -66,7 +66,12 @@ export default function StartWorkoutSheet({
   const handlePickSession = (session: SessionResponse) => {
     const exercises = session.exercises
       .sort((a, b) => a.order_index - b.order_index)
-      .map((ex) => ({ name: ex.exercise_name, sets: ex.sets, unilateral: ex.unilateral }));
+      .map((ex) => ({
+        name: ex.exercise_name,
+        sets: ex.sets,
+        unilateral: ex.unilateral,
+        templateExerciseId: ex.id,
+      }));
     onStartSession(session.name, exercises, session.id, session.split_id);
     handleClose();
   };
