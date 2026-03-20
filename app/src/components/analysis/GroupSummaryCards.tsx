@@ -116,6 +116,9 @@ export default function GroupSummaryCards({ muscles }: Props) {
           </TouchableOpacity>
         </View>
       </View>
+      <Text style={styles.modeHint}>
+        {metricMode === 'raw' ? 'Raw stimulus before atrophy' : 'Net stimulus after atrophy'}
+      </Text>
       {sorted.map((group) => {
         const value = metricMode === 'raw' ? group.rawStimulus : group.netStimulus;
         const barColor = getStimulusColor(value, maxStimulus);
@@ -177,6 +180,10 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 14,
     fontWeight: '700',
+  },
+  modeHint: {
+    color: colors.textSecondary,
+    fontSize: 11,
   },
   toggleWrap: {
     flexDirection: 'row',
