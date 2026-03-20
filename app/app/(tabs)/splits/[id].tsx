@@ -186,7 +186,6 @@ export default function SplitDetailScreen() {
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
   const sessionListRef = useRef<any>(null);
-  const webSessionRefs = useRef<Record<string, any>>({});
   const dragResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isWeb = Platform.OS === 'web';
   const ScrollContainerComponent: any = Platform.OS === 'web' ? ScrollView : NestableScrollContainer;
@@ -226,34 +225,25 @@ export default function SplitDetailScreen() {
   useEffect(() => {
     if (!isWeb || !draggingSessionId || typeof window === 'undefined') return;
 
-    const handlePointerMove = (event: PointerEvent | MouseEvent) => {
-      const targetId = Object.entries(webSessionRefs.current).find(([, node]) => {
-        if (!node || typeof node.getBoundingClientRect !== 'function') return false;
-        const rect = node.getBoundingClientRect();
-        return event.clientY >= rect.top && event.clientY <= rect.bottom;
-      })?.[0];
-
-      if (!targetId || targetId === draggingSessionId) return;
-      setEditSessions((previous) => reorderSessionsWithStableDays(previous, draggingSessionId, targetId));
-    };
-
     const stopSessionDrag = () => {
       setDraggingSessionId(null);
       handleSessionDragEnd();
     };
 
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('mousemove', handlePointerMove);
     window.addEventListener('pointerup', stopSessionDrag);
     window.addEventListener('mouseup', stopSessionDrag);
 
     return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('mousemove', handlePointerMove);
       window.removeEventListener('pointerup', stopSessionDrag);
       window.removeEventListener('mouseup', stopSessionDrag);
     };
   }, [draggingSessionId, handleSessionDragEnd, isWeb]);
+
+  const handleWebSessionMove = useCallback((targetId: string) => {
+    if (!draggingSessionId || draggingSessionId === targetId) return;
+
+    setEditSessions((previous) => reorderSessionsWithStableDays(previous, draggingSessionId, targetId));
+  }, [draggingSessionId]);
 
   useEffect(() => {
     if (!split || !analysis) return;
@@ -719,13 +709,7 @@ export default function SplitDetailScreen() {
                 return (
                   <View
                     key={sessionId}
-                    ref={(node) => {
-                      if (node) {
-                        webSessionRefs.current[sessionId] = node;
-                      } else {
-                        delete webSessionRefs.current[sessionId];
-                      }
-                    }}
+                    onPointerMove={() => handleWebSessionMove(sessionId)}
                   >
                     <SessionEditorMobile
                       session={session}

@@ -53,7 +53,6 @@ export default function SessionEditorMobile({
   const [draggingExerciseId, setDraggingExerciseId] = useState<string | null>(null);
   const isWeb = Platform.OS === 'web';
   const ExerciseListComponent: any = isWeb ? DraggableFlatList : NestableDraggableFlatList;
-  const webExerciseRefs = React.useRef<Record<string, any>>({});
 
   useEffect(() => {
     if (session.exercises.some((exercise) => !exercise.id)) {
@@ -69,38 +68,28 @@ export default function SessionEditorMobile({
   useEffect(() => {
     if (!isWeb || !draggingExerciseId || typeof window === 'undefined') return;
 
-    const handlePointerMove = (event: PointerEvent | MouseEvent) => {
-      const targetId = Object.entries(webExerciseRefs.current).find(([, node]) => {
-        if (!node || typeof node.getBoundingClientRect !== 'function') return false;
-        const rect = node.getBoundingClientRect();
-        return event.clientY >= rect.top && event.clientY <= rect.bottom;
-      })?.[0];
-
-      if (!targetId || targetId === draggingExerciseId) return;
-
-      onUpdate({
-        ...session,
-        exercises: reorderExercises(session.exercises, draggingExerciseId, targetId),
-      });
-    };
-
     const stopExerciseDrag = () => {
       setDraggingExerciseId(null);
       onDragEnd?.();
     };
 
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('mousemove', handlePointerMove);
     window.addEventListener('pointerup', stopExerciseDrag);
     window.addEventListener('mouseup', stopExerciseDrag);
 
     return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('mousemove', handlePointerMove);
       window.removeEventListener('pointerup', stopExerciseDrag);
       window.removeEventListener('mouseup', stopExerciseDrag);
     };
   }, [draggingExerciseId, isWeb, onDragEnd, onUpdate, session]);
+
+  const handleWebExerciseMove = useCallback((targetId: string) => {
+    if (!draggingExerciseId || draggingExerciseId === targetId) return;
+
+    onUpdate({
+      ...session,
+      exercises: reorderExercises(session.exercises, draggingExerciseId, targetId),
+    });
+  }, [draggingExerciseId, onUpdate, session]);
 
   const totalSets = session.exercises.reduce((sum, e) => sum + e.sets, 0);
 
@@ -226,13 +215,7 @@ export default function SessionEditorMobile({
               return (
                 <View
                   key={exerciseId}
-                  ref={(node) => {
-                    if (node) {
-                      webExerciseRefs.current[exerciseId] = node;
-                    } else {
-                      delete webExerciseRefs.current[exerciseId];
-                    }
-                  }}
+                  onPointerMove={() => handleWebExerciseMove(exerciseId)}
                 >
                   <ExerciseRowMobile
                     exercise={item}
