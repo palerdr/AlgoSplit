@@ -24,7 +24,7 @@ const GROUP_LABELS: Record<string, string> = {
   lower_back: 'Lower Back',
   lats: 'Lats',
   triceps: 'Triceps',
-  elbow_flexors: 'Biceps',
+  elbow_flexors: 'Elbow Flexors',
   forearms: 'Forearms',
   glutes: 'Glutes',
   quads: 'Quads',
