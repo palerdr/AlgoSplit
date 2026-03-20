@@ -1,4 +1,4 @@
-import { Tabs, useRouter, Redirect } from 'expo-router';
+import { Tabs, useRouter, Redirect, useSegments } from 'expo-router';
 import {
   View,
   Text,
@@ -171,9 +171,11 @@ function WorkoutButton({ onBlocked, onTrigger }: { onBlocked: () => void; onTrig
 export default function TabLayout() {
   const { isAuthenticated, isLoading } = useAuth();
   const queryClient = useQueryClient();
+  const segments = useSegments();
   const msgOpacity = useRef(new Animated.Value(0)).current;
   const msgVisible = useRef(false);
   const [showStartSheet, setShowStartSheet] = useState(false);
+  const isOnSplitsRoute = segments.includes('splits');
 
   const showBlockedMsg = useCallback(() => {
     if (msgVisible.current) return;
@@ -265,7 +267,7 @@ export default function TabLayout() {
           }}
         />
       </Tabs>
-      <ActiveWorkoutWidget />
+      {!isOnSplitsRoute && <ActiveWorkoutWidget />}
       <Animated.View pointerEvents="none" style={[styles.blockedMsg, { opacity: msgOpacity }]}>
         <Text style={styles.blockedMsgText}>Finish or cancel{'\n'}current workout</Text>
       </Animated.View>

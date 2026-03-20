@@ -476,14 +476,14 @@ export default function SplitDetailScreen() {
       {/* Header */}
       {isEditing ? (
         <View style={styles.header}>
-          <TouchableOpacity onPress={cancelEdit} hitSlop={8}>
+          <TouchableOpacity onPress={cancelEdit} hitSlop={12}>
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Editing</Text>
           <TouchableOpacity
             onPress={handleSave}
             disabled={!dirty || replaceMutation.isPending || updateMutation.isPending || updateExercisesMutation.isPending}
-            hitSlop={8}
+            hitSlop={12}
           >
             {replaceMutation.isPending || updateMutation.isPending || updateExercisesMutation.isPending ? (
               <Spinner />
@@ -494,17 +494,17 @@ export default function SplitDetailScreen() {
         </View>
       ) : (
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.replace('/(tabs)/splits')} hitSlop={8}>
+          <TouchableOpacity onPress={() => router.replace('/(tabs)/splits')} hitSlop={12}>
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>
           <Text style={styles.headerTitle} numberOfLines={1}>
             {split.name}
           </Text>
           <View style={styles.headerActions}>
-            <TouchableOpacity onPress={enterEditMode} hitSlop={8}>
+            <TouchableOpacity onPress={enterEditMode} hitSlop={12}>
               <Ionicons name="pencil" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={handleDelete} hitSlop={8}>
+            <TouchableOpacity onPress={handleDelete} hitSlop={12}>
               <Ionicons name="trash-outline" size={20} color={colors.red} />
             </TouchableOpacity>
           </View>
@@ -730,6 +730,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
+    zIndex: 2,
   },
   headerTitle: {
     color: colors.text,
@@ -743,6 +744,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 16,
+    zIndex: 3,
   },
   cancelText: {
     color: colors.textSecondary,

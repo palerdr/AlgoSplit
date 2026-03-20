@@ -4,6 +4,7 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import { useRouter } from 'expo-router';
@@ -81,15 +82,21 @@ export default function CreateSplitScreen() {
   };
 
   const handleSave = async () => {
+    const showSaveError = (message: string) => {
+      setError(message);
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+      Alert.alert('Unable to save split', message);
+    };
+
     if (!splitName.trim()) {
-      setError('Split name is required');
+      showSaveError('Split name is required');
       return;
     }
     const hasValidSession = sessions.some(
       (s) => s.name.trim() && s.exercises.some((e) => e.name.trim()),
     );
     if (!hasValidSession) {
-      setError('Add at least one session with a named exercise');
+      showSaveError('Add at least one session with a named exercise');
       return;
     }
 
@@ -112,7 +119,7 @@ export default function CreateSplitScreen() {
       });
       router.replace(`/(tabs)/splits/${result.id}`);
     } catch (err) {
-      setError(getErrorMessage(err));
+      showSaveError(getErrorMessage(err));
     }
   };
 

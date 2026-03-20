@@ -34,14 +34,30 @@ export default function SplitsScreen() {
     <TouchableOpacity
       activeOpacity={0.7}
       onPress={() => router.push(`/(tabs)/splits/${item.id}`)}
-      onLongPress={() => handleDelete(item)}
     >
       <Card style={styles.splitCard}>
         <View style={styles.splitCardHeader}>
           <Text style={styles.splitName}>{item.name}</Text>
-          <TouchableOpacity onPress={() => handleDelete(item)} hitSlop={8}>
-            <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
-          </TouchableOpacity>
+          <View style={styles.cardActions}>
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                router.push(`/(tabs)/splits/${item.id}`);
+              }}
+              hitSlop={10}
+            >
+              <Ionicons name="pencil-outline" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                handleDelete(item);
+              }}
+              hitSlop={10}
+            >
+              <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
         </View>
         <View style={styles.splitMeta}>
           <Text style={styles.metaText}>
@@ -173,6 +189,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
+  },
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
   splitName: {
     color: colors.text,
