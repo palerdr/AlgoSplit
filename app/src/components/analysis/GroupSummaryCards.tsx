@@ -116,13 +116,6 @@ export default function GroupSummaryCards({ muscles }: Props) {
           </TouchableOpacity>
         </View>
       </View>
-
-      <Text style={styles.helperText}>
-        {metricMode === 'raw'
-          ? 'Raw stimulus before atrophy. Better for seeing what the split is actually applying.'
-          : 'Net stimulus after atrophy across the cycle.'}
-      </Text>
-
       {sorted.map((group) => {
         const value = metricMode === 'raw' ? group.rawStimulus : group.netStimulus;
         const barColor = getStimulusColor(value, maxStimulus);
@@ -184,11 +177,6 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 14,
     fontWeight: '700',
-  },
-  helperText: {
-    color: colors.textSecondary,
-    fontSize: 11,
-    lineHeight: 16,
   },
   toggleWrap: {
     flexDirection: 'row',
