@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSplitsList, useDeleteSplit } from '../../../src/hooks/useSplits';
-import { Spinner, Card, Button, Modal } from '../../../src/components/ui';
+import { Spinner, Card, Button } from '../../../src/components/ui';
 import { getErrorMessage } from '../../../src/api/client';
 import { colors, typography, spacing, borders } from '../../../src/theme';
 import type { SplitResponse } from '../../../src/types/api.types';
@@ -14,19 +14,18 @@ export default function SplitsScreen() {
   const router = useRouter();
   const { data, isLoading, error } = useSplitsList();
   const deleteMutation = useDeleteSplit();
-  const [pendingDeleteSplit, setPendingDeleteSplit] = useState<SplitResponse | null>(null);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const splits = data?.splits ?? [];
 
   const handleDelete = (split: SplitResponse) => {
-    setPendingDeleteSplit(split);
+    setPendingDeleteId(split.id);
   };
 
-  const confirmDelete = async () => {
-    if (!pendingDeleteSplit) return;
+  const confirmDelete = async (split: SplitResponse) => {
     try {
-      await deleteMutation.mutateAsync(pendingDeleteSplit.id);
-      setPendingDeleteSplit(null);
+      await deleteMutation.mutateAsync(split.id);
+      setPendingDeleteId(null);
     } catch (err) {
       Alert.alert('Delete failed', getErrorMessage(err));
     }
@@ -72,6 +71,37 @@ export default function SplitsScreen() {
             {new Date(item.updated_at).toLocaleDateString()}
           </Text>
         </View>
+        {pendingDeleteId === item.id && (
+          <View style={styles.inlineConfirm}>
+            <Text style={styles.inlineConfirmText}>Delete this split?</Text>
+            <View style={styles.inlineConfirmActions}>
+              <TouchableOpacity
+                style={styles.inlineCancelBtn}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  setPendingDeleteId(null);
+                }}
+                disabled={deleteMutation.isPending}
+              >
+                <Text style={styles.inlineCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.inlineDeleteBtn}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  confirmDelete(item);
+                }}
+                disabled={deleteMutation.isPending}
+              >
+                {deleteMutation.isPending ? (
+                  <Spinner />
+                ) : (
+                  <Text style={styles.inlineDeleteText}>Delete</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
       </Card>
     </TouchableOpacity>
   );
@@ -131,35 +161,6 @@ export default function SplitsScreen() {
         />
       )}
 
-      <Modal
-        visible={!!pendingDeleteSplit}
-        onClose={() => setPendingDeleteSplit(null)}
-        title="Delete Split"
-      >
-        <Text style={styles.confirmBody}>
-          Delete "{pendingDeleteSplit?.name}"? This cannot be undone.
-        </Text>
-        <View style={styles.confirmActions}>
-          <TouchableOpacity
-            style={styles.confirmSecondary}
-            onPress={() => setPendingDeleteSplit(null)}
-            disabled={deleteMutation.isPending}
-          >
-            <Text style={styles.confirmSecondaryText}>Cancel</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.confirmPrimary}
-            onPress={confirmDelete}
-            disabled={deleteMutation.isPending}
-          >
-            {deleteMutation.isPending ? (
-              <Spinner />
-            ) : (
-              <Text style={styles.confirmPrimaryText}>Delete</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -271,42 +272,48 @@ const styles = StyleSheet.create({
     color: colors.red,
     fontSize: 14,
   },
-  confirmBody: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: spacing.lg,
-  },
-  confirmActions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  confirmSecondary: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: borders.radius.lg,
+  inlineConfirm: {
+    marginTop: 10,
     borderWidth: borders.width.thin,
     borderColor: colors.border,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: borders.radius.lg,
+    backgroundColor: colors.surfaceElevated,
+    padding: 10,
+    gap: 8,
   },
-  confirmSecondaryText: {
-    color: colors.text,
-    fontSize: 14,
+  inlineConfirmText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  inlineConfirmActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  inlineCancelBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: borders.radius.md,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+  },
+  inlineCancelText: {
+    color: colors.textSecondary,
+    fontSize: 12,
     fontWeight: '700',
   },
-  confirmPrimary: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: borders.radius.lg,
+  inlineDeleteBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: borders.radius.md,
     backgroundColor: colors.red,
+    minWidth: 70,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  confirmPrimaryText: {
+  inlineDeleteText: {
     color: colors.text,
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '700',
   },
 });

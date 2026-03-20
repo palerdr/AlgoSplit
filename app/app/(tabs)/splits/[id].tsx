@@ -23,7 +23,7 @@ import {
   useUpdateSplitExercises,
 } from '../../../src/hooks/useSplits';
 import { getErrorMessage } from '../../../src/api/client';
-import { Spinner, Card, Modal } from '../../../src/components/ui';
+import { Spinner, Card } from '../../../src/components/ui';
 import AnalysisTabView from '../../../src/components/analysis/AnalysisTabView';
 import SessionEditorMobile from '../../../src/components/splits/SessionEditorMobile';
 import {
@@ -504,6 +504,31 @@ export default function SplitDetailScreen() {
             <TouchableOpacity onPress={handleDelete} hitSlop={12}>
               <Ionicons name="trash-outline" size={20} color={colors.red} />
             </TouchableOpacity>
+            {showDeleteConfirm && (
+              <View style={styles.deletePopover}>
+                <Text style={styles.deletePopoverText}>Delete split?</Text>
+                <View style={styles.deletePopoverActions}>
+                  <TouchableOpacity
+                    style={styles.deletePopoverCancel}
+                    onPress={() => setShowDeleteConfirm(false)}
+                    disabled={deleteMutation.isPending}
+                  >
+                    <Text style={styles.deletePopoverCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.deletePopoverConfirm}
+                    onPress={confirmDelete}
+                    disabled={deleteMutation.isPending}
+                  >
+                    {deleteMutation.isPending ? (
+                      <Spinner />
+                    ) : (
+                      <Text style={styles.deletePopoverConfirmText}>Delete</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
           </View>
         </View>
       )}
@@ -713,35 +738,6 @@ export default function SplitDetailScreen() {
         ) : null}
       </ScrollView>
 
-      <Modal
-        visible={showDeleteConfirm}
-        onClose={() => setShowDeleteConfirm(false)}
-        title="Delete Split"
-      >
-        <Text style={styles.confirmBody}>
-          Delete "{split?.name}"? This cannot be undone.
-        </Text>
-        <View style={styles.confirmActions}>
-          <TouchableOpacity
-            style={styles.confirmSecondary}
-            onPress={() => setShowDeleteConfirm(false)}
-            disabled={deleteMutation.isPending}
-          >
-            <Text style={styles.confirmSecondaryText}>Cancel</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.confirmPrimary}
-            onPress={confirmDelete}
-            disabled={deleteMutation.isPending}
-          >
-            {deleteMutation.isPending ? (
-              <Spinner />
-            ) : (
-              <Text style={styles.confirmPrimaryText}>Delete</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -772,6 +768,54 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
     zIndex: 3,
+    position: 'relative',
+  },
+  deletePopover: {
+    position: 'absolute',
+    top: 28,
+    right: 0,
+    width: 180,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+    borderRadius: borders.radius.lg,
+    backgroundColor: colors.surfaceElevated,
+    padding: 10,
+    gap: 8,
+  },
+  deletePopoverText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+  },
+  deletePopoverActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  deletePopoverCancel: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: borders.radius.md,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+  },
+  deletePopoverCancelText: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  deletePopoverConfirm: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: borders.radius.md,
+    backgroundColor: colors.red,
+    minWidth: 68,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deletePopoverConfirmText: {
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '700',
   },
   cancelText: {
     color: colors.textSecondary,
@@ -1013,44 +1057,6 @@ const styles = StyleSheet.create({
   savingText: {
     color: colors.textMuted,
     fontSize: 12,
-  },
-  confirmBody: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: spacing.lg,
-  },
-  confirmActions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  confirmSecondary: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: borders.radius.lg,
-    borderWidth: borders.width.thin,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confirmSecondaryText: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  confirmPrimary: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: borders.radius.lg,
-    backgroundColor: colors.red,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confirmPrimaryText: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '700',
   },
   errorText: {
     color: colors.red,
