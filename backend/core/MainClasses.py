@@ -355,6 +355,7 @@ class MuscleRegion:
         current_session_time: float,
         consecutive_day_penalty: float = 1.0,
         collect_breakdown: bool = True,
+        precomputed_global_mult: Optional[float] = None,
     ) -> float:
         """
         Apply tiered stimulus with all modifiers.
@@ -414,8 +415,8 @@ class MuscleRegion:
             else:
                 self.quaternary_sets += 1
 
-        # 5. Global CNS fatigue multiplier
-        global_mult = self.g(global_set_number, axial_fatigue=axial_fatigue)
+        # 5. Global CNS fatigue multiplier (use precomputed value if available)
+        global_mult = precomputed_global_mult if precomputed_global_mult is not None else self.g(global_set_number, axial_fatigue=axial_fatigue)
 
         # 6. Apply consecutive day penalty (systemic fatigue from training without rest)
         # This affects the entire session uniformly
@@ -682,6 +683,15 @@ class Session:
                             'total_stimulus': 0.0,
                         }
 
+            # --- P2: Precompute CNS multiplier array ---
+            # axial_fatigue is updated once per exercise (above), not per set,
+            # so the entire CNS array can be precomputed here.
+            _current_axial = fatigue_state.axial_fatigue
+            cns_lookup = [
+                calculate_cns_fatigue(global_sets + s + 1, axial_fatigue=_current_axial)
+                for s in range(sets)
+            ]
+
             # Process each set
             for set_num in range(sets):
                 global_sets += 1
@@ -698,11 +708,12 @@ class Session:
                         hours_since_training=hours_since,
                         stimulus_duration=stimulus_duration,
                         global_set_number=global_sets,
-                        axial_fatigue=fatigue_state.axial_fatigue,
+                        axial_fatigue=_current_axial,
                         dataset=dataset,
                         current_session_time=self.time,
                         consecutive_day_penalty=consecutive_day_penalty,
                         collect_breakdown=collect_breakdowns,
+                        precomputed_global_mult=cns_lookup[set_num],
                     )
 
                     if collect_breakdowns:
