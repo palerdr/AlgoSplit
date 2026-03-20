@@ -1,10 +1,10 @@
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
+import { useState } from 'react';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSplitsList, useDeleteSplit } from '../../../src/hooks/useSplits';
-import { Spinner, Card, Button } from '../../../src/components/ui';
-import { confirm } from '../../../src/utils/confirm';
+import { Spinner, Card, Button, Modal } from '../../../src/components/ui';
 import { getErrorMessage } from '../../../src/api/client';
 import { colors, typography, spacing, borders } from '../../../src/theme';
 import type { SplitResponse } from '../../../src/types/api.types';
@@ -14,30 +14,22 @@ export default function SplitsScreen() {
   const router = useRouter();
   const { data, isLoading, error } = useSplitsList();
   const deleteMutation = useDeleteSplit();
+  const [pendingDeleteSplit, setPendingDeleteSplit] = useState<SplitResponse | null>(null);
 
   const splits = data?.splits ?? [];
 
-  const showDeleteError = (message: string) => {
-    if (Platform.OS === 'web') {
-      window.alert(`Delete failed\n\n${message}`);
-      return;
-    }
-    Alert.alert('Delete failed', message);
+  const handleDelete = (split: SplitResponse) => {
+    setPendingDeleteSplit(split);
   };
 
-  const handleDelete = (split: SplitResponse) => {
-    confirm(
-      'Delete Split',
-      `Delete "${split.name}"? This cannot be undone.`,
-      'Delete',
-      async () => {
-        try {
-          await deleteMutation.mutateAsync(split.id);
-        } catch (err) {
-          showDeleteError(getErrorMessage(err));
-        }
-      },
-    );
+  const confirmDelete = async () => {
+    if (!pendingDeleteSplit) return;
+    try {
+      await deleteMutation.mutateAsync(pendingDeleteSplit.id);
+      setPendingDeleteSplit(null);
+    } catch (err) {
+      Alert.alert('Delete failed', getErrorMessage(err));
+    }
   };
 
   const renderSplit = ({ item }: { item: SplitResponse }) => (
@@ -138,6 +130,36 @@ export default function SplitsScreen() {
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      <Modal
+        visible={!!pendingDeleteSplit}
+        onClose={() => setPendingDeleteSplit(null)}
+        title="Delete Split"
+      >
+        <Text style={styles.confirmBody}>
+          Delete "{pendingDeleteSplit?.name}"? This cannot be undone.
+        </Text>
+        <View style={styles.confirmActions}>
+          <TouchableOpacity
+            style={styles.confirmSecondary}
+            onPress={() => setPendingDeleteSplit(null)}
+            disabled={deleteMutation.isPending}
+          >
+            <Text style={styles.confirmSecondaryText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.confirmPrimary}
+            onPress={confirmDelete}
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? (
+              <Spinner />
+            ) : (
+              <Text style={styles.confirmPrimaryText}>Delete</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -248,5 +270,43 @@ const styles = StyleSheet.create({
   errorText: {
     color: colors.red,
     fontSize: 14,
+  },
+  confirmBody: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: spacing.lg,
+  },
+  confirmActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  confirmSecondary: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: borders.radius.lg,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmSecondaryText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  confirmPrimary: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: borders.radius.lg,
+    backgroundColor: colors.red,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmPrimaryText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

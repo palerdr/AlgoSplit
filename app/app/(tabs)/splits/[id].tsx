@@ -6,7 +6,6 @@ import {
   TextInput,
   StyleSheet,
   Alert,
-  Platform,
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -24,7 +23,7 @@ import {
   useUpdateSplitExercises,
 } from '../../../src/hooks/useSplits';
 import { getErrorMessage } from '../../../src/api/client';
-import { Spinner, Card } from '../../../src/components/ui';
+import { Spinner, Card, Modal } from '../../../src/components/ui';
 import AnalysisTabView from '../../../src/components/analysis/AnalysisTabView';
 import SessionEditorMobile from '../../../src/components/splits/SessionEditorMobile';
 import {
@@ -134,6 +133,7 @@ export default function SplitDetailScreen() {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
   const [editSessions, setEditSessions] = useState<SessionInput[]>([]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Collapsible detailed analysis
   const [showDetailedAnalysis, setShowDetailedAnalysis] = useState(false);
@@ -388,25 +388,18 @@ export default function SplitDetailScreen() {
   }, [isEditing, split, advMaintenanceVolume, saveAdvancedSettings]);
 
   const handleDelete = () => {
-    if (!id || !split) return;
-    confirm(
-      'Delete Split',
-      `Delete "${split.name}"? This cannot be undone.`,
-      'Delete',
-      async () => {
-        try {
-          await deleteMutation.mutateAsync(id);
-          router.replace('/(tabs)/splits');
-        } catch (err) {
-          const message = getErrorMessage(err);
-          if (Platform.OS === 'web') {
-            window.alert(`Delete failed\n\n${message}`);
-          } else {
-            Alert.alert('Delete failed', message);
-          }
-        }
-      },
-    );
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!id) return;
+    try {
+      await deleteMutation.mutateAsync(id);
+      setShowDeleteConfirm(false);
+      router.replace('/(tabs)/splits');
+    } catch (err) {
+      Alert.alert('Delete failed', getErrorMessage(err));
+    }
   };
 
   const updateSession = (index: number, session: SessionInput) => {
@@ -719,6 +712,36 @@ export default function SplitDetailScreen() {
           </>
         ) : null}
       </ScrollView>
+
+      <Modal
+        visible={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        title="Delete Split"
+      >
+        <Text style={styles.confirmBody}>
+          Delete "{split?.name}"? This cannot be undone.
+        </Text>
+        <View style={styles.confirmActions}>
+          <TouchableOpacity
+            style={styles.confirmSecondary}
+            onPress={() => setShowDeleteConfirm(false)}
+            disabled={deleteMutation.isPending}
+          >
+            <Text style={styles.confirmSecondaryText}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.confirmPrimary}
+            onPress={confirmDelete}
+            disabled={deleteMutation.isPending}
+          >
+            {deleteMutation.isPending ? (
+              <Spinner />
+            ) : (
+              <Text style={styles.confirmPrimaryText}>Delete</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -990,6 +1013,44 @@ const styles = StyleSheet.create({
   savingText: {
     color: colors.textMuted,
     fontSize: 12,
+  },
+  confirmBody: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: spacing.lg,
+  },
+  confirmActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  confirmSecondary: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: borders.radius.lg,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmSecondaryText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  confirmPrimary: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: borders.radius.lg,
+    backgroundColor: colors.red,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmPrimaryText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
   },
   errorText: {
     color: colors.red,
