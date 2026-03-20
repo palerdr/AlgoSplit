@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import DraggableFlatList from 'react-native-draggable-flatlist';
+import { NestableDraggableFlatList } from 'react-native-draggable-flatlist';
 import { colors, borders, spacing } from '../../theme';
 import ExerciseRowMobile from './ExerciseRowMobile';
 import { generateExerciseId } from '../../utils/splitEditHelpers';
@@ -86,9 +86,17 @@ export default function SessionEditorMobile({
           <TouchableOpacity
             style={styles.sessionDragHandle}
             onPress={(e) => e.stopPropagation()}
+            onPressIn={(e) => {
+              e.stopPropagation();
+              if (Platform.OS === 'web') {
+                dragSession?.();
+              }
+            }}
             onLongPress={(e) => {
               e.stopPropagation();
-              dragSession?.();
+              if (Platform.OS !== 'web') {
+                dragSession?.();
+              }
             }}
             delayLongPress={180}
             hitSlop={8}
@@ -155,7 +163,7 @@ export default function SessionEditorMobile({
       {/* Body */}
       {expanded && (
         <View style={styles.body}>
-          <DraggableFlatList
+          <NestableDraggableFlatList
             data={session.exercises}
             keyExtractor={(item, index) => item.id ?? `exercise_${index}`}
             renderItem={({ item, drag, isActive, getIndex }) => {
@@ -179,6 +187,8 @@ export default function SessionEditorMobile({
             }}
             scrollEnabled={false}
             activationDistance={14}
+            autoscrollThreshold={40}
+            autoscrollSpeed={150}
             keyboardShouldPersistTaps="handled"
             containerStyle={styles.listContainer}
             simultaneousHandlers={simultaneousHandlers}

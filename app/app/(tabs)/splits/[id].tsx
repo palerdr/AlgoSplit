@@ -8,7 +8,7 @@ import {
   Alert,
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
-import DraggableFlatList from 'react-native-draggable-flatlist';
+import { NestableDraggableFlatList, NestableScrollContainer } from 'react-native-draggable-flatlist';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -626,7 +626,7 @@ export default function SplitDetailScreen() {
         </View>
       )}
 
-      <ScrollView
+      <NestableScrollContainer
         ref={scrollRef}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -649,7 +649,7 @@ export default function SplitDetailScreen() {
             </Text>
 
             {/* Edit: Sessions */}
-            <DraggableFlatList
+            <NestableDraggableFlatList
               data={editSessions}
               keyExtractor={(item, index) => item.id ?? `session_${index}`}
               renderItem={({ item, drag, isActive, getIndex }) => {
@@ -683,6 +683,8 @@ export default function SplitDetailScreen() {
               }}
               scrollEnabled={false}
               activationDistance={14}
+              autoscrollThreshold={40}
+              autoscrollSpeed={150}
               keyboardShouldPersistTaps="handled"
               simultaneousHandlers={scrollRef}
             />
@@ -859,7 +861,7 @@ export default function SplitDetailScreen() {
             )}
           </>
         ) : null}
-      </ScrollView>
+      </NestableScrollContainer>
 
     </View>
   );
