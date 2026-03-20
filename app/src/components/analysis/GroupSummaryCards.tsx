@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { colors, borders, spacing } from '../../theme';
-import type { MuscleStats } from '../../types/api.types';
+import type { MuscleGroupSummary } from '../../types/api.types';
 
 function getStimulusColor(value: number, maxValue: number): string {
   if (maxValue <= 0) return '#4B5563';
@@ -14,18 +14,40 @@ function getStimulusColor(value: number, maxValue: number): string {
 }
 
 interface Props {
-  muscles: MuscleStats[];
+  groups: MuscleGroupSummary[];
 }
 
-export default function GroupSummaryCards({ muscles }: Props) {
-  const [activeRegion, setActiveRegion] = useState<string | null>(null);
+const GROUP_LABELS: Record<string, string> = {
+  chest: 'Chest',
+  shoulders: 'Shoulders',
+  upper_back: 'Upper Back',
+  lower_back: 'Lower Back',
+  lats: 'Lats',
+  triceps: 'Triceps',
+  elbow_flexors: 'Biceps',
+  forearms: 'Forearms',
+  glutes: 'Glutes',
+  quads: 'Quads',
+  hamstrings: 'Hamstrings',
+  calves: 'Calves',
+  adductors: 'Adductors',
+  abs: 'Abs',
+  core: 'Core',
+};
+
+function formatGroupLabel(group: string): string {
+  return GROUP_LABELS[group] ?? group.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+export default function GroupSummaryCards({ groups }: Props) {
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
 
   const sorted = useMemo(
-    () => [...muscles].sort((a, b) => b.net_stimulus - a.net_stimulus),
-    [muscles],
+    () => [...groups].sort((a, b) => b.total_net_stimulus - a.total_net_stimulus),
+    [groups],
   );
   const maxStimulus = useMemo(
-    () => Math.max(...sorted.map((m) => m.net_stimulus), 1),
+    () => Math.max(...sorted.map((group) => group.total_net_stimulus), 1),
     [sorted],
   );
 
@@ -40,31 +62,35 @@ export default function GroupSummaryCards({ muscles }: Props) {
   return (
     <View style={styles.chartCard}>
       {sorted.map((g) => {
-        const barColor = getStimulusColor(g.net_stimulus, maxStimulus);
-        const widthPct = Math.max((g.net_stimulus / maxStimulus) * 100, 3);
-        const isActive = activeRegion === g.region_id;
+        const barColor = getStimulusColor(g.total_net_stimulus, maxStimulus);
+        const widthPct = Math.max((g.total_net_stimulus / maxStimulus) * 100, 3);
+        const isActive = activeGroup === g.group;
 
         return (
           <Pressable
-            key={g.region_id}
+            key={g.group}
             style={styles.row}
-            onHoverIn={() => setActiveRegion(g.region_id)}
-            onHoverOut={() => setActiveRegion((current) => (current === g.region_id ? null : current))}
-            onPressIn={() => setActiveRegion(g.region_id)}
-            onPressOut={() => setActiveRegion((current) => (current === g.region_id ? null : current))}
+            onHoverIn={() => setActiveGroup(g.group)}
+            onHoverOut={() => setActiveGroup((current) => (current === g.group ? null : current))}
+            onPressIn={() => setActiveGroup(g.group)}
+            onPressOut={() => setActiveGroup((current) => (current === g.group ? null : current))}
           >
             <View style={styles.rowHeader}>
               <Text style={styles.groupName} numberOfLines={1}>
-                {g.display_name}
+                {formatGroupLabel(g.group)}
               </Text>
-              <Text style={styles.meta}>{g.net_stimulus.toFixed(2)}</Text>
+              <Text style={styles.meta}>{g.total_net_stimulus.toFixed(2)}</Text>
             </View>
+
+            <Text style={styles.subMeta} numberOfLines={1}>
+              {g.regions.length} regions
+            </Text>
 
             <View style={styles.track}>
               <View style={[styles.fill, { width: `${widthPct}%`, backgroundColor: barColor }]} />
               {isActive ? (
                 <View style={styles.valuePill}>
-                  <Text style={styles.valueText}>{g.net_stimulus.toFixed(2)}</Text>
+                  <Text style={styles.valueText}>{g.total_net_stimulus.toFixed(2)}</Text>
                 </View>
               ) : null}
             </View>
@@ -104,6 +130,11 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 11,
     fontWeight: '600',
+  },
+  subMeta: {
+    color: colors.textDim,
+    fontSize: 10,
+    marginTop: -2,
   },
   track: {
     height: 16,
