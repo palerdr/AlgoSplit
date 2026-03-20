@@ -5,9 +5,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  Platform,
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
-import { NestableDraggableFlatList, NestableScrollContainer } from 'react-native-draggable-flatlist';
+import DraggableFlatList, { NestableDraggableFlatList, NestableScrollContainer } from 'react-native-draggable-flatlist';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -62,7 +63,10 @@ export default function CreateSplitScreen() {
   const [isDraggingExercises, setIsDraggingExercises] = useState(false);
   const [isDraggingSessions, setIsDraggingSessions] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+  const sessionListRef = useRef<any>(null);
   const dragResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ScrollContainerComponent: any = Platform.OS === 'web' ? ScrollView : NestableScrollContainer;
+  const SessionListComponent: any = Platform.OS === 'web' ? DraggableFlatList : NestableDraggableFlatList;
 
   const handleDragStart = useCallback(() => {
     setIsDraggingExercises(true);
@@ -201,7 +205,7 @@ export default function CreateSplitScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      <NestableScrollContainer
+      <ScrollContainerComponent
         ref={scrollRef}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -222,10 +226,21 @@ export default function CreateSplitScreen() {
           Missing days are rest days. Auto cycle length ends on your last training day; a longer cycle length adds trailing rest days. Use the three-bar handle to reorder sessions.
         </Text>
 
-        <NestableDraggableFlatList
+        <SessionListComponent
+          ref={sessionListRef}
           data={sessions}
-          keyExtractor={(item, index) => item.id ?? `session_${index}`}
-          renderItem={({ item, drag, isActive, getIndex }) => {
+          keyExtractor={(item: SessionInput, index: number) => item.id ?? `session_${index}`}
+          renderItem={({
+            item,
+            drag,
+            isActive,
+            getIndex,
+          }: {
+            item: SessionInput;
+            drag: () => void;
+            isActive: boolean;
+            getIndex: () => number | undefined;
+          }) => {
             const index = getIndex() ?? 0;
             return (
               <SessionEditorMobile
@@ -233,7 +248,7 @@ export default function CreateSplitScreen() {
                 onUpdate={(session) => updateSession(item.id, index, session)}
                 onRemove={() => removeSession(item.id, index)}
                 canRemove={sessions.length > 1}
-                simultaneousHandlers={scrollRef}
+                simultaneousHandlers={[scrollRef, sessionListRef]}
                 dragSession={drag}
                 isSessionActive={isActive}
                 onDragStart={handleDragStart}
@@ -243,11 +258,11 @@ export default function CreateSplitScreen() {
           }}
           onDragBegin={handleSessionDragStart}
           onRelease={handleSessionDragEnd}
-          onDragEnd={({ data }) => {
+          onDragEnd={({ data }: { data: SessionInput[] }) => {
             const daySlots = [...sessions]
               .map((session) => session.day)
               .sort((a, b) => a - b);
-            const reordered = data.map((session, index) => ({
+            const reordered = data.map((session: SessionInput, index: number) => ({
               ...session,
               day: daySlots[index] ?? Math.min(index + 1, 7),
             }));
@@ -329,7 +344,7 @@ export default function CreateSplitScreen() {
           loading={createMutation.isPending}
           style={styles.saveBtn}
         />
-      </NestableScrollContainer>
+      </ScrollContainerComponent>
     </View>
   );
 }

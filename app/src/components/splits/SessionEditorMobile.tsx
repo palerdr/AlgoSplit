@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { NestableDraggableFlatList } from 'react-native-draggable-flatlist';
+import DraggableFlatList, { NestableDraggableFlatList } from 'react-native-draggable-flatlist';
 import { colors, borders, spacing } from '../../theme';
 import ExerciseRowMobile from './ExerciseRowMobile';
 import { generateExerciseId } from '../../utils/splitEditHelpers';
@@ -33,6 +33,7 @@ export default function SessionEditorMobile({
   onDragEnd,
 }: Props) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  const ExerciseListComponent: any = Platform.OS === 'web' ? DraggableFlatList : NestableDraggableFlatList;
 
   useEffect(() => {
     if (session.exercises.some((exercise) => !exercise.id)) {
@@ -163,10 +164,20 @@ export default function SessionEditorMobile({
       {/* Body */}
       {expanded && (
         <View style={styles.body}>
-          <NestableDraggableFlatList
+          <ExerciseListComponent
             data={session.exercises}
-            keyExtractor={(item, index) => item.id ?? `exercise_${index}`}
-            renderItem={({ item, drag, isActive, getIndex }) => {
+            keyExtractor={(item: ExerciseInput, index: number) => item.id ?? `exercise_${index}`}
+            renderItem={({
+              item,
+              drag,
+              isActive,
+              getIndex,
+            }: {
+              item: ExerciseInput;
+              drag: () => void;
+              isActive: boolean;
+              getIndex: () => number | undefined;
+            }) => {
               const index = getIndex() ?? 0;
               return (
                 <ExerciseRowMobile
@@ -181,7 +192,7 @@ export default function SessionEditorMobile({
             }}
             onDragBegin={() => onDragStart?.()}
             onRelease={() => onDragEnd?.()}
-            onDragEnd={({ data }) => {
+            onDragEnd={({ data }: { data: ExerciseInput[] }) => {
               onUpdate({ ...session, exercises: data });
               onDragEnd?.();
             }}
