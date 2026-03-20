@@ -24,7 +24,8 @@ import {
   useUpdateSplitExercises,
 } from '../../../src/hooks/useSplits';
 import { getErrorMessage } from '../../../src/api/client';
-import { Spinner, Card } from '../../../src/components/ui';
+import { Spinner, Card, InfoButton } from '../../../src/components/ui';
+import { HELP_CONTENT } from '../../../src/data/helpContent';
 import AnalysisTabView from '../../../src/components/analysis/AnalysisTabView';
 import SessionEditorMobile from '../../../src/components/splits/SessionEditorMobile';
 import {
@@ -572,9 +573,12 @@ export default function SplitDetailScreen() {
           <TouchableOpacity onPress={() => router.replace('/(tabs)/splits')} hitSlop={12}>
             <Ionicons name="chevron-back" size={24} color={colors.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {split.name}
-          </Text>
+          <View style={styles.headerTitleRow}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {split.name}
+            </Text>
+            <InfoButton title={HELP_CONTENT['splits.analysisOverview'].title} body={HELP_CONTENT['splits.analysisOverview'].body} />
+          </View>
           <View style={styles.headerActions}>
             <TouchableOpacity onPress={enterEditMode} hitSlop={12}>
               <Ionicons name="pencil" size={20} color={colors.textSecondary} />
@@ -770,6 +774,7 @@ export default function SplitDetailScreen() {
               onPress={() => setShowDetailedAnalysis(!showDetailedAnalysis)}
             >
               <Text style={styles.detailedToggleText}>Detailed Analysis</Text>
+              <InfoButton title={HELP_CONTENT['splits.detailedAnalysis'].title} body={HELP_CONTENT['splits.detailedAnalysis'].body} />
               <Ionicons
                 name={showDetailedAnalysis ? 'chevron-up' : 'chevron-down'}
                 size={16}
@@ -862,13 +867,20 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     zIndex: 2,
   },
+  headerTitleRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginHorizontal: 12,
+  },
   headerTitle: {
     color: colors.text,
     fontSize: 18,
     fontWeight: '700',
-    flex: 1,
+    flexShrink: 1,
     textAlign: 'center',
-    marginHorizontal: 12,
   },
   headerActions: {
     flexDirection: 'row',

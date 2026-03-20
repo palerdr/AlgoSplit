@@ -4,7 +4,8 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSplitsList, useDeleteSplit } from '../../../src/hooks/useSplits';
-import { Spinner, Card, Button } from '../../../src/components/ui';
+import { Spinner, Card, Button, InfoButton } from '../../../src/components/ui';
+import { HELP_CONTENT } from '../../../src/data/helpContent';
 import { getErrorMessage } from '../../../src/api/client';
 import { colors, typography, spacing, borders } from '../../../src/theme';
 import type { SplitResponse } from '../../../src/types/api.types';
@@ -109,7 +110,10 @@ export default function SplitsScreen() {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Splits</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>Splits</Text>
+          <InfoButton title={HELP_CONTENT['splits.overview'].title} body={HELP_CONTENT['splits.overview'].body} />
+        </View>
         <View style={styles.headerActions}>
           <TouchableOpacity
             style={styles.compareBtn}
@@ -181,6 +185,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   title: {
     ...typography.h2,

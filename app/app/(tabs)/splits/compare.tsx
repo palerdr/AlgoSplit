@@ -3,7 +3,8 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Input, Spinner } from '../../../src/components/ui';
+import { InfoButton, Input, Spinner } from '../../../src/components/ui';
+import { HELP_CONTENT } from '../../../src/data/helpContent';
 import SummaryTable from '../../../src/components/compare/SummaryTable';
 import RadarComparisonChart from '../../../src/components/compare/RadarComparisonChart';
 import CompareViewSwitcher, {
@@ -121,7 +122,10 @@ export default function CompareSplitsScreen() {
         <TouchableOpacity onPress={() => router.replace('/(tabs)/splits')} hitSlop={8}>
           <Ionicons name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.title}>Compare Splits</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>Compare Splits</Text>
+          <InfoButton title={HELP_CONTENT['compare.overview'].title} body={HELP_CONTENT['compare.overview'].body} />
+        </View>
         <View style={styles.headerSpacer} />
       </View>
       <Text style={styles.subtitle}>Select two or three splits, then run analysis side by side.</Text>
@@ -264,12 +268,19 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 24,
   },
+  titleRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginHorizontal: 12,
+  },
   title: {
     ...typography.h2,
     color: colors.text,
-    flex: 1,
+    flexShrink: 1,
     textAlign: 'center',
-    marginHorizontal: 12,
   },
   subtitle: {
     color: colors.textSecondary,

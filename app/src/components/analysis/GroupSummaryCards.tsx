@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, TouchableOpacity } from 'react-native';
 import { colors, borders, spacing } from '../../theme';
+import { InfoButton } from '../ui';
+import { HELP_CONTENT } from '../../data/helpContent';
 import type { MuscleStats } from '../../types/api.types';
 
 type MetricMode = 'raw' | 'net';
@@ -44,6 +46,7 @@ export default function GroupSummaryCards({ muscles }: Props) {
     <View style={styles.chartCard}>
       <View style={styles.headerRow}>
         <Text style={styles.headerTitle}>Stimulus by Region</Text>
+        <InfoButton title={HELP_CONTENT['splits.stimulusByGroup'].title} body={HELP_CONTENT['splits.stimulusByGroup'].body} size={15} />
         <View style={styles.toggleWrap}>
           <TouchableOpacity
             style={[styles.toggleBtn, metricMode === 'raw' && styles.toggleBtnActive]}

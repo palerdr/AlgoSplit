@@ -3,7 +3,8 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { colors, borders, spacing } from '../../theme';
 import GroupSummaryCards from './GroupSummaryCards';
 import StimulusBreakdownMobile from './StimulusBreakdownMobile';
-import { Spinner } from '../ui';
+import { InfoButton, Spinner } from '../ui';
+import { HELP_CONTENT } from '../../data/helpContent';
 import { useSplitAnalysisWithBreakdowns } from '../../hooks/useSplits';
 import type { AnalysisResponse } from '../../types/api.types';
 
@@ -26,8 +27,9 @@ export default function AnalysisTabView({ splitId, analysis }: Props) {
 
   return (
     <View>
-      <View style={styles.tabBar}>
-        {TABS.map((tab) => (
+      <View style={styles.tabRow}>
+        <View style={styles.tabBar}>
+          {TABS.map((tab) => (
           <TouchableOpacity
             key={tab}
             style={[styles.tab, activeTab === tab && styles.tabActive]}
@@ -38,6 +40,8 @@ export default function AnalysisTabView({ splitId, analysis }: Props) {
             </Text>
           </TouchableOpacity>
         ))}
+        </View>
+        <InfoButton title={HELP_CONTENT['splits.regionsTabs'].title} body={HELP_CONTENT['splits.regionsTabs'].body} size={15} />
       </View>
 
       <View style={styles.content}>
@@ -54,10 +58,16 @@ export default function AnalysisTabView({ splitId, analysis }: Props) {
 }
 
 const styles = StyleSheet.create({
+  tabRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: spacing.md,
+  },
   tabBar: {
+    flex: 1,
     flexDirection: 'row',
     gap: 4,
-    marginBottom: spacing.md,
     backgroundColor: colors.surface,
     borderRadius: borders.radius.lg,
     padding: 3,

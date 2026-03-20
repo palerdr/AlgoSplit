@@ -21,6 +21,8 @@ import {
   useDeleteCustomExercise,
 } from '../../../src/hooks/useCustomExercises';
 import { colors, borders } from '../../../src/theme';
+import { InfoButton } from '../../../src/components/ui';
+import { HELP_CONTENT } from '../../../src/data/helpContent';
 import type { CustomExerciseResponse, CustomExerciseCreate } from '../../../src/types/api.types';
 
 // ─── Canonical muscle regions grouped for the picker ─────────────
@@ -448,6 +450,7 @@ export default function ExercisesScreen() {
           {/* Muscle Targets */}
           <View style={styles.sumRow}>
             <Text style={styles.fieldLabel}>Muscle Targets</Text>
+            <InfoButton title={HELP_CONTENT['exercises.muscleTargets'].title} body={HELP_CONTENT['exercises.muscleTargets'].body} />
             <Text style={[styles.sumBadge, isValidSum ? styles.sumValid : styles.sumInvalid]}>
               Sum: {weightSum.toFixed(2)} / 1.00
             </Text>
@@ -520,7 +523,10 @@ export default function ExercisesScreen() {
           />
 
           {/* Resistance Profile */}
-          <Text style={styles.fieldLabel}>Resistance Profile</Text>
+          <View style={styles.resistanceLabelRow}>
+            <Text style={styles.fieldLabel}>Resistance Profile</Text>
+            <InfoButton title={HELP_CONTENT['exercises.resistanceProfile'].title} body={HELP_CONTENT['exercises.resistanceProfile'].body} />
+          </View>
           <View style={styles.segmented}>
             {RESISTANCE_PROFILES.map((rp) => {
               const active = rp.key === resistanceProfile;
@@ -558,7 +564,10 @@ export default function ExercisesScreen() {
         <TouchableOpacity onPress={() => router.replace('/splits')} hitSlop={8}>
           <Ionicons name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Custom Exercises</Text>
+        <View style={styles.headerTitleRow}>
+          <Text style={styles.headerTitle}>Custom Exercises</Text>
+          <InfoButton title={HELP_CONTENT['exercises.customOverview'].title} body={HELP_CONTENT['exercises.customOverview'].body} />
+        </View>
         <TouchableOpacity onPress={() => { resetForm(); setShowForm(true); }} hitSlop={8}>
           <Ionicons name="add-circle-outline" size={24} color={colors.green} />
         </TouchableOpacity>
@@ -649,7 +658,9 @@ const styles = StyleSheet.create({
   },
 
   // Weight sum badge
-  sumRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  sumRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 6 },
+  resistanceLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   sumBadge: { fontSize: 12, fontWeight: '700', fontVariant: ['tabular-nums'], paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, overflow: 'hidden' },
   sumValid: { backgroundColor: 'rgba(74, 222, 128, 0.15)', color: colors.green },
   sumInvalid: { backgroundColor: 'rgba(239, 68, 68, 0.15)', color: colors.red },

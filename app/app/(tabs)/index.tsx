@@ -4,7 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
 import { DateSelector, DialGauge, InsightCard } from '../../src/components/shared';
 import InteractiveBody from '../../src/components/3d/InteractiveBody';
-import { Modal, Spinner } from '../../src/components/ui';
+import { Modal, Spinner, InfoButton } from '../../src/components/ui';
+import { HELP_CONTENT } from '../../src/data/helpContent';
 import { useRecentStimulus, useWorkoutDates, useRecentWorkoutPair } from '../../src/hooks/useWorkouts';
 import { startPerfSpan } from '../../src/dev/perfTrace';
 import { useSettingsStore } from '../../src/stores/settingsStore';
@@ -181,6 +182,9 @@ export default function DashboardScreen() {
           isDesktop ? (
             <View style={[styles.mainRow, styles.mainRowDesktop]}>
               <View style={[styles.bodyContainer, { width: bodyWidth, height: bodyHeight }]}>
+                <View style={styles.helpOverlay}>
+                  <InfoButton title={HELP_CONTENT['dashboard.bodyMap'].title} body={HELP_CONTENT['dashboard.bodyMap'].body} />
+                </View>
                 {body3dReady ? (
                   <InteractiveBody
                     width={bodyWidth}
@@ -195,6 +199,7 @@ export default function DashboardScreen() {
                 )}
               </View>
               <View style={styles.dialsDesktop}>
+                <InfoButton title={HELP_CONTENT['dashboard.dials'].title} body={HELP_CONTENT['dashboard.dials'].body} />
                 {dialsReady && (
                   <>
                     <DialGauge
@@ -233,6 +238,9 @@ export default function DashboardScreen() {
           ) : (
             <View style={styles.mainColumnMobile}>
               <View style={[styles.bodyContainer, { width: bodyWidth, height: bodyHeight }]}>
+                <View style={styles.helpOverlay}>
+                  <InfoButton title={HELP_CONTENT['dashboard.bodyMap'].title} body={HELP_CONTENT['dashboard.bodyMap'].body} />
+                </View>
                 {body3dReady ? (
                   <InteractiveBody
                     width={bodyWidth}
@@ -278,6 +286,7 @@ export default function DashboardScreen() {
                     />
                   </>
                 )}
+                <InfoButton title={HELP_CONTENT['dashboard.dials'].title} body={HELP_CONTENT['dashboard.dials'].body} />
               </View>
             </View>
           )
@@ -375,6 +384,12 @@ const styles = StyleSheet.create({
   },
   bodyContainer: {
     alignItems: 'center',
+  },
+  helpOverlay: {
+    position: 'absolute' as const,
+    top: 4,
+    right: 4,
+    zIndex: 10,
   },
   bodyPlaceholder: {
     backgroundColor: '#141414',

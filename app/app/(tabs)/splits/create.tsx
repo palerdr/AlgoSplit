@@ -11,7 +11,8 @@ import DraggableFlatList from 'react-native-draggable-flatlist';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Button, Input } from '../../../src/components/ui';
+import { Button, InfoButton, Input } from '../../../src/components/ui';
+import { HELP_CONTENT } from '../../../src/data/helpContent';
 import SessionEditorMobile from '../../../src/components/splits/SessionEditorMobile';
 import { useCreateSplit } from '../../../src/hooks/useSplits';
 import { useSettingsStore } from '../../../src/stores/settingsStore';
@@ -193,7 +194,10 @@ export default function CreateSplitScreen() {
         <TouchableOpacity onPress={() => router.replace('/(tabs)/splits')} hitSlop={8}>
           <Ionicons name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Create Split</Text>
+        <View style={styles.headerTitleRow}>
+          <Text style={styles.headerTitle}>Create Split</Text>
+          <InfoButton title={HELP_CONTENT['splits.overview'].title} body={HELP_CONTENT['splits.overview'].body} />
+        </View>
         <View style={{ width: 24 }} />
       </View>
 
@@ -266,6 +270,7 @@ export default function CreateSplitScreen() {
           onPress={() => setShowAdvanced(!showAdvanced)}
         >
           <Text style={styles.advancedToggleText}>Advanced Settings</Text>
+          <InfoButton title={HELP_CONTENT['splits.detailedAnalysis'].title} body={HELP_CONTENT['splits.detailedAnalysis'].body} />
           <Ionicons
             name={showAdvanced ? 'chevron-up' : 'chevron-down'}
             size={16}
@@ -338,6 +343,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   headerTitle: {
     ...typography.h3,

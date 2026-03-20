@@ -10,6 +10,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, borders, spacing } from '../../theme';
 import { EXERCISE_DATABASE, findExercise } from '../../data/exercises';
 import { useCustomExercises } from '../../hooks/useCustomExercises';
+import { InfoButton } from '../ui';
+import { HELP_CONTENT } from '../../data/helpContent';
 import type { ExerciseInput } from '../../types/api.types';
 
 const STATIC_EXERCISE_NAMES = [
@@ -142,6 +144,7 @@ export default function ExerciseRowMobile({
             UNI
           </Text>
         </TouchableOpacity>
+        <InfoButton title={HELP_CONTENT['exercises.unilateral'].title} body={HELP_CONTENT['exercises.unilateral'].body} size={14} />
 
         <View style={styles.resistancePills}>
           {RESISTANCE_PROFILES.map((p) => (
@@ -163,6 +166,7 @@ export default function ExerciseRowMobile({
             </TouchableOpacity>
           ))}
         </View>
+        <InfoButton title={HELP_CONTENT['exercises.resistanceProfile'].title} body={HELP_CONTENT['exercises.resistanceProfile'].body} size={14} />
 
         <View style={styles.setsStepper}>
           <TouchableOpacity

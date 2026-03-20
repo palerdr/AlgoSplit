@@ -5,7 +5,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useWorkoutHistorySummaries } from '../../../src/hooks/useWorkouts';
 import { startPerfSpan } from '../../../src/dev/perfTrace';
-import { Spinner } from '../../../src/components/ui';
+import { Spinner, InfoButton } from '../../../src/components/ui';
+import { HELP_CONTENT } from '../../../src/data/helpContent';
 import ProgressTabPanel from '../../../src/components/progress/ProgressTabPanel';
 import { colors, borders, spacing } from '../../../src/theme';
 import type { WorkoutSummaryResponse } from '../../../src/types/api.types';
@@ -74,7 +75,10 @@ export default function HistoryScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <Text style={styles.title}>History</Text>
+      <View style={styles.titleRow}>
+        <Text style={styles.title}>History</Text>
+        <InfoButton title={HELP_CONTENT['history.overview'].title} body={HELP_CONTENT['history.overview'].body} />
+      </View>
       <View style={styles.switchRow}>
         <TouchableOpacity
           style={[styles.switchBtn, activeView === 'progress' && styles.switchBtnActive]}
@@ -131,12 +135,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.bg,
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+  },
   title: {
     color: colors.text,
     fontSize: 28,
     fontWeight: '800',
-    paddingHorizontal: 20,
-    paddingTop: 8,
     paddingBottom: 10,
   },
   switchRow: {
