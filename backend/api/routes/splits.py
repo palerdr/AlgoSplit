@@ -899,7 +899,7 @@ async def analyze_split(
 
         # Convert to analysis format (using correct model names)
         from schemas.models import SplitRequest, SessionInput, ExerciseInput
-        from api.analysis_routes import analyze_split as run_analysis
+        from api.analysis_routes import _run_split_analysis
 
         # Build sessions for analysis
         analysis_sessions = []
@@ -932,8 +932,10 @@ async def analyze_split(
             include_breakdowns=include_breakdowns,
         )
 
-        # Run analysis using existing endpoint logic
-        return await run_analysis(split_request)
+        # Run analysis using existing endpoint logic, but include the current
+        # user so custom exercises created in mobile/web both resolve through
+        # move_match_with_overrides during stimulus calculation.
+        return _run_split_analysis(split_request, current_user.id)
 
     except HTTPException:
         raise

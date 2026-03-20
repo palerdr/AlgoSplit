@@ -9,7 +9,7 @@ from collections import defaultdict
 import numpy as np
 from typing import Dict, List, Set, Optional, Any, Tuple
 
-from .movementMatching import move_match
+from .exerciseMatching import move_match_with_overrides
 from .muscle_regions import get_all_muscle_regions, MuscleRegionData, LEGACY_MUSCLE_MAPPING
 from .stimulus_tiers import (
     StimulusTier,
@@ -514,7 +514,7 @@ class MuscleRegion:
 class Session:
     """Represents a single training session within a split."""
 
-    def __init__(self, name: str, day: int, exercises: Dict[str, Any]):
+    def __init__(self, name: str, day: int, exercises: Dict[str, Any], user_id: Optional[str] = None):
         """
         Args:
             name: Session name
@@ -525,6 +525,7 @@ class Session:
                 - tuple of 3: (sets, unilateral_flag, resistance_profile_override)
         """
         self.name = name
+        self.user_id = user_id
         self.time = (day - 1) * 24  # Hours into the split/cycle
         # Normalize exercises to always have (sets, unilateral, resistance_profile) format
         self.exercises = {}
@@ -755,7 +756,7 @@ class Session:
         Returns tuple of (pattern_name, tiered_targets, is_bilateral, is_unilateral, axial_load, resistance_profile)
         """
         # First try legacy matcher to get pattern name
-        pattern = move_match(exercise_name)
+        pattern = move_match_with_overrides(exercise_name, self.user_id)
         if not pattern:
             return (None, {}, False, False, 0.0, resistance_profile_override or 'mid')
 
@@ -850,12 +851,14 @@ class Split:
         stimulus_duration: int,
         maintenance_volume: int,
         dataset: str,
-        cycle_length: Optional[int] = None
+        cycle_length: Optional[int] = None,
+        user_id: Optional[str] = None,
     ):
         self.name = name
         self.stimulus_duration = stimulus_duration
         self.maintenance_volume = maintenance_volume
         self.dataset = dataset
+        self.user_id = user_id
 
         # Cycle length can be explicitly set, or defaults to max day number
         # e.g., Full Body every other day = cycle_length of 2 (train, rest, repeat)
@@ -865,7 +868,7 @@ class Split:
             self.cycle_length = max(day for _, day, _ in days) if days else 7
 
         # Create sessions from day tuples
-        self.days = [Session(name, day, exercises) for name, day, exercises in days]
+        self.days = [Session(name, day, exercises, user_id=user_id) for name, day, exercises in days]
 
         # Initialize muscles
         self._init_muscles()

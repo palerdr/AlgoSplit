@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 import api.analysis_routes as analysis_routes
 import api.routes.splits as splits_routes
+import core.MainClasses as main_classes
 from schemas.splits import ExerciseResponse, SessionResponse, SplitResponse
 
 
@@ -140,12 +141,12 @@ def test_analyze_saved_split_passes_include_breakdowns_query(monkeypatch, client
 
     captured = {"include_breakdowns": None}
 
-    async def fake_run_analysis(request):
+    def fake_run_analysis(request, user_id=None):
         captured["include_breakdowns"] = request.include_breakdowns
         return {"ok": True, "include_breakdowns": request.include_breakdowns}
 
     monkeypatch.setattr(splits_routes, "get_split", fake_get_split)
-    monkeypatch.setattr(analysis_routes, "analyze_split", fake_run_analysis)
+    monkeypatch.setattr(analysis_routes, "_run_split_analysis", fake_run_analysis)
 
     response = client.post("/api/splits/split-1/analyze?include_breakdowns=true")
     assert response.status_code == 200
@@ -194,6 +195,56 @@ def test_create_split_rejects_day_above_7(client):
     response = client.post("/api/splits", json=payload)
 
     assert response.status_code == 422
+
+
+def test_analyze_saved_split_uses_custom_exercise_overrides(monkeypatch, client):
+    def fake_match(name: str, user_id: str | None = None):
+        if name == "Mobile Custom Fly" and user_id == "user-123":
+            return type(
+                "Movement",
+                (),
+                {
+                    "name": "custom:mobile_custom_fly",
+                    "targets": {"sternocostal": 1.0},
+                    "resistance_profile": "mid",
+                    "unilateral": False,
+                    "tiered_targets": {
+                        "prime": {"sternocostal": 1.0},
+                        "secondary": {},
+                        "tertiary": {},
+                        "quaternary": {},
+                    },
+                    "axial_load": 0.0,
+                },
+            )()
+        return None
+
+    monkeypatch.setattr(splits_routes, "move_match_with_overrides", fake_match)
+    monkeypatch.setattr(main_classes, "move_match_with_overrides", fake_match)
+
+    create_resp = client.post(
+        "/api/splits",
+        json={
+            "name": "Custom Analysis",
+            "stimulus_duration": 48,
+            "maintenance_volume": 4,
+            "dataset": "average",
+            "sessions": [
+                {
+                    "name": "Day A",
+                    "day_number": 1,
+                    "exercises": [{"name": "Mobile Custom Fly", "sets": 3}],
+                }
+            ],
+        },
+    )
+    split_id = create_resp.json()["id"]
+
+    response = client.post(f"/api/splits/{split_id}/analyze")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert any(muscle["region_id"] == "sternocostal" for muscle in body["muscles"])
 
 
 def test_update_split_allows_clearing_cycle_length(client):

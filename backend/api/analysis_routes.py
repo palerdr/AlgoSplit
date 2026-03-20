@@ -93,32 +93,34 @@ async def analyze_split(request: SplitRequest):
     (prime/secondary/tertiary movers).
     """
     try:
-        # Convert request sessions to Split format
-        # Now includes unilateral and resistance_profile as tuple: (sets, unilateral, resistance_profile)
-        days = []
-        for session in request.sessions:
-            # Pass exercises as dict with tuple values for unilateral/resistance_profile support
-            exercises_dict = {
-                ex.name: (ex.sets, ex.unilateral, ex.resistance_profile)
-                for ex in session.exercises
-            }
-            days.append((session.name, session.day, exercises_dict))
-
-        # Create and simulate split
-        split = Split(
-            name=request.name,
-            days=days,
-            stimulus_duration=request.stimulus_duration,
-            maintenance_volume=request.maintenance_volume,
-            dataset=request.dataset,
-            cycle_length=request.cycle_length
-        )
-        split.simulate_split(collect_breakdowns=request.include_breakdowns)
-
-        return _build_response(split, request)
-
+        return _run_split_analysis(request)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error analyzing split: {str(e)}")
+
+
+def _run_split_analysis(request: SplitRequest, user_id: Optional[str] = None) -> AnalysisResponse:
+    # Convert request sessions to Split format
+    # Now includes unilateral and resistance_profile as tuple: (sets, unilateral, resistance_profile)
+    days = []
+    for session in request.sessions:
+        exercises_dict = {
+            ex.name: (ex.sets, ex.unilateral, ex.resistance_profile)
+            for ex in session.exercises
+        }
+        days.append((session.name, session.day, exercises_dict))
+
+    split = Split(
+        name=request.name,
+        days=days,
+        stimulus_duration=request.stimulus_duration,
+        maintenance_volume=request.maintenance_volume,
+        dataset=request.dataset,
+        cycle_length=request.cycle_length,
+        user_id=user_id,
+    )
+    split.simulate_split(collect_breakdowns=request.include_breakdowns)
+
+    return _build_response(split, request)
 
 
 @router.post("/analyze-workouts", response_model=AnalysisResponse)
@@ -195,6 +197,7 @@ async def analyze_workouts(
             maintenance_volume=maintenance_volume,
             dataset=dataset,
             now=window_end,
+            user_id=current_user.id,
         )
 
         # Store in cache
@@ -243,6 +246,7 @@ def _build_workout_analysis(
     maintenance_volume: int = 3,
     dataset: str = "schoenfeld",
     now: Optional[datetime] = None,
+    user_id: Optional[str] = None,
 ) -> AnalysisResponse:
     """Pure transform: workout + exercise rows → AnalysisResponse.
 
@@ -305,6 +309,7 @@ def _build_workout_analysis(
         maintenance_volume=maintenance_volume,
         dataset=dataset,
         cycle_length=effective_cycle,
+        user_id=user_id,
     )
     split.simulate_split(collect_breakdowns=False)
 
