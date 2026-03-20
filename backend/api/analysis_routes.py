@@ -143,15 +143,9 @@ def _run_split_analysis(request: SplitRequest, user_id: Optional[str] = None) ->
         user_id=user_id,
         user_exercise_maps=user_exercise_maps,
     )
-    _t0 = _time.perf_counter()
     split.simulate_split(collect_breakdowns=request.include_breakdowns)
-    _t1 = _time.perf_counter()
-    print(f"[PERF] simulate_split: {(_t1-_t0)*1000:.1f}ms  breakdowns={request.include_breakdowns}")
 
-    _t2 = _time.perf_counter()
     response = _build_response(split, request)
-    _t3 = _time.perf_counter()
-    print(f"[PERF] _build_response: {(_t3-_t2)*1000:.1f}ms  total={(_t3-_t0)*1000:.1f}ms")
 
     if user_id:
         with _analysis_cache_lock:

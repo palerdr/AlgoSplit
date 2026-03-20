@@ -8,7 +8,6 @@ using a granular 29-region anatomical muscle model.
 from collections import defaultdict
 from dataclasses import dataclass
 import numpy as np
-import time as _time
 from typing import Dict, List, Set, Optional, Any, Tuple
 
 from .exerciseMatching import move_match_with_overrides
@@ -603,7 +602,6 @@ class Session:
             fatigue_state = GlobalFatigueState()
 
         global_sets = 0
-        _apply_stimulus_calls = 0
         session_stats = {
             'axial_fatigue': 0.0,
             'bilateral_compound_sets': 0,
@@ -719,7 +717,6 @@ class Session:
                 fatigue_state.add_sets(1)
 
                 for muscle, muscle_id, weight, tier, hours_since in work_items:
-                    _apply_stimulus_calls += 1
                     stimulus = muscle.apply_stimulus(
                         stimulus_amount=weight,
                         tier=tier,
@@ -785,7 +782,6 @@ class Session:
                 global_sets, axial_fatigue=fatigue_state.axial_fatigue
             )
 
-        print(f"[PERF] Session.execute '{self.name}': {global_sets} sets, {_apply_stimulus_calls} apply_stimulus calls")
         return session_stats
 
     def _get_exercise_pattern(
@@ -977,7 +973,6 @@ class Split:
         weeks_to_sim = int(np.lcm(self.cycle_length, 7) / 7)
         total_days = weeks_to_sim * 7
         num_cycles = int(total_days / self.cycle_length)
-        print(f"[PERF] simulate_split: cycle_length={self.cycle_length} weeks_to_sim={weeks_to_sim} num_cycles={num_cycles}")
 
         # Track weekly results
         weekly_results = {muscle_name: [] for muscle_name in self.muscles.keys()}
