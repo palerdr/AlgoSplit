@@ -20,6 +20,23 @@ interface Props {
   onDragEnd?: () => void;
 }
 
+function reorderExercises(
+  previous: ExerciseInput[],
+  activeId: string,
+  targetId: string,
+): ExerciseInput[] {
+  const fromIndex = previous.findIndex((exercise) => exercise.id === activeId);
+  const toIndex = previous.findIndex((exercise) => exercise.id === targetId);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
+    return previous;
+  }
+
+  const reordered = [...previous];
+  const [moved] = reordered.splice(fromIndex, 1);
+  reordered.splice(toIndex, 0, moved);
+  return reordered;
+}
+
 export default function SessionEditorMobile({
   session,
   onUpdate,
@@ -33,7 +50,9 @@ export default function SessionEditorMobile({
   onDragEnd,
 }: Props) {
   const [expanded, setExpanded] = useState(defaultExpanded);
-  const ExerciseListComponent: any = Platform.OS === 'web' ? DraggableFlatList : NestableDraggableFlatList;
+  const [draggingExerciseId, setDraggingExerciseId] = useState<string | null>(null);
+  const isWeb = Platform.OS === 'web';
+  const ExerciseListComponent: any = isWeb ? DraggableFlatList : NestableDraggableFlatList;
 
   useEffect(() => {
     if (session.exercises.some((exercise) => !exercise.id)) {
@@ -45,6 +64,23 @@ export default function SessionEditorMobile({
       });
     }
   }, [session, onUpdate]);
+
+  useEffect(() => {
+    if (!isWeb || !draggingExerciseId || typeof window === 'undefined') return;
+
+    const stopExerciseDrag = () => {
+      setDraggingExerciseId(null);
+      onDragEnd?.();
+    };
+
+    window.addEventListener('pointerup', stopExerciseDrag);
+    window.addEventListener('mouseup', stopExerciseDrag);
+
+    return () => {
+      window.removeEventListener('pointerup', stopExerciseDrag);
+      window.removeEventListener('mouseup', stopExerciseDrag);
+    };
+  }, [draggingExerciseId, isWeb, onDragEnd]);
 
   const totalSets = session.exercises.reduce((sum, e) => sum + e.sets, 0);
 
@@ -77,6 +113,15 @@ export default function SessionEditorMobile({
       exercises: [...session.exercises, { id: generateExerciseId(), name: '', sets: 3 }],
     });
   }, [session, onUpdate]);
+
+  const handleWebExerciseHover = useCallback((targetId: string) => {
+    if (!draggingExerciseId || draggingExerciseId === targetId) return;
+
+    onUpdate({
+      ...session,
+      exercises: reorderExercises(session.exercises, draggingExerciseId, targetId),
+    });
+  }, [draggingExerciseId, onUpdate, session]);
 
   return (
     <View style={styles.container}>
@@ -164,46 +209,70 @@ export default function SessionEditorMobile({
       {/* Body */}
       {expanded && (
         <View style={styles.body}>
-          <ExerciseListComponent
-            data={session.exercises}
-            keyExtractor={(item: ExerciseInput, index: number) => item.id ?? `exercise_${index}`}
-            renderItem={({
-              item,
-              drag,
-              isActive,
-              getIndex,
-            }: {
-              item: ExerciseInput;
-              drag: () => void;
-              isActive: boolean;
-              getIndex: () => number | undefined;
-            }) => {
-              const index = getIndex() ?? 0;
+          {isWeb ? (
+            session.exercises.map((item, index) => {
+              const exerciseId = item.id ?? `exercise_${index}`;
               return (
-                <ExerciseRowMobile
-                  exercise={item}
-                  index={index}
-                  onUpdate={(ex) => updateExercise(item.id, index, ex)}
-                  onRemove={() => removeExercise(item.id, index)}
-                  drag={drag}
-                  isActive={isActive}
-                />
+                <View
+                  key={exerciseId}
+                  onPointerEnter={() => handleWebExerciseHover(exerciseId)}
+                >
+                  <ExerciseRowMobile
+                    exercise={item}
+                    index={index}
+                    onUpdate={(ex) => updateExercise(item.id, index, ex)}
+                    onRemove={() => removeExercise(item.id, index)}
+                    drag={() => {
+                      setDraggingExerciseId(exerciseId);
+                      onDragStart?.();
+                    }}
+                    isActive={draggingExerciseId === exerciseId}
+                  />
+                </View>
               );
-            }}
-            onDragBegin={() => onDragStart?.()}
-            onRelease={() => onDragEnd?.()}
-            onDragEnd={({ data }: { data: ExerciseInput[] }) => {
-              onUpdate({ ...session, exercises: data });
-              onDragEnd?.();
-            }}
-            scrollEnabled={false}
-            activationDistance={14}
-            autoscrollThreshold={40}
-            autoscrollSpeed={150}
-            keyboardShouldPersistTaps="handled"
-            containerStyle={styles.listContainer}
-            simultaneousHandlers={simultaneousHandlers}
-          />
+            })
+          ) : (
+            <ExerciseListComponent
+              data={session.exercises}
+              keyExtractor={(item: ExerciseInput, index: number) => item.id ?? `exercise_${index}`}
+              renderItem={({
+                item,
+                drag,
+                isActive,
+                getIndex,
+              }: {
+                item: ExerciseInput;
+                drag: () => void;
+                isActive: boolean;
+                getIndex: () => number | undefined;
+              }) => {
+                const index = getIndex() ?? 0;
+                return (
+                  <ExerciseRowMobile
+                    exercise={item}
+                    index={index}
+                    onUpdate={(ex) => updateExercise(item.id, index, ex)}
+                    onRemove={() => removeExercise(item.id, index)}
+                    drag={drag}
+                    isActive={isActive}
+                  />
+                );
+              }}
+              onDragBegin={() => onDragStart?.()}
+              onRelease={() => onDragEnd?.()}
+              onDragEnd={({ data }: { data: ExerciseInput[] }) => {
+                onUpdate({ ...session, exercises: data });
+                onDragEnd?.();
+              }}
+              scrollEnabled={false}
+              activationDistance={14}
+              autoscrollThreshold={40}
+              autoscrollSpeed={150}
+              keyboardShouldPersistTaps="handled"
+              containerStyle={styles.listContainer}
+              simultaneousHandlers={simultaneousHandlers}
+            />
+          )}
           <TouchableOpacity style={styles.addExerciseBtn} onPress={addExercise}>
             <Ionicons name="add" size={16} color={colors.green} />
             <Text style={styles.addExerciseText}>Add Exercise</Text>
