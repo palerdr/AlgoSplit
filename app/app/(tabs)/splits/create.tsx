@@ -5,10 +5,9 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
-  Platform,
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
-import DraggableFlatList, { NestableDraggableFlatList, NestableScrollContainer } from 'react-native-draggable-flatlist';
+import DraggableFlatList from 'react-native-draggable-flatlist';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -44,31 +43,6 @@ function nextAvailableDay(sessions: SessionInput[]): number | null {
   return null;
 }
 
-function reorderSessionsWithStableDays(
-  previous: SessionInput[],
-  activeId: string,
-  targetId: string,
-): SessionInput[] {
-  const fromIndex = previous.findIndex((session) => session.id === activeId);
-  const toIndex = previous.findIndex((session) => session.id === targetId);
-  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) {
-    return previous;
-  }
-
-  const reordered = [...previous];
-  const [moved] = reordered.splice(fromIndex, 1);
-  reordered.splice(toIndex, 0, moved);
-
-  const daySlots = [...previous]
-    .map((session) => session.day)
-    .sort((a, b) => a - b);
-
-  return reordered.map((session, index) => ({
-    ...session,
-    day: daySlots[index] ?? Math.min(index + 1, 7),
-  }));
-}
-
 export default function CreateSplitScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -87,13 +61,8 @@ export default function CreateSplitScreen() {
   const [error, setError] = useState('');
   const [isDraggingExercises, setIsDraggingExercises] = useState(false);
   const [isDraggingSessions, setIsDraggingSessions] = useState(false);
-  const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
-  const sessionListRef = useRef<any>(null);
   const dragResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isWeb = Platform.OS === 'web';
-  const ScrollContainerComponent: any = Platform.OS === 'web' ? ScrollView : NestableScrollContainer;
-  const SessionListComponent: any = Platform.OS === 'web' ? DraggableFlatList : NestableDraggableFlatList;
 
   const handleDragStart = useCallback(() => {
     setIsDraggingExercises(true);
@@ -125,29 +94,6 @@ export default function CreateSplitScreen() {
       if (dragResetTimerRef.current) clearTimeout(dragResetTimerRef.current);
     };
   }, []);
-
-  useEffect(() => {
-    if (!isWeb || !draggingSessionId || typeof window === 'undefined') return;
-
-    const stopSessionDrag = () => {
-      setDraggingSessionId(null);
-      handleSessionDragEnd();
-    };
-
-    window.addEventListener('pointerup', stopSessionDrag);
-    window.addEventListener('mouseup', stopSessionDrag);
-
-    return () => {
-      window.removeEventListener('pointerup', stopSessionDrag);
-      window.removeEventListener('mouseup', stopSessionDrag);
-    };
-  }, [draggingSessionId, handleSessionDragEnd, isWeb]);
-
-  const handleWebSessionMove = useCallback((targetId: string) => {
-    if (!draggingSessionId || draggingSessionId === targetId) return;
-
-    setSessions((previous) => reorderSessionsWithStableDays(previous, draggingSessionId, targetId));
-  }, [draggingSessionId]);
 
   const updateSession = (sessionId: string | undefined, fallbackIndex: number, session: SessionInput) => {
     const updated = [...sessions];
@@ -255,7 +201,7 @@ export default function CreateSplitScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollContainerComponent
+      <ScrollView
         ref={scrollRef}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -276,83 +222,56 @@ export default function CreateSplitScreen() {
           Missing days are rest days. Auto cycle length ends on your last training day; a longer cycle length adds trailing rest days. Use the three-bar handle to reorder sessions.
         </Text>
 
-        {isWeb ? (
-          sessions.map((session, index) => {
-            const sessionId = session.id ?? `session_${index}`;
+        <DraggableFlatList
+          data={sessions}
+          keyExtractor={(item: SessionInput, index: number) => item.id ?? `session_${index}`}
+          renderItem={({
+            item,
+            drag,
+            isActive,
+            getIndex,
+          }: {
+            item: SessionInput;
+            drag: () => void;
+            isActive: boolean;
+            getIndex: () => number | undefined;
+          }) => {
+            const index = getIndex() ?? 0;
             return (
-              <View
-                key={sessionId}
-                onPointerMove={() => handleWebSessionMove(sessionId)}
-              >
-                <SessionEditorMobile
-                  session={session}
-                  onUpdate={(nextSession) => updateSession(session.id, index, nextSession)}
-                  onRemove={() => removeSession(session.id, index)}
-                  canRemove={sessions.length > 1}
-                  simultaneousHandlers={scrollRef}
-                  dragSession={() => {
-                    setDraggingSessionId(sessionId);
-                    handleSessionDragStart();
-                  }}
-                  isSessionActive={draggingSessionId === sessionId}
-                  onDragStart={handleDragStart}
-                  onDragEnd={handleDragEnd}
-                />
-              </View>
+              <SessionEditorMobile
+                session={item}
+                onUpdate={(sessionUpdate) => updateSession(item.id, index, sessionUpdate)}
+                onRemove={() => removeSession(item.id, index)}
+                canRemove={sessions.length > 1}
+                simultaneousHandlers={scrollRef}
+                dragSession={drag}
+                isSessionActive={isActive}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+              />
             );
-          })
-        ) : (
-          <SessionListComponent
-            ref={sessionListRef}
-            data={sessions}
-            keyExtractor={(item: SessionInput, index: number) => item.id ?? `session_${index}`}
-            renderItem={({
-              item,
-              drag,
-              isActive,
-              getIndex,
-            }: {
-              item: SessionInput;
-              drag: () => void;
-              isActive: boolean;
-              getIndex: () => number | undefined;
-            }) => {
-              const index = getIndex() ?? 0;
-              return (
-                <SessionEditorMobile
-                  session={item}
-                  onUpdate={(sessionUpdate) => updateSession(item.id, index, sessionUpdate)}
-                  onRemove={() => removeSession(item.id, index)}
-                  canRemove={sessions.length > 1}
-                  simultaneousHandlers={[scrollRef, sessionListRef]}
-                  dragSession={drag}
-                  isSessionActive={isActive}
-                  onDragStart={handleDragStart}
-                  onDragEnd={handleDragEnd}
-                />
-              );
-            }}
-            onDragBegin={handleSessionDragStart}
-            onRelease={handleSessionDragEnd}
-            onDragEnd={({ data }: { data: SessionInput[] }) => {
-              const daySlots = [...sessions]
-                .map((session) => session.day)
-                .sort((a, b) => a - b);
-              const reordered = data.map((session, index) => ({
-                ...session,
-                day: daySlots[index] ?? Math.min(index + 1, 7),
-              }));
-              setSessions(reordered);
-              handleSessionDragEnd();
-            }}
-            scrollEnabled={false}
-            activationDistance={14}
-            autoscrollThreshold={40}
-            autoscrollSpeed={150}
-            keyboardShouldPersistTaps="handled"
-            simultaneousHandlers={scrollRef}
-          />
-        )}
+          }}
+          onDragBegin={handleSessionDragStart}
+          onRelease={handleSessionDragEnd}
+          onDragEnd={({ data }: { data: SessionInput[] }) => {
+            const daySlots = [...sessions]
+              .map((session) => session.day)
+              .sort((a, b) => a - b);
+            const reordered = data.map((session, index) => ({
+              ...session,
+              day: daySlots[index] ?? Math.min(index + 1, 7),
+            }));
+            setSessions(reordered);
+            handleSessionDragEnd();
+          }}
+          scrollEnabled={false}
+          activationDistance={14}
+          autoscrollThreshold={40}
+          autoscrollSpeed={150}
+          dragHitSlop={{ left: 0, top: 0, bottom: 0, right: -1000 }}
+          keyboardShouldPersistTaps="handled"
+          simultaneousHandlers={scrollRef}
+        />
 
         <TouchableOpacity style={styles.addSessionBtn} onPress={addSession}>
           <Ionicons name="add-circle-outline" size={20} color={colors.green} />
@@ -421,7 +340,7 @@ export default function CreateSplitScreen() {
           loading={createMutation.isPending}
           style={styles.saveBtn}
         />
-      </ScrollContainerComponent>
+      </ScrollView>
     </View>
   );
 }

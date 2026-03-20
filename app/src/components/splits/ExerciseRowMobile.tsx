@@ -5,7 +5,6 @@ import {
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, borders, spacing } from '../../theme';
@@ -95,16 +94,7 @@ export default function ExerciseRowMobile({
       <View style={styles.row1}>
         <TouchableOpacity
           style={styles.dragHandle}
-          onPressIn={() => {
-            if (Platform.OS === 'web') {
-              drag?.();
-            }
-          }}
-          onLongPress={() => {
-            if (Platform.OS !== 'web') {
-              drag?.();
-            }
-          }}
+          onLongPress={drag}
           delayLongPress={180}
           hitSlop={8}
         >
