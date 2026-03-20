@@ -1,9 +1,11 @@
-import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useSplitsList, useDeleteSplit } from '../../../src/hooks/useSplits';
 import { Spinner, Card, Button } from '../../../src/components/ui';
+import { confirm } from '../../../src/utils/confirm';
+import { getErrorMessage } from '../../../src/api/client';
 import { colors, typography, spacing, borders } from '../../../src/theme';
 import type { SplitResponse } from '../../../src/types/api.types';
 
@@ -15,18 +17,26 @@ export default function SplitsScreen() {
 
   const splits = data?.splits ?? [];
 
+  const showDeleteError = (message: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(`Delete failed\n\n${message}`);
+      return;
+    }
+    Alert.alert('Delete failed', message);
+  };
+
   const handleDelete = (split: SplitResponse) => {
-    Alert.alert(
+    confirm(
       'Delete Split',
       `Delete "${split.name}"? This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => deleteMutation.mutate(split.id),
-        },
-      ],
+      'Delete',
+      async () => {
+        try {
+          await deleteMutation.mutateAsync(split.id);
+        } catch (err) {
+          showDeleteError(getErrorMessage(err));
+        }
+      },
     );
   };
 

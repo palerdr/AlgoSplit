@@ -848,15 +848,19 @@ async def delete_split(
         # Use client with user's token for proper RLS enforcement
         supabase = get_supabase_client_with_token(current_user.access_token)
 
-        # Delete split (RLS ensures user can only delete their own)
-        # Sessions and exercises will be cascade deleted
-        result = supabase.table("splits").delete().eq("id", split_id).execute()
-
-        if not result.data:
+        # Preflight ownership/existence check first.
+        # Do not rely on DELETE return payload because some PostgREST/Supabase
+        # configurations return minimal responses with empty data on success.
+        existing = supabase.table("splits").select("id").eq("id", split_id).limit(1).execute()
+        if not existing.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Split not found",
             )
+
+        # Delete split (RLS ensures user can only delete their own)
+        # Sessions and exercises will be cascade deleted
+        supabase.table("splits").delete().eq("id", split_id).execute()
 
         return None
 

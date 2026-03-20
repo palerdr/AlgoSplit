@@ -6,6 +6,7 @@ import {
   TextInput,
   StyleSheet,
   Alert,
+  Platform,
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -387,22 +388,25 @@ export default function SplitDetailScreen() {
   }, [isEditing, split, advMaintenanceVolume, saveAdvancedSettings]);
 
   const handleDelete = () => {
-    if (!id) return;
-    Alert.alert('Delete Split', `Delete "${split?.name}"? This cannot be undone.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await deleteMutation.mutateAsync(id);
-            router.replace('/(tabs)/splits');
-          } catch {
-            Alert.alert('Error', 'Failed to delete split. Please try again.');
+    if (!id || !split) return;
+    confirm(
+      'Delete Split',
+      `Delete "${split.name}"? This cannot be undone.`,
+      'Delete',
+      async () => {
+        try {
+          await deleteMutation.mutateAsync(id);
+          router.replace('/(tabs)/splits');
+        } catch (err) {
+          const message = getErrorMessage(err);
+          if (Platform.OS === 'web') {
+            window.alert(`Delete failed\n\n${message}`);
+          } else {
+            Alert.alert('Delete failed', message);
           }
-        },
+        }
       },
-    ]);
+    );
   };
 
   const updateSession = (index: number, session: SessionInput) => {
