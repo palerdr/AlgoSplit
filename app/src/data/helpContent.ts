@@ -29,7 +29,7 @@ export const HELP_CONTENT: Record<string, { title: string; body: string }> = {
   },
   'exercises.unilateral': {
     title: 'Unilateral (UNI)',
-    body: 'Marks an exercise as single-limb (e.g. one-arm rows, lunges). Unilateral exercises receive a 5% stimulus boost because single-limb work allows greater motor unit recruitment per side. Bilateral exercises receive a 5% reduction.',
+    body: 'Marks an exercise as single-limb (e.g. one-arm rows, lunges). Unilateral exercises allow for greater motor unit recruitment per side',
   },
   'exercises.customOverview': {
     title: 'Custom Exercises',
@@ -41,7 +41,7 @@ export const HELP_CONTENT: Record<string, { title: string; body: string }> = {
   },
   'exercises.resistanceProfile': {
     title: 'Resistance Profile',
-    body: 'Where in the range of motion the exercise is hardest.\n\nAscending — hardest at top / shortened position (e.g. cables, machines).\n\nMid-range — hardest in the middle (most free weight exercises).\n\nDescending — hardest at the bottom / stretched position (e.g. flyes, preacher curls).',
+    body: 'Where in the range of motion the exercise is hardest.\n\nAscending — hardest at top / shortened position (e.g. cables, machines).\n\nMid-range — hardest in the middle (most free weight exercises).\n\nDescending — hardest at the bottom / stretched position.',
   },
   'compare.overview': {
     title: 'Compare Splits',

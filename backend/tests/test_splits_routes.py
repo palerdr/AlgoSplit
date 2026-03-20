@@ -161,7 +161,7 @@ def test_batch_update_exercise_accepts_custom_exercise_name(monkeypatch, client)
     split_id = created["id"]
     exercise_id = created["sessions"][0]["exercises"][0]["id"]
 
-    def fake_match(name: str, user_id: str | None = None):
+    def fake_match(name: str, user_id: str | None = None, **_kwargs):
         if name == "My Custom Cable Fly" and user_id == "user-123":
             return type("Movement", (), {"name": "custom:my_custom_cable_fly"})()
         return None
@@ -198,7 +198,7 @@ def test_create_split_rejects_day_above_7(client):
 
 
 def test_analyze_saved_split_uses_custom_exercise_overrides(monkeypatch, client):
-    def fake_match(name: str, user_id: str | None = None):
+    def fake_match(name: str, user_id: str | None = None, **_kwargs):
         if name == "Mobile Custom Fly" and user_id == "user-123":
             return type(
                 "Movement",
@@ -260,3 +260,17 @@ def test_update_split_allows_clearing_cycle_length(client):
 
     assert update_resp.status_code == 200
     assert update_resp.json()["cycle_length"] is None
+
+
+def test_list_splits_can_skip_nested_exercises(client):
+    create_resp = client.post("/api/splits", json=_create_payload("Lite List"))
+    assert create_resp.status_code == 201
+
+    response = client.get("/api/splits?include_exercises=false")
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["total"] == 1
+    assert len(body["splits"]) == 1
+    assert len(body["splits"][0]["sessions"]) == 2
+    assert body["splits"][0]["sessions"][0]["exercises"] == []

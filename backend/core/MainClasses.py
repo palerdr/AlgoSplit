@@ -514,7 +514,15 @@ class MuscleRegion:
 class Session:
     """Represents a single training session within a split."""
 
-    def __init__(self, name: str, day: int, exercises: Dict[str, Any], user_id: Optional[str] = None):
+    def __init__(
+        self,
+        name: str,
+        day: int,
+        exercises: Dict[str, Any],
+        user_id: Optional[str] = None,
+        user_exercise_maps: Optional[Dict[str, Dict[str, Any]]] = None,
+        movement_cache: Optional[Dict[str, Optional[Any]]] = None,
+    ):
         """
         Args:
             name: Session name
@@ -526,6 +534,8 @@ class Session:
         """
         self.name = name
         self.user_id = user_id
+        self.user_exercise_maps = user_exercise_maps
+        self.movement_cache = movement_cache if movement_cache is not None else {}
         self.time = (day - 1) * 24  # Hours into the split/cycle
         # Normalize exercises to always have (sets, unilateral, resistance_profile) format
         self.exercises = {}
@@ -571,15 +581,19 @@ class Session:
 
         global_sets = 0
         session_stats = {
-            'time': self.time,
-            'total_sets': 0,
-            'muscles_trained': set(),
-            'stimulus_by_muscle': defaultdict(float),
-            'exercises_performed': [],
             'axial_fatigue': 0.0,
-            'bilateral_compounds': 0,
-            'consecutive_day_penalty': consecutive_day_penalty,
+            'bilateral_compound_sets': 0,
         }
+        if collect_breakdowns:
+            session_stats.update({
+                'time': self.time,
+                'total_sets': 0,
+                'muscles_trained': set(),
+                'stimulus_by_muscle': defaultdict(float),
+                'exercises_performed': [],
+                'bilateral_compounds': 0,
+                'consecutive_day_penalty': consecutive_day_penalty,
+            })
 
         # Reset muscles at session start
         for muscle in muscles.values():
@@ -673,8 +687,9 @@ class Session:
                             collect_breakdown=collect_breakdowns,
                         )
 
-                        session_stats['stimulus_by_muscle'][muscle_id] += stimulus
-                        session_stats['muscles_trained'].add(muscle_id)
+                        if collect_breakdowns:
+                            session_stats['stimulus_by_muscle'][muscle_id] += stimulus
+                            session_stats['muscles_trained'].add(muscle_id)
 
                         # Collect breakdown data
                         if collect_breakdowns and exercise_bd is not None and muscle._last_breakdown is not None:
@@ -705,29 +720,31 @@ class Session:
                     muscle.session_times.add(self.time)
 
             # Record exercise
-            session_stats['exercises_performed'].append({
-                'name': exercise_name,
-                'pattern': pattern_name,
-                'sets': sets,
-                'unilateral': is_unilateral,
-                'bilateral': is_bilateral,
-                'resistance_profile': resistance_profile,
-                'tiered_targets': tiered_targets
-            })
+            if collect_breakdowns:
+                session_stats['exercises_performed'].append({
+                    'name': exercise_name,
+                    'pattern': pattern_name,
+                    'sets': sets,
+                    'unilateral': is_unilateral,
+                    'bilateral': is_bilateral,
+                    'resistance_profile': resistance_profile,
+                    'tiered_targets': tiered_targets
+                })
 
             if collect_breakdowns and exercise_bd is not None:
                 exercise_breakdowns.append(exercise_bd)
 
-        session_stats['total_sets'] = global_sets
-        session_stats['muscles_trained'] = list(session_stats['muscles_trained'])
-        session_stats['stimulus_by_muscle'] = dict(session_stats['stimulus_by_muscle'])
         session_stats['axial_fatigue'] = fatigue_state.axial_fatigue
-        session_stats['bilateral_compounds'] = fatigue_state.bilateral_compounds
         session_stats['bilateral_compound_sets'] = fatigue_state.bilateral_compound_sets
-        session_stats['exercise_breakdowns'] = exercise_breakdowns if collect_breakdowns else []
-        session_stats['final_cns_multiplier'] = calculate_cns_fatigue(
-            global_sets, axial_fatigue=fatigue_state.axial_fatigue
-        )
+        if collect_breakdowns:
+            session_stats['total_sets'] = global_sets
+            session_stats['muscles_trained'] = list(session_stats['muscles_trained'])
+            session_stats['stimulus_by_muscle'] = dict(session_stats['stimulus_by_muscle'])
+            session_stats['bilateral_compounds'] = fatigue_state.bilateral_compounds
+            session_stats['exercise_breakdowns'] = exercise_breakdowns
+            session_stats['final_cns_multiplier'] = calculate_cns_fatigue(
+                global_sets, axial_fatigue=fatigue_state.axial_fatigue
+            )
 
         return session_stats
 
@@ -756,7 +773,12 @@ class Session:
         Returns tuple of (pattern_name, tiered_targets, is_bilateral, is_unilateral, axial_load, resistance_profile)
         """
         # First try legacy matcher to get pattern name
-        pattern = move_match_with_overrides(exercise_name, self.user_id)
+        pattern = move_match_with_overrides(
+            exercise_name,
+            self.user_id,
+            user_maps=self.user_exercise_maps,
+            movement_cache=self.movement_cache,
+        )
         if not pattern:
             return (None, {}, False, False, 0.0, resistance_profile_override or 'mid')
 
@@ -853,12 +875,15 @@ class Split:
         dataset: str,
         cycle_length: Optional[int] = None,
         user_id: Optional[str] = None,
+        user_exercise_maps: Optional[Dict[str, Dict[str, Any]]] = None,
     ):
         self.name = name
         self.stimulus_duration = stimulus_duration
         self.maintenance_volume = maintenance_volume
         self.dataset = dataset
         self.user_id = user_id
+        self.user_exercise_maps = user_exercise_maps
+        self._movement_cache: Dict[str, Optional[Any]] = {}
 
         # Cycle length can be explicitly set, or defaults to max day number
         # e.g., Full Body every other day = cycle_length of 2 (train, rest, repeat)
@@ -868,7 +893,17 @@ class Split:
             self.cycle_length = max(day for _, day, _ in days) if days else 7
 
         # Create sessions from day tuples
-        self.days = [Session(name, day, exercises, user_id=user_id) for name, day, exercises in days]
+        self.days = [
+            Session(
+                name,
+                day,
+                exercises,
+                user_id=user_id,
+                user_exercise_maps=user_exercise_maps,
+                movement_cache=self._movement_cache,
+            )
+            for name, day, exercises in days
+        ]
 
         # Initialize muscles
         self._init_muscles()
@@ -975,10 +1010,11 @@ class Split:
                 )
 
                 if stats:
-                    stats['time'] = week_start_hour + week_relative_time
-                    stats['week'] = week + 1
-                    stats['consecutive_days'] = consecutive_tracker.consecutive_days
-                    self.session_stats.append(stats)
+                    if collect_breakdowns:
+                        stats['time'] = week_start_hour + week_relative_time
+                        stats['week'] = week + 1
+                        stats['consecutive_days'] = consecutive_tracker.consecutive_days
+                        self.session_stats.append(stats)
 
                     # Update consecutive day tracker with THIS session's fatigue
                     consecutive_tracker.cumulative_axial_fatigue += stats.get('axial_fatigue', 0.0)

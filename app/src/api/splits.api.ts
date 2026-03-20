@@ -11,14 +11,17 @@ import type {
 export const splitKeys = {
   all: ['splits'] as const,
   lists: () => [...splitKeys.all, 'list'] as const,
-  list: () => [...splitKeys.lists()] as const,
+  list: (includeExercises = true) => [...splitKeys.lists(), includeExercises ? 'full' : 'lite'] as const,
   details: () => [...splitKeys.all, 'detail'] as const,
   detail: (id: string) => [...splitKeys.details(), id] as const,
   analysis: (id: string) => [...splitKeys.all, 'analysis', id] as const,
 };
 
-export async function getSplits(): Promise<SplitListResponse> {
-  const response = await apiClient.get<SplitListResponse>('/api/splits');
+export async function getSplits(options?: { includeExercises?: boolean }): Promise<SplitListResponse> {
+  const includeExercises = options?.includeExercises ?? true;
+  const response = await apiClient.get<SplitListResponse>('/api/splits', {
+    params: includeExercises ? undefined : { include_exercises: false },
+  });
   return response.data;
 }
 
@@ -201,6 +204,20 @@ export async function analyzeSplit(id: string, includeBreakdowns = false): Promi
     `/api/splits/${id}/analyze`,
     null,
     { params: includeBreakdowns ? { include_breakdowns: true } : undefined }
+  );
+  return response.data;
+}
+
+export async function analyzeSplitFromDefinition(
+  data: SplitRequest,
+  includeBreakdowns = false
+): Promise<AnalysisResponse> {
+  const response = await apiClient.post<AnalysisResponse>(
+    '/api/analyze-split',
+    {
+      ...data,
+      include_breakdowns: includeBreakdowns,
+    }
   );
   return response.data;
 }

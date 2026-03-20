@@ -136,7 +136,11 @@ export default function SplitDetailScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
   const { data: split, isLoading: splitLoading } = useSplit(id);
-  const { data: analysis, isLoading: analysisLoading, error: analysisError } = useSplitAnalysis(id);
+  const { data: analysis, isLoading: analysisLoading, error: analysisError } = useSplitAnalysis(
+    id,
+    !!split,
+    split,
+  );
   const deleteMutation = useDeleteSplit();
   const replaceMutation = useReplaceSplit({ invalidateLists: false });
   const updateMutation = useUpdateSplit({ invalidateLists: false });

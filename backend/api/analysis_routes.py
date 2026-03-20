@@ -11,6 +11,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 import threading
 import time as _time
+import json
 import sys
 from pathlib import Path
 
@@ -31,6 +32,7 @@ from schemas.models import (
 )
 from core.MainClasses import Split, MuscleRegion
 from core.movementMatching import move_match
+from core.exerciseMatching import preload_user_exercise_maps
 from core.muscle_regions import get_all_muscle_regions, get_parent_groups
 from api.dependencies import get_current_user, AuthUser
 from db.supabase import get_supabase_client_with_token
@@ -68,6 +70,11 @@ def _analysis_cache_key(
     return f"{user_id}:{days}:{end_date}:{timezone_offset_minutes}:{stimulus_duration}:{maintenance_volume}:{dataset}"
 
 
+def _split_analysis_cache_key(user_id: str, request: SplitRequest) -> str:
+    payload = json.dumps(request.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    return f"{user_id}:split:{payload}"
+
+
 def invalidate_analysis_cache(user_id: str) -> None:
     """Purge all cached analysis entries for a given user.
 
@@ -85,7 +92,10 @@ def invalidate_analysis_cache(user_id: str) -> None:
 # ============================================================================
 
 @router.post("/analyze-split", response_model=AnalysisResponse)
-async def analyze_split(request: SplitRequest):
+async def analyze_split(
+    request: SplitRequest,
+    current_user: AuthUser = Depends(get_current_user),
+):
     """
     Analyze a complete training split and return muscle stimulus breakdown.
 
@@ -93,12 +103,22 @@ async def analyze_split(request: SplitRequest):
     (prime/secondary/tertiary movers).
     """
     try:
-        return _run_split_analysis(request)
+        return _run_split_analysis(request, current_user.id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error analyzing split: {str(e)}")
 
 
 def _run_split_analysis(request: SplitRequest, user_id: Optional[str] = None) -> AnalysisResponse:
+    if user_id:
+        cache_key = _split_analysis_cache_key(user_id, request)
+        now_mono = _time.monotonic()
+        with _analysis_cache_lock:
+            cached = _analysis_cache.get(cache_key)
+            if cached is not None:
+                response, cached_at = cached
+                if now_mono - cached_at < _ANALYSIS_CACHE_TTL_S:
+                    return response
+
     # Convert request sessions to Split format
     # Now includes unilateral and resistance_profile as tuple: (sets, unilateral, resistance_profile)
     days = []
@@ -109,6 +129,10 @@ def _run_split_analysis(request: SplitRequest, user_id: Optional[str] = None) ->
         }
         days.append((session.name, session.day, exercises_dict))
 
+    user_exercise_maps = None
+    if user_id:
+        user_exercise_maps = preload_user_exercise_maps(user_id)
+
     split = Split(
         name=request.name,
         days=days,
@@ -117,10 +141,17 @@ def _run_split_analysis(request: SplitRequest, user_id: Optional[str] = None) ->
         dataset=request.dataset,
         cycle_length=request.cycle_length,
         user_id=user_id,
+        user_exercise_maps=user_exercise_maps,
     )
     split.simulate_split(collect_breakdowns=request.include_breakdowns)
 
-    return _build_response(split, request)
+    response = _build_response(split, request)
+
+    if user_id:
+        with _analysis_cache_lock:
+            _analysis_cache[cache_key] = (response, _time.monotonic())
+
+    return response
 
 
 @router.post("/analyze-workouts", response_model=AnalysisResponse)
@@ -302,6 +333,10 @@ def _build_workout_analysis(
     # engine correctly models atrophy for the gap between sessions and now.
     effective_cycle = days
 
+    user_exercise_maps = None
+    if user_id:
+        user_exercise_maps = preload_user_exercise_maps(user_id)
+
     split = Split(
         name="Logged Workouts",
         days=split_days,
@@ -310,6 +345,7 @@ def _build_workout_analysis(
         dataset=dataset,
         cycle_length=effective_cycle,
         user_id=user_id,
+        user_exercise_maps=user_exercise_maps,
     )
     split.simulate_split(collect_breakdowns=False)
 

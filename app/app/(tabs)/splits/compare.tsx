@@ -12,7 +12,7 @@ import CompareViewSwitcher, {
 } from '../../../src/components/compare/CompareViewSwitcher';
 import { analyzeSplit } from '../../../src/api/splits.api';
 import { useComparisonsList, useDeleteComparison, useSaveComparison } from '../../../src/hooks/useComparisons';
-import { useSplitsList } from '../../../src/hooks/useSplits';
+import { useSplitsListWithOptions } from '../../../src/hooks/useSplits';
 import { useCompareStore } from '../../../src/stores/compareStore';
 import { borders, colors, spacing, typography } from '../../../src/theme';
 
@@ -21,7 +21,7 @@ const SPLIT_COLORS = ['#ef4444', '#3b82f6', '#22c55e'];
 export default function CompareSplitsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { data: splitsData, isLoading: isSplitsLoading } = useSplitsList();
+  const { data: splitsData, isLoading: isSplitsLoading } = useSplitsListWithOptions({ includeExercises: false });
   const { data: comparisonsData, isLoading: isComparisonsLoading } = useComparisonsList();
   const saveComparisonMutation = useSaveComparison();
   const deleteComparisonMutation = useDeleteComparison();

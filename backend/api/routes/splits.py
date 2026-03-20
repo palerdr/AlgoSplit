@@ -6,7 +6,7 @@ Handles CRUD operations for training splits
 import logging
 from time import perf_counter
 from typing import List
-from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks, Query
 from db.supabase import get_supabase_client_with_token
 
 logger = logging.getLogger("algosplit.splits")
@@ -408,6 +408,7 @@ async def create_split(
     description="Get all splits for the authenticated user",
 )
 async def list_splits(
+    include_exercises: bool = Query(True, description="Include nested exercises in each split session"),
     current_user: AuthUser = Depends(get_current_user),
 ):
     """
@@ -419,10 +420,13 @@ async def list_splits(
         # Use client with user's token for proper RLS enforcement
         supabase = get_supabase_client_with_token(current_user.access_token)
 
-        # Single nested query - fetches splits, sessions, and exercises in one request
-        splits_result = supabase.table("splits").select(
+        # Single nested query - optionally skips nested exercises for lighter payloads.
+        select_clause = (
             "*, sessions(*, exercises(*))"
-        ).order("created_at", desc=True).execute()
+            if include_exercises
+            else "*, sessions(id, split_id, name, day_number, created_at, updated_at)"
+        )
+        splits_result = supabase.table("splits").select(select_clause).order("created_at", desc=True).execute()
 
         if not splits_result.data:
             return SplitListResponse(splits=[], total=0)

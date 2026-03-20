@@ -3,7 +3,7 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert } from 'react
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useSplitsList, useDeleteSplit } from '../../../src/hooks/useSplits';
+import { useSplitsListWithOptions, useDeleteSplit } from '../../../src/hooks/useSplits';
 import { Spinner, Card, Button, InfoButton } from '../../../src/components/ui';
 import { HELP_CONTENT } from '../../../src/data/helpContent';
 import { getErrorMessage } from '../../../src/api/client';
@@ -13,7 +13,7 @@ import type { SplitResponse } from '../../../src/types/api.types';
 export default function SplitsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { data, isLoading, error } = useSplitsList();
+  const { data, isLoading, error } = useSplitsListWithOptions({ includeExercises: false });
   const deleteMutation = useDeleteSplit();
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 

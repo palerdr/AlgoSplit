@@ -5,6 +5,7 @@ import {
   createSplit,
   deleteSplit,
   analyzeSplit,
+  analyzeSplitFromDefinition,
   replaceSplit,
   updateSplit,
   updateSplitExercises,
@@ -18,6 +19,28 @@ import type {
   SplitUpdate,
 } from '../types/api.types';
 
+function splitToRequestPayload(split: SplitResponse, includeBreakdowns = false): SplitRequest {
+  return {
+    name: split.name,
+    sessions: split.sessions.map((session) => ({
+      name: session.name,
+      day: session.day_number,
+      exercises: session.exercises.map((exercise) => ({
+        id: exercise.id,
+        name: exercise.exercise_name,
+        sets: exercise.sets,
+        unilateral: exercise.unilateral,
+        resistance_profile: exercise.resistance_profile,
+      })),
+    })),
+    cycle_length: split.cycle_length ?? undefined,
+    stimulus_duration: split.stimulus_duration,
+    maintenance_volume: split.maintenance_volume,
+    dataset: split.dataset as 'schoenfeld' | 'pelland' | 'average',
+    include_breakdowns: includeBreakdowns,
+  };
+}
+
 function updateSplitInListCache(
   previous: SplitListResponse | undefined,
   updatedSplit: SplitResponse
@@ -30,9 +53,14 @@ function updateSplitInListCache(
 }
 
 export function useSplitsList() {
+  return useSplitsListWithOptions();
+}
+
+export function useSplitsListWithOptions(options?: { includeExercises?: boolean }) {
+  const includeExercises = options?.includeExercises ?? true;
   return useQuery({
-    queryKey: splitKeys.list(),
-    queryFn: getSplits,
+    queryKey: splitKeys.list(includeExercises),
+    queryFn: () => getSplits({ includeExercises }),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
@@ -48,10 +76,19 @@ export function useSplit(id: string | undefined) {
   });
 }
 
-export function useSplitAnalysis(id: string | undefined, enabled = true) {
+export function useSplitAnalysis(
+  id: string | undefined,
+  enabled = true,
+  splitData?: SplitResponse
+) {
   return useQuery({
-    queryKey: [...splitKeys.analysis(id!), 'lite'],
-    queryFn: () => analyzeSplit(id!, false),
+    queryKey: [...splitKeys.analysis(id!), 'lite', splitData?.updated_at ?? 'server'],
+    queryFn: () => {
+      if (splitData) {
+        return analyzeSplitFromDefinition(splitToRequestPayload(splitData, false), false);
+      }
+      return analyzeSplit(id!, false);
+    },
     enabled: !!id && enabled,
   });
 }
@@ -74,9 +111,13 @@ export function useReplaceSplit(options?: { invalidateLists?: boolean }) {
       if (invalidateLists) {
         queryClient.invalidateQueries({ queryKey: splitKeys.lists() });
       } else {
-        const previous = queryClient.getQueryData<SplitListResponse>(splitKeys.list());
-        const next = updateSplitInListCache(previous, result);
-        if (next) queryClient.setQueryData(splitKeys.list(), next);
+        const fullPrevious = queryClient.getQueryData<SplitListResponse>(splitKeys.list(true));
+        const fullNext = updateSplitInListCache(fullPrevious, result);
+        if (fullNext) queryClient.setQueryData(splitKeys.list(true), fullNext);
+
+        const litePrevious = queryClient.getQueryData<SplitListResponse>(splitKeys.list(false));
+        const liteNext = updateSplitInListCache(litePrevious, result);
+        if (liteNext) queryClient.setQueryData(splitKeys.list(false), liteNext);
       }
       queryClient.invalidateQueries({ queryKey: splitKeys.analysis(variables.id) });
     },
@@ -93,9 +134,13 @@ export function useUpdateSplit(options?: { invalidateLists?: boolean }) {
       if (invalidateLists) {
         queryClient.invalidateQueries({ queryKey: splitKeys.lists() });
       } else {
-        const previous = queryClient.getQueryData<SplitListResponse>(splitKeys.list());
-        const next = updateSplitInListCache(previous, result);
-        if (next) queryClient.setQueryData(splitKeys.list(), next);
+        const fullPrevious = queryClient.getQueryData<SplitListResponse>(splitKeys.list(true));
+        const fullNext = updateSplitInListCache(fullPrevious, result);
+        if (fullNext) queryClient.setQueryData(splitKeys.list(true), fullNext);
+
+        const litePrevious = queryClient.getQueryData<SplitListResponse>(splitKeys.list(false));
+        const liteNext = updateSplitInListCache(litePrevious, result);
+        if (liteNext) queryClient.setQueryData(splitKeys.list(false), liteNext);
       }
       queryClient.invalidateQueries({ queryKey: splitKeys.analysis(variables.id) });
     },
@@ -131,20 +176,29 @@ export function useDeleteSplit() {
     mutationFn: (id: string) => deleteSplit(id),
     onMutate: async (id) => {
       await queryClient.cancelQueries({ queryKey: splitKeys.lists() });
-      const previous = queryClient.getQueryData<SplitListResponse>(splitKeys.list());
-      if (previous) {
-        queryClient.setQueryData<SplitListResponse>(splitKeys.list(), {
-          ...previous,
-          splits: previous.splits.filter((s) => s.id !== id),
-          total: previous.total - 1,
+      const previousFull = queryClient.getQueryData<SplitListResponse>(splitKeys.list(true));
+      const previousLite = queryClient.getQueryData<SplitListResponse>(splitKeys.list(false));
+
+      if (previousFull) {
+        queryClient.setQueryData<SplitListResponse>(splitKeys.list(true), {
+          ...previousFull,
+          splits: previousFull.splits.filter((s) => s.id !== id),
+          total: previousFull.total - 1,
         });
       }
-      return { previous };
+      if (previousLite) {
+        queryClient.setQueryData<SplitListResponse>(splitKeys.list(false), {
+          ...previousLite,
+          splits: previousLite.splits.filter((s) => s.id !== id),
+          total: previousLite.total - 1,
+        });
+      }
+
+      return { previousFull, previousLite };
     },
     onError: (_err, _id, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(splitKeys.list(), context.previous);
-      }
+      if (context?.previousFull) queryClient.setQueryData(splitKeys.list(true), context.previousFull);
+      if (context?.previousLite) queryClient.setQueryData(splitKeys.list(false), context.previousLite);
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: splitKeys.lists() });
@@ -159,8 +213,8 @@ export function useDeleteSplit() {
 /** Prefetch splits list so the Splits tab is warm on arrival. */
 export function prefetchSplitsQueries(qc: QueryClient) {
   qc.prefetchQuery({
-    queryKey: splitKeys.list(),
-    queryFn: getSplits,
+    queryKey: splitKeys.list(false),
+    queryFn: () => getSplits({ includeExercises: false }),
     staleTime: 5 * 60 * 1000,
   });
 }
