@@ -23,6 +23,48 @@ interface EditableState {
   cycle_length?: number;
 }
 
+export function parseCycleLengthInput(value: string | number | null | undefined): number | undefined {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? Math.min(7, Math.max(1, value)) : undefined;
+  }
+  if (typeof value !== 'string' || value.trim() === '') return undefined;
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return undefined;
+  return Math.min(7, Math.max(1, parsed));
+}
+
+export function normalizeSessionsForSave(
+  sessions: SessionInput[],
+  cycleLength?: number,
+): SessionInput[] {
+  const namedSessions = sessions
+    .filter((session) => session.name.trim())
+    .map((session) => ({
+      ...session,
+      name: session.name.trim(),
+      day: Math.min(7, Math.max(1, session.day)),
+      exercises: session.exercises
+        .filter((exercise) => exercise.name.trim())
+        .map((exercise) => ({
+          ...exercise,
+          name: exercise.name.trim(),
+        })),
+    }));
+
+  if (namedSessions.length === 0) return namedSessions;
+
+  const resolvedCycleLength = parseCycleLengthInput(cycleLength);
+  const maxDay = Math.max(...namedSessions.map((session) => session.day));
+  if (resolvedCycleLength != null && resolvedCycleLength < maxDay) {
+    return namedSessions.map((session, index) => ({
+      ...session,
+      day: index + 1,
+    }));
+  }
+
+  return namedSessions;
+}
+
 /**
  * Convert a SplitResponse (from API) into editable state for the edit form.
  */
@@ -53,26 +95,23 @@ export function splitResponseToEditable(split: SplitResponse): EditableState {
  * Convert editable state into a SplitRequest for the API.
  */
 export function editableToSplitRequest(state: EditableState): SplitRequest {
+  const cycleLength = parseCycleLengthInput(state.cycle_length);
   return {
     name: state.name.trim(),
-    sessions: state.sessions
-      .filter((s) => s.name.trim())
-      .map((s) => ({
-        name: s.name.trim(),
-        day: s.day,
-        exercises: s.exercises
-          .filter((e) => e.name.trim())
-          .map((e) => ({
-            name: e.name.trim(),
-            sets: e.sets,
-            unilateral: e.unilateral,
-            resistance_profile: e.resistance_profile,
-          })),
+    sessions: normalizeSessionsForSave(state.sessions, cycleLength).map((session) => ({
+      name: session.name,
+      day: session.day,
+      exercises: session.exercises.map((exercise) => ({
+        name: exercise.name,
+        sets: exercise.sets,
+        unilateral: exercise.unilateral,
+        resistance_profile: exercise.resistance_profile,
       })),
+    })),
     dataset: state.dataset as 'schoenfeld' | 'pelland' | 'average',
     stimulus_duration: state.stimulus_duration,
     maintenance_volume: state.maintenance_volume,
-    cycle_length: state.cycle_length,
+    cycle_length: cycleLength,
   };
 }
 

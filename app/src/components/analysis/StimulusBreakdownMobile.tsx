@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, borders, spacing } from '../../theme';
@@ -11,10 +11,111 @@ const TIER_COLORS: Record<string, string> = {
   quaternary: '#6B7280',
 };
 
+const PARENT_GROUPS: Record<string, string> = {
+  clavicular: 'Chest',
+  sternocostal: 'Chest',
+  anterior_deltoid: 'Shoulders',
+  lateral_deltoid: 'Shoulders',
+  posterior_deltoid: 'Shoulders',
+  trapezius: 'Upper Back',
+  rhomboids: 'Upper Back',
+  spinal_erectors: 'Lower Back',
+  thoracic_lats: 'Lats',
+  iliac_lats: 'Lats',
+  biceps_brachii: 'Elbow Flexors',
+  brachialis: 'Elbow Flexors',
+  brachioradialis: 'Elbow Flexors',
+  wrist_flexors: 'Forearms',
+  wrist_extensors: 'Forearms',
+  triceps_long_head: 'Triceps',
+  triceps_lateral_medial: 'Triceps',
+  glute_max: 'Glutes',
+  glute_med_min: 'Glutes',
+  vasti: 'Quads',
+  rectus_femoris: 'Quads',
+  hip_extensors: 'Hamstrings',
+  knee_flexors: 'Hamstrings',
+  gastrocnemius: 'Calves',
+  soleus: 'Calves',
+  hip_adductors: 'Adductors',
+  anterior_core: 'Abs',
+  lateral_core: 'Abs',
+  deep_core: 'Abs',
+};
+
+type ViewMode = 'exercise' | 'muscle';
+
+interface GroupContribution {
+  key: string;
+  exerciseName: string;
+  sessionName: string;
+  totalStimulus: number;
+  muscles: string[];
+}
+
+interface MuscleGroupAggregation {
+  group: string;
+  totalStimulus: number;
+  contributions: GroupContribution[];
+}
+
 function getCnsColor(multiplier: number): string {
   if (multiplier >= 0.9) return '#22C55E';
   if (multiplier >= 0.8) return '#EAB308';
   return '#F97316';
+}
+
+function getParentGroup(muscleId: string): string {
+  return PARENT_GROUPS[muscleId] ?? 'Other';
+}
+
+function buildMuscleGroupAggregations(sessionBreakdowns: SessionBreakdown[]): MuscleGroupAggregation[] {
+  const groups = new Map<string, MuscleGroupAggregation>();
+
+  for (const session of sessionBreakdowns) {
+    for (const exercise of session.exercises) {
+      const exerciseGroups = new Map<string, GroupContribution>();
+      for (const contribution of exercise.muscle_contributions) {
+        const group = getParentGroup(contribution.muscle_id);
+        const existing = exerciseGroups.get(group);
+        if (existing) {
+          existing.totalStimulus += contribution.total_stimulus;
+          if (!existing.muscles.includes(contribution.display_name)) {
+            existing.muscles.push(contribution.display_name);
+          }
+        } else {
+          exerciseGroups.set(group, {
+            key: `${session.session_name}:${exercise.name}:${group}`,
+            exerciseName: exercise.name,
+            sessionName: session.session_name,
+            totalStimulus: contribution.total_stimulus,
+            muscles: [contribution.display_name],
+          });
+        }
+      }
+
+      for (const [group, groupContribution] of exerciseGroups) {
+        const existingGroup = groups.get(group);
+        if (existingGroup) {
+          existingGroup.totalStimulus += groupContribution.totalStimulus;
+          existingGroup.contributions.push(groupContribution);
+        } else {
+          groups.set(group, {
+            group,
+            totalStimulus: groupContribution.totalStimulus,
+            contributions: [groupContribution],
+          });
+        }
+      }
+    }
+  }
+
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      contributions: [...group.contributions].sort((a, b) => b.totalStimulus - a.totalStimulus),
+    }))
+    .sort((a, b) => b.totalStimulus - a.totalStimulus);
 }
 
 function TierBadge({ tier }: { tier: string }) {
@@ -103,12 +204,75 @@ function ExerciseCard({ exercise }: { exercise: ExerciseBreakdown }) {
   );
 }
 
+function MuscleGroupCard({ group }: { group: MuscleGroupAggregation }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <View style={styles.groupCard}>
+      <TouchableOpacity style={styles.groupHeader} onPress={() => setExpanded(!expanded)}>
+        <View style={styles.groupHeaderLeft}>
+          <Ionicons
+            name={expanded ? 'chevron-down' : 'chevron-forward'}
+            size={14}
+            color={colors.textMuted}
+          />
+          <Text style={styles.groupTitle}>{group.group}</Text>
+        </View>
+        <Text style={styles.groupTotal}>{group.totalStimulus.toFixed(1)}</Text>
+      </TouchableOpacity>
+
+      {expanded && (
+        <View style={styles.groupContributionList}>
+          {group.contributions.map((contribution) => (
+            <View key={contribution.key} style={styles.groupContributionCard}>
+              <View style={styles.groupContributionHeader}>
+                <View style={styles.groupContributionInfo}>
+                  <Text style={styles.groupContributionExercise}>{contribution.exerciseName}</Text>
+                  <Text style={styles.groupContributionSession}>{contribution.sessionName}</Text>
+                </View>
+                <Text style={styles.groupContributionValue}>{contribution.totalStimulus.toFixed(2)}</Text>
+              </View>
+              <Text style={styles.groupContributionMuscles}>
+                {contribution.muscles.join(', ')}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function ViewToggle({ mode, onChange }: { mode: ViewMode; onChange: (mode: ViewMode) => void }) {
+  return (
+    <View style={styles.toggleWrap}>
+      <TouchableOpacity
+        style={[styles.toggleBtn, mode === 'exercise' && styles.toggleBtnActive]}
+        onPress={() => onChange('exercise')}
+      >
+        <Text style={[styles.toggleText, mode === 'exercise' && styles.toggleTextActive]}>By Exercise</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={[styles.toggleBtn, mode === 'muscle' && styles.toggleBtnActive]}
+        onPress={() => onChange('muscle')}
+      >
+        <Text style={[styles.toggleText, mode === 'muscle' && styles.toggleTextActive]}>By Muscle Group</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 interface Props {
   sessionBreakdowns: SessionBreakdown[];
 }
 
 export default function StimulusBreakdownMobile({ sessionBreakdowns }: Props) {
   const [collapsedSessions, setCollapsedSessions] = useState<Set<number>>(new Set());
+  const [viewMode, setViewMode] = useState<ViewMode>('exercise');
+  const muscleGroups = useMemo(
+    () => buildMuscleGroupAggregations(sessionBreakdowns),
+    [sessionBreakdowns],
+  );
 
   const toggleSession = (index: number) => {
     setCollapsedSessions((prev) => {
@@ -129,42 +293,59 @@ export default function StimulusBreakdownMobile({ sessionBreakdowns }: Props) {
 
   return (
     <View>
-      {sessionBreakdowns.map((session, idx) => {
-        const collapsed = collapsedSessions.has(idx);
-        return (
-          <View key={idx} style={styles.sessionSection}>
-            <TouchableOpacity style={styles.sessionHeader} onPress={() => toggleSession(idx)}>
-              <Ionicons
-                name={collapsed ? 'chevron-forward' : 'chevron-down'}
-                size={16}
-                color={colors.textSecondary}
-              />
-              <View style={styles.sessionInfo}>
-                <Text style={styles.sessionName}>{session.session_name}</Text>
-                <Text style={styles.sessionDay}>Day {session.day_number}</Text>
-              </View>
-              <View style={styles.sessionBadges}>
-                <View style={styles.setsBadge}>
-                  <Text style={styles.setsBadgeText}>{session.cumulative_sets} sets</Text>
-                </View>
-                <View style={[styles.cnsBadge, { borderColor: getCnsColor(session.final_cns_multiplier) }]}>
-                  <Text style={[styles.cnsBadgeText, { color: getCnsColor(session.final_cns_multiplier) }]}>
-                    CNS {(session.final_cns_multiplier * 100).toFixed(0)}%
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
+      <View style={styles.breakdownHeader}>
+        <Text style={styles.breakdownHint}>
+          {viewMode === 'exercise'
+            ? 'Inspect stimulus by split day and exercise.'
+            : 'Inspect total stimulus by muscle group and how each exercise contributed.'}
+        </Text>
+        <ViewToggle mode={viewMode} onChange={setViewMode} />
+      </View>
 
-            {!collapsed && (
-              <View style={styles.exerciseList}>
-                {session.exercises.map((ex, exIdx) => (
-                  <ExerciseCard key={exIdx} exercise={ex} />
-                ))}
-              </View>
-            )}
-          </View>
-        );
-      })}
+      {viewMode === 'exercise' ? (
+        sessionBreakdowns.map((session, idx) => {
+          const collapsed = collapsedSessions.has(idx);
+          return (
+            <View key={idx} style={styles.sessionSection}>
+              <TouchableOpacity style={styles.sessionHeader} onPress={() => toggleSession(idx)}>
+                <Ionicons
+                  name={collapsed ? 'chevron-forward' : 'chevron-down'}
+                  size={16}
+                  color={colors.textSecondary}
+                />
+                <View style={styles.sessionInfo}>
+                  <Text style={styles.sessionName}>{session.session_name}</Text>
+                  <Text style={styles.sessionDay}>Day {session.day_number}</Text>
+                </View>
+                <View style={styles.sessionBadges}>
+                  <View style={styles.setsBadge}>
+                    <Text style={styles.setsBadgeText}>{session.cumulative_sets} sets</Text>
+                  </View>
+                  <View style={[styles.cnsBadge, { borderColor: getCnsColor(session.final_cns_multiplier) }]}>
+                    <Text style={[styles.cnsBadgeText, { color: getCnsColor(session.final_cns_multiplier) }]}>
+                      CNS {(session.final_cns_multiplier * 100).toFixed(0)}%
+                    </Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+
+              {!collapsed && (
+                <View style={styles.exerciseList}>
+                  {session.exercises.map((ex, exIdx) => (
+                    <ExerciseCard key={exIdx} exercise={ex} />
+                  ))}
+                </View>
+              )}
+            </View>
+          );
+        })
+      ) : (
+        <View style={styles.groupList}>
+          {muscleGroups.map((group) => (
+            <MuscleGroupCard key={group.group} group={group} />
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -177,6 +358,41 @@ const styles = StyleSheet.create({
   emptyText: {
     color: colors.textMuted,
     fontSize: 13,
+  },
+  breakdownHeader: {
+    gap: 10,
+    marginBottom: spacing.md,
+  },
+  breakdownHint: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  toggleWrap: {
+    flexDirection: 'row',
+    backgroundColor: colors.surface,
+    borderRadius: borders.radius.lg,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+    padding: 4,
+    gap: 4,
+  },
+  toggleBtn: {
+    flex: 1,
+    borderRadius: borders.radius.md,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  toggleBtnActive: {
+    backgroundColor: colors.greenMuted,
+  },
+  toggleText: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  toggleTextActive: {
+    color: colors.green,
   },
   sessionSection: {
     marginBottom: spacing.md,
@@ -344,5 +560,76 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 11,
     lineHeight: 15,
+  },
+  groupList: {
+    gap: spacing.md,
+  },
+  groupCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borders.radius.lg,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+    overflow: 'hidden',
+  },
+  groupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: spacing.md,
+  },
+  groupHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  groupTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  groupTotal: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  groupContributionList: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+    gap: 8,
+  },
+  groupContributionCard: {
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: borders.radius.md,
+    padding: spacing.sm,
+    gap: 4,
+  },
+  groupContributionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  groupContributionInfo: {
+    flex: 1,
+  },
+  groupContributionExercise: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  groupContributionSession: {
+    color: colors.textMuted,
+    fontSize: 11,
+  },
+  groupContributionValue: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  groupContributionMuscles: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    lineHeight: 16,
   },
 });

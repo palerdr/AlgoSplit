@@ -539,7 +539,7 @@ async def update_split(
         update_data = {}
         if split_update.name is not None:
             update_data["name"] = split_update.name
-        if split_update.cycle_length is not None:
+        if "cycle_length" in split_update.model_fields_set:
             update_data["cycle_length"] = split_update.cycle_length
         if split_update.stimulus_duration is not None:
             update_data["stimulus_duration"] = split_update.stimulus_duration

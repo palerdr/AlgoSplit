@@ -194,3 +194,18 @@ def test_create_split_rejects_day_above_7(client):
     response = client.post("/api/splits", json=payload)
 
     assert response.status_code == 422
+
+
+def test_update_split_allows_clearing_cycle_length(client):
+    payload = _create_payload("Clear Cycle Length")
+    payload["cycle_length"] = 7
+    create_resp = client.post("/api/splits", json=payload)
+    split_id = create_resp.json()["id"]
+
+    update_resp = client.put(
+        f"/api/splits/{split_id}",
+        json={"cycle_length": None},
+    )
+
+    assert update_resp.status_code == 200
+    assert update_resp.json()["cycle_length"] is None

@@ -16,7 +16,12 @@ import SessionEditorMobile from '../../../src/components/splits/SessionEditorMob
 import { useCreateSplit } from '../../../src/hooks/useSplits';
 import { useSettingsStore } from '../../../src/stores/settingsStore';
 import { getErrorMessage } from '../../../src/api/client';
-import { generateExerciseId, generateSessionId } from '../../../src/utils/splitEditHelpers';
+import {
+  generateExerciseId,
+  generateSessionId,
+  normalizeSessionsForSave,
+  parseCycleLengthInput,
+} from '../../../src/utils/splitEditHelpers';
 import { colors, typography, spacing, borders } from '../../../src/theme';
 import type { SessionInput } from '../../../src/types/api.types';
 
@@ -158,21 +163,21 @@ export default function CreateSplitScreen() {
 
     setError('');
     try {
-      const parsedCycleLength = parseInt(cycleLength, 10);
-      if (Number.isFinite(parsedCycleLength) && parsedCycleLength > 7) {
-        showSaveError('Cycle length must be 7 days or fewer.');
+      const parsedCycleLength = parseCycleLengthInput(cycleLength);
+      if (cycleLength.trim() && parsedCycleLength == null) {
+        showSaveError('Cycle length must be between 1 and 7 days.');
         return;
       }
+      if (parsedCycleLength != null && namedSessions.length > parsedCycleLength) {
+        showSaveError('Cycle length cannot be shorter than the number of training days in the split.');
+        return;
+      }
+      const normalizedSessions = normalizeSessionsForSave(namedSessions, parsedCycleLength);
       const result = await createMutation.mutateAsync({
         name: splitName.trim(),
-        sessions: namedSessions
-          .map((session) => ({
-            name: session.name.trim(),
-            day: Math.max(1, Math.min(7, session.day)),
-            exercises: session.exercises.filter((exercise) => exercise.name.trim()),
-          })),
+        sessions: normalizedSessions,
         dataset,
-        cycle_length: Number.isFinite(parsedCycleLength) ? parsedCycleLength : undefined,
+        cycle_length: parsedCycleLength,
         stimulus_duration: parseInt(stimulusDuration, 10) || 48,
         maintenance_volume: parseInt(maintenanceVolume, 10) || 3,
       });

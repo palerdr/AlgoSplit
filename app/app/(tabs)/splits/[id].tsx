@@ -33,6 +33,8 @@ import {
   hasChanges as checkHasChanges,
   generateExerciseId,
   generateSessionId,
+  normalizeSessionsForSave,
+  parseCycleLengthInput,
 } from '../../../src/utils/splitEditHelpers';
 import { colors, borders, spacing } from '../../../src/theme';
 import { triggerExpandTransition } from '../../../src/utils/workoutTransition';
@@ -233,12 +235,12 @@ export default function SplitDetailScreen() {
   // Edit-mode dirty check (includes advanced settings)
   const dirty = useMemo(() => {
     if (!split || !isEditing) return false;
-    const parsedCycleLength = parseInt(advCycleLength, 10);
+    const parsedCycleLength = parseCycleLengthInput(advCycleLength);
     const current = {
       name: editName,
       sessions: editSessions,
       dataset: advDataset,
-      cycle_length: Number.isFinite(parsedCycleLength) ? parsedCycleLength : undefined,
+      cycle_length: parsedCycleLength,
       stimulus_duration: parseInt(advStimulusDuration, 10) || 48,
       maintenance_volume: parseInt(advMaintenanceVolume, 10) || 3,
     };
@@ -271,11 +273,17 @@ export default function SplitDetailScreen() {
         return;
       }
 
-      const normalizedSessions = namedSessions.map((session) => ({
-        ...session,
-        day: Math.max(1, Math.min(7, session.day)),
-        exercises: session.exercises.filter((exercise) => exercise.name.trim()),
-      }));
+      const parsedCycleLength = parseCycleLengthInput(advCycleLength);
+      if (advCycleLength.trim() && parsedCycleLength == null) {
+        Alert.alert('Error', 'Cycle length must be between 1 and 7 days.');
+        return;
+      }
+      if (parsedCycleLength != null && namedSessions.length > parsedCycleLength) {
+        Alert.alert('Error', 'Cycle length cannot be shorter than the number of training days in the split.');
+        return;
+      }
+
+      const normalizedSessions = normalizeSessionsForSave(namedSessions, parsedCycleLength);
 
       const originalEditable = splitResponseToEditable(split);
       const { canUseFastPath, updates } = buildFastExercisePatches(
@@ -290,12 +298,7 @@ export default function SplitDetailScreen() {
         metadataUpdate.name = nextName;
       }
       const nextDataset = advDataset;
-      const parsedCycleLength = parseInt(advCycleLength, 10);
-      if (Number.isFinite(parsedCycleLength) && parsedCycleLength > 7) {
-        Alert.alert('Error', 'Cycle length must be 7 days or fewer.');
-        return;
-      }
-      const nextCycleLength = Number.isFinite(parsedCycleLength) ? parsedCycleLength : null;
+      const nextCycleLength = parsedCycleLength ?? null;
       const nextStimulus = parseInt(advStimulusDuration, 10) || 48;
       const nextMaintenance = parseInt(advMaintenanceVolume, 10) || 3;
       if (nextDataset !== split.dataset) metadataUpdate.dataset = nextDataset;
@@ -377,8 +380,7 @@ export default function SplitDetailScreen() {
       const nextCycleLength =
         overrides?.cycle_length ??
         (() => {
-          const parsed = parseInt(advCycleLength, 10);
-          return Number.isFinite(parsed) ? Math.min(7, Math.max(1, parsed)) : null;
+          return parseCycleLengthInput(advCycleLength) ?? null;
         })();
       const nextStimulusDuration =
         overrides?.stimulus_duration ?? (parseInt(advStimulusDuration, 10) || 48);
@@ -425,9 +427,18 @@ export default function SplitDetailScreen() {
 
   const handleAdvCycleLengthBlur = useCallback(() => {
     if (!isEditing && split) {
-      const parsed = parseInt(advCycleLength, 10);
-      const nextCycleLength = Number.isFinite(parsed) ? Math.min(7, Math.max(1, parsed)) : null;
-      if (Number.isFinite(parsed) && parsed !== nextCycleLength) {
+      const nextCycleLength = parseCycleLengthInput(advCycleLength) ?? null;
+      if (advCycleLength.trim() === '') {
+        if ((split.cycle_length ?? null) !== null) {
+          saveAdvancedSettings({ cycle_length: null });
+        }
+        return;
+      }
+      if (nextCycleLength == null) {
+        setAdvCycleLength(split.cycle_length != null ? String(split.cycle_length) : '');
+        return;
+      }
+      if (String(nextCycleLength) !== advCycleLength) {
         setAdvCycleLength(String(nextCycleLength));
       }
       if (nextCycleLength !== (split.cycle_length ?? null)) {
