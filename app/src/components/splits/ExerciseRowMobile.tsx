@@ -172,6 +172,7 @@ export default function ExerciseRowMobile({
             <Ionicons name="remove-circle-outline" size={20} color={colors.textSecondary} />
           </TouchableOpacity>
           <Text style={styles.setsValue}>{exercise.sets}</Text>
+          <Text style={styles.setsLabel}>sets</Text>
           <TouchableOpacity
             onPress={() => onUpdate({ ...exercise, sets: exercise.sets + 1 })}
             hitSlop={6}
@@ -295,5 +296,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     minWidth: 18,
     textAlign: 'center',
+  },
+  setsLabel: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
