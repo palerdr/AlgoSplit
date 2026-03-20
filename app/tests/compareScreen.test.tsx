@@ -11,6 +11,7 @@ jest.mock('react-native-safe-area-context', () => ({
 
 jest.mock('../src/hooks/useSplits', () => ({
   useSplitsList: jest.fn(),
+  useSplitsListWithOptions: jest.fn(),
 }));
 
 jest.mock('../src/hooks/useComparisons', () => ({
@@ -27,7 +28,7 @@ import React from 'react';
 import { Alert } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import CompareSplitsScreen from '../app/(tabs)/splits/compare';
-import { useSplitsList } from '../src/hooks/useSplits';
+import { useSplitsList, useSplitsListWithOptions } from '../src/hooks/useSplits';
 import {
   useComparisonsList,
   useDeleteComparison,
@@ -37,6 +38,7 @@ import { analyzeSplit } from '../src/api/splits.api';
 import { useCompareStore } from '../src/stores/compareStore';
 
 const mockUseSplitsList = useSplitsList as jest.Mock;
+const mockUseSplitsListWithOptions = useSplitsListWithOptions as jest.Mock;
 const mockUseComparisonsList = useComparisonsList as jest.Mock;
 const mockUseSaveComparison = useSaveComparison as jest.Mock;
 const mockUseDeleteComparison = useDeleteComparison as jest.Mock;
@@ -69,7 +71,7 @@ describe('CompareSplitsScreen', () => {
     act(() => {
       useCompareStore.getState().reset();
     });
-    mockUseSplitsList.mockReturnValue({
+    const splitsResult = {
       data: {
         splits: [
           { id: 's1', name: 'Push', sessions: [{ id: 'a' }], stimulus_duration: 48, dataset: 'schoenfeld' },
@@ -79,7 +81,9 @@ describe('CompareSplitsScreen', () => {
         ],
       },
       isLoading: false,
-    });
+    };
+    mockUseSplitsList.mockReturnValue(splitsResult);
+    mockUseSplitsListWithOptions.mockReturnValue(splitsResult);
     mockUseComparisonsList.mockReturnValue({
       data: {
         comparisons: [

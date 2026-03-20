@@ -1,0 +1,1630 @@
+{
+  "ppl_7day": {
+    "clavicular": {
+      "stimulus": 2.04617856,
+      "atrophy": 5.754,
+      "net": -3.70782144,
+      "primary_sets": 3,
+      "weekly_frequency": 1.0
+    },
+    "sternocostal": {
+      "stimulus": 3.36015291,
+      "atrophy": 1.233,
+      "net": 2.12715291,
+      "primary_sets": 6,
+      "weekly_frequency": 2.0
+    },
+    "anterior_deltoid": {
+      "stimulus": 1.77320838,
+      "atrophy": 0.411,
+      "net": 1.36220838,
+      "primary_sets": 3,
+      "weekly_frequency": 1.0
+    },
+    "lateral_deltoid": {
+      "stimulus": 3.11455008,
+      "atrophy": 1.233,
+      "net": 1.88155008,
+      "primary_sets": 9,
+      "weekly_frequency": 2.0
+    },
+    "posterior_deltoid": {
+      "stimulus": 2.737949,
+      "atrophy": 0.0,
+      "net": 2.737949,
+      "primary_sets": 3,
+      "weekly_frequency": 1.0
+    },
+    "trapezius": {
+      "stimulus": 2.95063567,
+      "atrophy": 1.233,
+      "net": 1.71763567,
+      "primary_sets": 9,
+      "weekly_frequency": 2.0
+    },
+    "rhomboids": {
+      "stimulus": 1.24731586,
+      "atrophy": 1.233,
+      "net": 0.01431586,
+      "primary_sets": 9,
+      "weekly_frequency": 2.0
+    },
+    "spinal_erectors": {
+      "stimulus": 0.8419029,
+      "atrophy": 1.233,
+      "net": -0.3910971,
+      "primary_sets": 6,
+      "weekly_frequency": 2.0
+    },
+    "thoracic_lats": {
+      "stimulus": 2.80858379,
+      "atrophy": 1.233,
+      "net": 1.57558379,
+      "primary_sets": 6,
+      "weekly_frequency": 2.0
+    },
+    "iliac_lats": {
+      "stimulus": 0.17723314,
+      "atrophy": 0.0,
+      "net": 0.17723314,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "biceps_brachii": {
+      "stimulus": 2.71824293,
+      "atrophy": 1.233,
+      "net": 1.48524293,
+      "primary_sets": 4,
+      "weekly_frequency": 2.0
+    },
+    "brachialis": {
+      "stimulus": 0.52525196,
+      "atrophy": 1.233,
+      "net": -0.70774804,
+      "primary_sets": 4,
+      "weekly_frequency": 2.0
+    },
+    "brachioradialis": {
+      "stimulus": 0.26558251,
+      "atrophy": 0.0,
+      "net": 0.26558251,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "triceps_long_head": {
+      "stimulus": 1.31915297,
+      "atrophy": 5.754,
+      "net": -4.43484703,
+      "primary_sets": 2,
+      "weekly_frequency": 1.0
+    },
+    "triceps_lateral_medial": {
+      "stimulus": 2.28422112,
+      "atrophy": 1.233,
+      "net": 1.05122112,
+      "primary_sets": 4,
+      "weekly_frequency": 2.0
+    },
+    "wrist_flexors": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "wrist_extensors": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "glute_max": {
+      "stimulus": 1.18847774,
+      "atrophy": 1.233,
+      "net": -0.04452226,
+      "primary_sets": 14,
+      "weekly_frequency": 2.0
+    },
+    "glute_med_min": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "vasti": {
+      "stimulus": 1.41476316,
+      "atrophy": 1.233,
+      "net": 0.18176316,
+      "primary_sets": 12,
+      "weekly_frequency": 2.0
+    },
+    "rectus_femoris": {
+      "stimulus": 1.19004394,
+      "atrophy": 1.233,
+      "net": -0.04295606,
+      "primary_sets": 12,
+      "weekly_frequency": 2.0
+    },
+    "hip_extensors": {
+      "stimulus": 1.44808638,
+      "atrophy": 1.233,
+      "net": 0.21508638,
+      "primary_sets": 10,
+      "weekly_frequency": 2.0
+    },
+    "knee_flexors": {
+      "stimulus": 1.48810511,
+      "atrophy": 1.233,
+      "net": 0.25510511,
+      "primary_sets": 4,
+      "weekly_frequency": 2.0
+    },
+    "gastrocnemius": {
+      "stimulus": 1.93947532,
+      "atrophy": 1.233,
+      "net": 0.70647532,
+      "primary_sets": 6,
+      "weekly_frequency": 2.0
+    },
+    "soleus": {
+      "stimulus": 1.27819482,
+      "atrophy": 1.233,
+      "net": 0.04519482,
+      "primary_sets": 6,
+      "weekly_frequency": 2.0
+    },
+    "hip_adductors": {
+      "stimulus": 0.4616858,
+      "atrophy": 0.0,
+      "net": 0.4616858,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "anterior_core": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "lateral_core": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "deep_core": {
+      "stimulus": 0.41385556,
+      "atrophy": 0.0,
+      "net": 0.41385556,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    }
+  },
+  "cycle_4_day": {
+    "clavicular": {
+      "stimulus": 2.48632434,
+      "atrophy": 1.33575,
+      "net": 1.15057434,
+      "primary_sets": 5,
+      "weekly_frequency": 1.75
+    },
+    "sternocostal": {
+      "stimulus": 3.17326767,
+      "atrophy": 1.33575,
+      "net": 1.83751767,
+      "primary_sets": 5,
+      "weekly_frequency": 1.75
+    },
+    "anterior_deltoid": {
+      "stimulus": 2.2250485,
+      "atrophy": 1.33575,
+      "net": 0.8892985,
+      "primary_sets": 3,
+      "weekly_frequency": 1.75
+    },
+    "lateral_deltoid": {
+      "stimulus": 2.78427716,
+      "atrophy": 0.51375,
+      "net": 2.27052716,
+      "primary_sets": 7,
+      "weekly_frequency": 3.5
+    },
+    "posterior_deltoid": {
+      "stimulus": 1.12075114,
+      "atrophy": 0.0,
+      "net": 1.12075114,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "trapezius": {
+      "stimulus": 1.97237375,
+      "atrophy": 1.33575,
+      "net": 0.63662375,
+      "primary_sets": 5,
+      "weekly_frequency": 1.75
+    },
+    "rhomboids": {
+      "stimulus": 0.83039619,
+      "atrophy": 1.33575,
+      "net": -0.50535381,
+      "primary_sets": 5,
+      "weekly_frequency": 1.75
+    },
+    "spinal_erectors": {
+      "stimulus": 0.73909243,
+      "atrophy": 1.33575,
+      "net": -0.59665757,
+      "primary_sets": 5,
+      "weekly_frequency": 1.75
+    },
+    "thoracic_lats": {
+      "stimulus": 2.68500092,
+      "atrophy": 1.33575,
+      "net": 1.34925092,
+      "primary_sets": 5,
+      "weekly_frequency": 1.75
+    },
+    "iliac_lats": {
+      "stimulus": 0.15559,
+      "atrophy": 0.0,
+      "net": 0.15559,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "biceps_brachii": {
+      "stimulus": 2.47357829,
+      "atrophy": 1.33575,
+      "net": 1.13782829,
+      "primary_sets": 3,
+      "weekly_frequency": 1.75
+    },
+    "brachialis": {
+      "stimulus": 0.49646715,
+      "atrophy": 1.33575,
+      "net": -0.83928285,
+      "primary_sets": 3,
+      "weekly_frequency": 1.75
+    },
+    "brachioradialis": {
+      "stimulus": 0.26369799,
+      "atrophy": 0.0,
+      "net": 0.26369799,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "triceps_long_head": {
+      "stimulus": 1.87696894,
+      "atrophy": 1.33575,
+      "net": 0.54121894,
+      "primary_sets": 3,
+      "weekly_frequency": 1.75
+    },
+    "triceps_lateral_medial": {
+      "stimulus": 1.21286378,
+      "atrophy": 1.33575,
+      "net": -0.12288622,
+      "primary_sets": 3,
+      "weekly_frequency": 1.75
+    },
+    "wrist_flexors": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "wrist_extensors": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "glute_max": {
+      "stimulus": 1.04334467,
+      "atrophy": 1.33575,
+      "net": -0.29240533,
+      "primary_sets": 12,
+      "weekly_frequency": 1.75
+    },
+    "glute_med_min": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "vasti": {
+      "stimulus": 1.24199684,
+      "atrophy": 1.33575,
+      "net": -0.09375316,
+      "primary_sets": 10,
+      "weekly_frequency": 1.75
+    },
+    "rectus_femoris": {
+      "stimulus": 1.04471961,
+      "atrophy": 1.33575,
+      "net": -0.29103039,
+      "primary_sets": 10,
+      "weekly_frequency": 1.75
+    },
+    "hip_extensors": {
+      "stimulus": 1.10586005,
+      "atrophy": 1.33575,
+      "net": -0.22988995,
+      "primary_sets": 5,
+      "weekly_frequency": 1.75
+    },
+    "knee_flexors": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "gastrocnemius": {
+      "stimulus": 1.38315377,
+      "atrophy": 1.33575,
+      "net": 0.04740377,
+      "primary_sets": 5,
+      "weekly_frequency": 1.75
+    },
+    "soleus": {
+      "stimulus": 1.13167126,
+      "atrophy": 1.33575,
+      "net": -0.20407874,
+      "primary_sets": 5,
+      "weekly_frequency": 1.75
+    },
+    "hip_adductors": {
+      "stimulus": 0.40530622,
+      "atrophy": 0.0,
+      "net": 0.40530622,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "anterior_core": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "lateral_core": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "deep_core": {
+      "stimulus": 0.36331685,
+      "atrophy": 0.0,
+      "net": 0.36331685,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    }
+  },
+  "cycle_5_day": {
+    "clavicular": {
+      "stimulus": 2.19502504,
+      "atrophy": 1.8084,
+      "net": 0.38662504,
+      "primary_sets": 4,
+      "weekly_frequency": 1.4
+    },
+    "sternocostal": {
+      "stimulus": 2.36075687,
+      "atrophy": 1.8084,
+      "net": 0.55235687,
+      "primary_sets": 4,
+      "weekly_frequency": 1.4
+    },
+    "anterior_deltoid": {
+      "stimulus": 1.72287438,
+      "atrophy": 1.8084,
+      "net": -0.08552562,
+      "primary_sets": 2,
+      "weekly_frequency": 1.4
+    },
+    "lateral_deltoid": {
+      "stimulus": 2.96571983,
+      "atrophy": 0.411,
+      "net": 2.55471983,
+      "primary_sets": 7,
+      "weekly_frequency": 2.8
+    },
+    "posterior_deltoid": {
+      "stimulus": 1.2946643,
+      "atrophy": 0.0,
+      "net": 1.2946643,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "trapezius": {
+      "stimulus": 2.81074326,
+      "atrophy": 1.0686,
+      "net": 1.74214326,
+      "primary_sets": 11,
+      "weekly_frequency": 2.8
+    },
+    "rhomboids": {
+      "stimulus": 1.16407465,
+      "atrophy": 1.0686,
+      "net": 0.09547465,
+      "primary_sets": 11,
+      "weekly_frequency": 2.8
+    },
+    "spinal_erectors": {
+      "stimulus": 0.52962095,
+      "atrophy": 1.8084,
+      "net": -1.27877905,
+      "primary_sets": 4,
+      "weekly_frequency": 1.4
+    },
+    "thoracic_lats": {
+      "stimulus": 2.14465561,
+      "atrophy": 1.8084,
+      "net": 0.33625561,
+      "primary_sets": 4,
+      "weekly_frequency": 1.4
+    },
+    "iliac_lats": {
+      "stimulus": 0.11149313,
+      "atrophy": 0.0,
+      "net": 0.11149313,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "biceps_brachii": {
+      "stimulus": 2.91574698,
+      "atrophy": 1.0686,
+      "net": 1.84714698,
+      "primary_sets": 5,
+      "weekly_frequency": 2.8
+    },
+    "brachialis": {
+      "stimulus": 0.53189466,
+      "atrophy": 1.0686,
+      "net": -0.53670534,
+      "primary_sets": 5,
+      "weekly_frequency": 2.8
+    },
+    "brachioradialis": {
+      "stimulus": 0.31675087,
+      "atrophy": 0.0,
+      "net": 0.31675087,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "triceps_long_head": {
+      "stimulus": 3.10785005,
+      "atrophy": 0.411,
+      "net": 2.69685005,
+      "primary_sets": 7,
+      "weekly_frequency": 2.8
+    },
+    "triceps_lateral_medial": {
+      "stimulus": 1.75048622,
+      "atrophy": 0.411,
+      "net": 1.33948622,
+      "primary_sets": 7,
+      "weekly_frequency": 2.8
+    },
+    "wrist_flexors": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "wrist_extensors": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "glute_max": {
+      "stimulus": 0.74764288,
+      "atrophy": 1.8084,
+      "net": -1.06075712,
+      "primary_sets": 9,
+      "weekly_frequency": 1.4
+    },
+    "glute_med_min": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "vasti": {
+      "stimulus": 0.88999362,
+      "atrophy": 1.8084,
+      "net": -0.91840638,
+      "primary_sets": 8,
+      "weekly_frequency": 1.4
+    },
+    "rectus_femoris": {
+      "stimulus": 0.74862814,
+      "atrophy": 1.8084,
+      "net": -1.05977186,
+      "primary_sets": 8,
+      "weekly_frequency": 1.4
+    },
+    "hip_extensors": {
+      "stimulus": 0.91095646,
+      "atrophy": 1.8084,
+      "net": -0.89744354,
+      "primary_sets": 7,
+      "weekly_frequency": 1.4
+    },
+    "knee_flexors": {
+      "stimulus": 0.93613129,
+      "atrophy": 1.8084,
+      "net": -0.87226871,
+      "primary_sets": 2,
+      "weekly_frequency": 1.4
+    },
+    "gastrocnemius": {
+      "stimulus": 0.2373109,
+      "atrophy": 0.0,
+      "net": 0.2373109,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "soleus": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "hip_adductors": {
+      "stimulus": 0.29043548,
+      "atrophy": 0.0,
+      "net": 0.29043548,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "anterior_core": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "lateral_core": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "deep_core": {
+      "stimulus": 0.26034662,
+      "atrophy": 0.0,
+      "net": 0.26034662,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    }
+  },
+  "cycle_6_day": {
+    "clavicular": {
+      "stimulus": 1.57679638,
+      "atrophy": 2.055,
+      "net": -0.47820362,
+      "primary_sets": 3,
+      "weekly_frequency": 1.16666667
+    },
+    "sternocostal": {
+      "stimulus": 1.63796295,
+      "atrophy": 2.055,
+      "net": -0.41703705,
+      "primary_sets": 3,
+      "weekly_frequency": 1.16666667
+    },
+    "anterior_deltoid": {
+      "stimulus": 1.50695872,
+      "atrophy": 2.055,
+      "net": -0.54804128,
+      "primary_sets": 3,
+      "weekly_frequency": 1.16666667
+    },
+    "lateral_deltoid": {
+      "stimulus": 2.25161557,
+      "atrophy": 0.8905,
+      "net": 1.36111557,
+      "primary_sets": 7,
+      "weekly_frequency": 2.33333333
+    },
+    "posterior_deltoid": {
+      "stimulus": 0.98707957,
+      "atrophy": 0.0,
+      "net": 0.98707957,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "trapezius": {
+      "stimulus": 1.48800974,
+      "atrophy": 2.055,
+      "net": -0.56699026,
+      "primary_sets": 5,
+      "weekly_frequency": 1.16666667
+    },
+    "rhomboids": {
+      "stimulus": 0.66501777,
+      "atrophy": 2.055,
+      "net": -1.38998223,
+      "primary_sets": 5,
+      "weekly_frequency": 1.16666667
+    },
+    "spinal_erectors": {
+      "stimulus": 0.63638575,
+      "atrophy": 2.055,
+      "net": -1.41861425,
+      "primary_sets": 3,
+      "weekly_frequency": 1.16666667
+    },
+    "thoracic_lats": {
+      "stimulus": 2.78779193,
+      "atrophy": 0.685,
+      "net": 2.10279193,
+      "primary_sets": 7,
+      "weekly_frequency": 2.33333333
+    },
+    "iliac_lats": {
+      "stimulus": 0.12247509,
+      "atrophy": 0.0,
+      "net": 0.12247509,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "biceps_brachii": {
+      "stimulus": 1.86012161,
+      "atrophy": 2.055,
+      "net": -0.19487839,
+      "primary_sets": 2,
+      "weekly_frequency": 1.16666667
+    },
+    "brachialis": {
+      "stimulus": 0.37622618,
+      "atrophy": 2.055,
+      "net": -1.67877382,
+      "primary_sets": 2,
+      "weekly_frequency": 1.16666667
+    },
+    "brachioradialis": {
+      "stimulus": 0.20041519,
+      "atrophy": 0.0,
+      "net": 0.20041519,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "triceps_long_head": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "triceps_lateral_medial": {
+      "stimulus": 0.44071201,
+      "atrophy": 0.0,
+      "net": 0.44071201,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "wrist_flexors": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "wrist_extensors": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "glute_max": {
+      "stimulus": 1.09313536,
+      "atrophy": 0.685,
+      "net": 0.40813536,
+      "primary_sets": 11,
+      "weekly_frequency": 2.33333333
+    },
+    "glute_med_min": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "vasti": {
+      "stimulus": 1.32111202,
+      "atrophy": 0.685,
+      "net": 0.63611202,
+      "primary_sets": 10,
+      "weekly_frequency": 2.33333333
+    },
+    "rectus_femoris": {
+      "stimulus": 1.02257349,
+      "atrophy": 0.685,
+      "net": 0.33757349,
+      "primary_sets": 10,
+      "weekly_frequency": 2.33333333
+    },
+    "hip_extensors": {
+      "stimulus": 1.16004651,
+      "atrophy": 0.685,
+      "net": 0.47504651,
+      "primary_sets": 7,
+      "weekly_frequency": 2.33333333
+    },
+    "knee_flexors": {
+      "stimulus": 0.77085224,
+      "atrophy": 2.055,
+      "net": -1.28414776,
+      "primary_sets": 3,
+      "weekly_frequency": 1.16666667
+    },
+    "gastrocnemius": {
+      "stimulus": 0.85552877,
+      "atrophy": 2.055,
+      "net": -1.19947123,
+      "primary_sets": 3,
+      "weekly_frequency": 1.16666667
+    },
+    "soleus": {
+      "stimulus": 0.52448224,
+      "atrophy": 2.055,
+      "net": -1.53051776,
+      "primary_sets": 3,
+      "weekly_frequency": 1.16666667
+    },
+    "hip_adductors": {
+      "stimulus": 0.42336721,
+      "atrophy": 0.0,
+      "net": 0.42336721,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "anterior_core": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "lateral_core": {
+      "stimulus": 0.0,
+      "atrophy": 0.0,
+      "net": 0.0,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    },
+    "deep_core": {
+      "stimulus": 0.34304723,
+      "atrophy": 0.0,
+      "net": 0.34304723,
+      "primary_sets": 0,
+      "weekly_frequency": 0.0
+    }
+  },
+  "single_session_breakdown": [
+    {
+      "time": 0,
+      "total_sets": 9,
+      "muscles_trained": [
+        "anterior_deltoid",
+        "biceps_brachii",
+        "brachialis",
+        "brachioradialis",
+        "clavicular",
+        "deep_core",
+        "glute_max",
+        "hip_adductors",
+        "hip_extensors",
+        "posterior_deltoid",
+        "rectus_femoris",
+        "rhomboids",
+        "spinal_erectors",
+        "sternocostal",
+        "thoracic_lats",
+        "trapezius",
+        "triceps_lateral_medial",
+        "vasti"
+      ],
+      "stimulus_by_muscle": {
+        "anterior_deltoid": 0.21227409,
+        "biceps_brachii": 0.12493339,
+        "brachialis": 0.07496003,
+        "brachioradialis": 0.04997335,
+        "clavicular": 0.37460133,
+        "deep_core": 0.12757595,
+        "glute_max": 0.49176719,
+        "hip_adductors": 0.23716881,
+        "hip_extensors": 0.11858441,
+        "posterior_deltoid": 0.23224234,
+        "rectus_femoris": 0.29506032,
+        "rhomboids": 0.3851747,
+        "spinal_erectors": 0.12757595,
+        "sternocostal": 1.4502386,
+        "thoracic_lats": 0.11612117,
+        "trapezius": 0.96293675,
+        "triceps_lateral_medial": 0.11417564,
+        "vasti": 0.68847407
+      },
+      "axial_fatigue": 0.54,
+      "bilateral_compounds": 3,
+      "bilateral_compound_sets": 9,
+      "consecutive_day_penalty": 1.0,
+      "exercise_breakdowns": [
+        {
+          "name": "Bench Press",
+          "pattern": "humeral_adduction_compound",
+          "sets": 3,
+          "resistance_profile": "mid",
+          "is_bilateral": true,
+          "is_unilateral": false,
+          "axial_load": 0.0,
+          "muscle_contributions": [
+            {
+              "muscle_id": "anterior_deltoid",
+              "display_name": "Front Delt",
+              "tier": "secondary",
+              "base_weight": 0.1,
+              "leverage_weight": 0.08695652,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.08695652,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.99126468,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.08619693
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.08695652,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.802,
+                  "global_multiplier": 0.98303807,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.06855622
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.08695652,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.67825,
+                  "global_multiplier": 0.97529053,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.05752094
+                }
+              ],
+              "total_stimulus": 0.21227409
+            },
+            {
+              "muscle_id": "clavicular",
+              "display_name": "Upper Chest",
+              "tier": "secondary",
+              "base_weight": 0.15,
+              "leverage_weight": 0.15345269,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.15345269,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.99126468,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.15211223
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.15345269,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.802,
+                  "global_multiplier": 0.98303807,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.12098156
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.15345269,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.67825,
+                  "global_multiplier": 0.97529053,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.10150754
+                }
+              ],
+              "total_stimulus": 0.37460133
+            },
+            {
+              "muscle_id": "sternocostal",
+              "display_name": "Mid-Lower Chest",
+              "tier": "prime",
+              "base_weight": 0.7,
+              "leverage_weight": 0.71611253,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.71611253,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.99126468,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.70985706
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.71611253,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.64,
+                  "global_multiplier": 0.98303807,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.45053816
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.71611253,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.415,
+                  "global_multiplier": 0.97529053,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.28984338
+                }
+              ],
+              "total_stimulus": 1.4502386
+            },
+            {
+              "muscle_id": "triceps_lateral_medial",
+              "display_name": "Triceps Lateral/Medial",
+              "tier": "tertiary",
+              "base_weight": 0.05,
+              "leverage_weight": 0.04347826,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.04347826,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.99126468,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.04309846
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.04347826,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.874,
+                  "global_multiplier": 0.98303807,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.03735545
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.04347826,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.79525,
+                  "global_multiplier": 0.97529053,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.03372173
+                }
+              ],
+              "total_stimulus": 0.11417564
+            }
+          ]
+        },
+        {
+          "name": "Squat",
+          "pattern": "squat_compound",
+          "sets": 3,
+          "resistance_profile": "mid",
+          "is_bilateral": true,
+          "is_unilateral": false,
+          "axial_load": 0.8,
+          "muscle_contributions": [
+            {
+              "muscle_id": "deep_core",
+              "display_name": "Transverse Abdominis",
+              "tier": "tertiary",
+              "base_weight": 0.05,
+              "leverage_weight": 0.05,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.96179147,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.04808957
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.874,
+                  "global_multiplier": 0.95528125,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.04174579
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.79525,
+                  "global_multiplier": 0.94915014,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.03774058
+                }
+              ],
+              "total_stimulus": 0.12757595
+            },
+            {
+              "muscle_id": "glute_max",
+              "display_name": "Gluteus Maximus",
+              "tier": "prime",
+              "base_weight": 0.25,
+              "leverage_weight": 0.25,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.25,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.96179147,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.24044787
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.25,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.64,
+                  "global_multiplier": 0.95528125,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.152845
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.25,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.415,
+                  "global_multiplier": 0.94915014,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.09847433
+                }
+              ],
+              "total_stimulus": 0.49176719
+            },
+            {
+              "muscle_id": "hip_adductors",
+              "display_name": "Hip Adductors",
+              "tier": "secondary",
+              "base_weight": 0.1,
+              "leverage_weight": 0.1,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.1,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.96179147,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.09617915
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.1,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.802,
+                  "global_multiplier": 0.95528125,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.07661356
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.1,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.67825,
+                  "global_multiplier": 0.94915014,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.06437611
+                }
+              ],
+              "total_stimulus": 0.23716881
+            },
+            {
+              "muscle_id": "hip_extensors",
+              "display_name": "Hamstrings (Proximal)",
+              "tier": "secondary",
+              "base_weight": 0.05,
+              "leverage_weight": 0.05,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.96179147,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.04808957
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.802,
+                  "global_multiplier": 0.95528125,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.03830678
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.67825,
+                  "global_multiplier": 0.94915014,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.03218805
+                }
+              ],
+              "total_stimulus": 0.11858441
+            },
+            {
+              "muscle_id": "rectus_femoris",
+              "display_name": "Rectus Femoris",
+              "tier": "prime",
+              "base_weight": 0.15,
+              "leverage_weight": 0.15,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.15,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.96179147,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.14426872
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.15,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.64,
+                  "global_multiplier": 0.95528125,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.091707
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.15,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.415,
+                  "global_multiplier": 0.94915014,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.0590846
+                }
+              ],
+              "total_stimulus": 0.29506032
+            },
+            {
+              "muscle_id": "spinal_erectors",
+              "display_name": "Lower Back",
+              "tier": "tertiary",
+              "base_weight": 0.05,
+              "leverage_weight": 0.05,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.96179147,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.04808957
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.874,
+                  "global_multiplier": 0.95528125,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.04174579
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.79525,
+                  "global_multiplier": 0.94915014,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.03774058
+                }
+              ],
+              "total_stimulus": 0.12757595
+            },
+            {
+              "muscle_id": "vasti",
+              "display_name": "Vastus Group",
+              "tier": "prime",
+              "base_weight": 0.35,
+              "leverage_weight": 0.35,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.35,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.96179147,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.33662702
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.35,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.64,
+                  "global_multiplier": 0.95528125,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.213983
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.35,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.415,
+                  "global_multiplier": 0.94915014,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.13786406
+                }
+              ],
+              "total_stimulus": 0.68847407
+            }
+          ]
+        },
+        {
+          "name": "Barbell Row",
+          "pattern": "scapular_retraction_compound",
+          "sets": 3,
+          "resistance_profile": "mid",
+          "is_bilateral": true,
+          "is_unilateral": false,
+          "axial_load": 0.4,
+          "muscle_contributions": [
+            {
+              "muscle_id": "biceps_brachii",
+              "display_name": "Biceps",
+              "tier": "tertiary",
+              "base_weight": 0.05,
+              "leverage_weight": 0.05,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.94088866,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.04704443
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.874,
+                  "global_multiplier": 0.93559572,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.04088553
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.79525,
+                  "global_multiplier": 0.93061101,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.03700342
+                }
+              ],
+              "total_stimulus": 0.12493339
+            },
+            {
+              "muscle_id": "brachialis",
+              "display_name": "Brachialis",
+              "tier": "tertiary",
+              "base_weight": 0.03,
+              "leverage_weight": 0.03,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.03,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.94088866,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.02822666
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.03,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.874,
+                  "global_multiplier": 0.93559572,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.02453132
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.03,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.79525,
+                  "global_multiplier": 0.93061101,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.02220205
+                }
+              ],
+              "total_stimulus": 0.07496003
+            },
+            {
+              "muscle_id": "brachioradialis",
+              "display_name": "Brachioradialis",
+              "tier": "tertiary",
+              "base_weight": 0.02,
+              "leverage_weight": 0.02,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.02,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.94088866,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.01881777
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.02,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.874,
+                  "global_multiplier": 0.93559572,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.01635421
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.02,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.79525,
+                  "global_multiplier": 0.93061101,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.01480137
+                }
+              ],
+              "total_stimulus": 0.04997335
+            },
+            {
+              "muscle_id": "posterior_deltoid",
+              "display_name": "Rear Delt",
+              "tier": "secondary",
+              "base_weight": 0.1,
+              "leverage_weight": 0.1,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.1,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.94088866,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.09408887
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.1,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.802,
+                  "global_multiplier": 0.93559572,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.07503478
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.1,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.67825,
+                  "global_multiplier": 0.93061101,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.06311869
+                }
+              ],
+              "total_stimulus": 0.23224234
+            },
+            {
+              "muscle_id": "rhomboids",
+              "display_name": "Rhomboids",
+              "tier": "prime",
+              "base_weight": 0.2,
+              "leverage_weight": 0.2,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.2,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.94088866,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.18817773
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.2,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.64,
+                  "global_multiplier": 0.93559572,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.11975625
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.2,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.415,
+                  "global_multiplier": 0.93061101,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.07724071
+                }
+              ],
+              "total_stimulus": 0.3851747
+            },
+            {
+              "muscle_id": "thoracic_lats",
+              "display_name": "Upper Lats",
+              "tier": "secondary",
+              "base_weight": 0.05,
+              "leverage_weight": 0.05,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.94088866,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.04704443
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.802,
+                  "global_multiplier": 0.93559572,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.03751739
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.05,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.67825,
+                  "global_multiplier": 0.93061101,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.03155935
+                }
+              ],
+              "total_stimulus": 0.11612117
+            },
+            {
+              "muscle_id": "trapezius",
+              "display_name": "Traps",
+              "tier": "prime",
+              "base_weight": 0.5,
+              "leverage_weight": 0.5,
+              "sets": [
+                {
+                  "set_number": 1,
+                  "weight": 0.5,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 1.0,
+                  "global_multiplier": 0.94088866,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.47044433
+                },
+                {
+                  "set_number": 2,
+                  "weight": 0.5,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.64,
+                  "global_multiplier": 0.93559572,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.29939063
+                },
+                {
+                  "set_number": 3,
+                  "weight": 0.5,
+                  "recovery_multiplier": 1.0,
+                  "bilateral_multiplier": 1.0,
+                  "local_multiplier": 0.415,
+                  "global_multiplier": 0.93061101,
+                  "consecutive_day_multiplier": 1.0,
+                  "final_stimulus": 0.19310179
+                }
+              ],
+              "total_stimulus": 0.96293675
+            }
+          ]
+        }
+      ],
+      "final_cns_multiplier": 0.93061101,
+      "week": 1,
+      "consecutive_days": 1
+    }
+  ]
+}

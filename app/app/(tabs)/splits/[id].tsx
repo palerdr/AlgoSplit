@@ -18,6 +18,7 @@ import { prefetchPreviousWorkoutData } from '../../../src/hooks/useWorkouts';
 import {
   useSplit,
   useSplitAnalysis,
+  prefetchSplitAnalysisWithBreakdowns,
   useDeleteSplit,
   useReplaceSplit,
   useUpdateSplit,
@@ -189,6 +190,12 @@ export default function SplitDetailScreen() {
       if (dragResetTimerRef.current) clearTimeout(dragResetTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!split || !analysis) return;
+
+    void prefetchSplitAnalysisWithBreakdowns(queryClient, split.id, split);
+  }, [queryClient, split, analysis]);
 
 
   // Advanced settings — always interactive, independent from edit mode
@@ -847,7 +854,7 @@ export default function SplitDetailScreen() {
                 </View>
 
                 {/* Groups / Breakdown tabs */}
-                <AnalysisTabView splitId={split.id} analysis={analysis} />
+                <AnalysisTabView splitId={split.id} analysis={analysis} splitData={split} />
               </View>
             )}
           </>

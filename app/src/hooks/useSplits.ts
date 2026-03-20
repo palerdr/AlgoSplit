@@ -41,6 +41,34 @@ function splitToRequestPayload(split: SplitResponse, includeBreakdowns = false):
   };
 }
 
+function splitAnalysisQueryOptions(
+  id: string,
+  includeBreakdowns: boolean,
+  splitData?: SplitResponse,
+) {
+  const queryKey = [
+    ...splitKeys.analysis(id),
+    includeBreakdowns ? 'full' : 'lite',
+    splitData?.updated_at ?? 'server',
+  ] as const;
+
+  return {
+    queryKey,
+    queryFn: () => {
+      if (splitData) {
+        return analyzeSplitFromDefinition(
+          splitToRequestPayload(splitData, includeBreakdowns),
+          includeBreakdowns,
+        );
+      }
+
+      return analyzeSplit(id, includeBreakdowns);
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  };
+}
+
 function updateSplitInListCache(
   previous: SplitListResponse | undefined,
   updatedSplit: SplitResponse
@@ -82,21 +110,28 @@ export function useSplitAnalysis(
   splitData?: SplitResponse
 ) {
   return useQuery({
-    queryKey: [...splitKeys.analysis(id!), splitData?.updated_at ?? 'server'],
-    queryFn: () => {
-      if (splitData) {
-        return analyzeSplitFromDefinition(splitToRequestPayload(splitData, true), true);
-      }
-      return analyzeSplit(id!, true);
-    },
+    ...splitAnalysisQueryOptions(id!, false, splitData),
     enabled: !!id && enabled,
   });
 }
 
-export function useSplitAnalysisWithBreakdowns(id: string | undefined, enabled = true) {
-  // After P4 optimization, useSplitAnalysis always includes breakdowns.
-  // This hook now delegates to the same cache key — no separate fetch.
-  return useSplitAnalysis(id, enabled);
+export function useSplitAnalysisWithBreakdowns(
+  id: string | undefined,
+  enabled = true,
+  splitData?: SplitResponse,
+) {
+  return useQuery({
+    ...splitAnalysisQueryOptions(id!, true, splitData),
+    enabled: !!id && enabled,
+  });
+}
+
+export function prefetchSplitAnalysisWithBreakdowns(
+  qc: QueryClient,
+  id: string,
+  splitData?: SplitResponse,
+) {
+  return qc.prefetchQuery(splitAnalysisQueryOptions(id, true, splitData));
 }
 
 export function useReplaceSplit(options?: { invalidateLists?: boolean }) {

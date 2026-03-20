@@ -3,9 +3,10 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { colors, borders, spacing } from '../../theme';
 import GroupSummaryCards from './GroupSummaryCards';
 import StimulusBreakdownMobile from './StimulusBreakdownMobile';
-import { InfoButton } from '../ui';
+import { InfoButton, Spinner } from '../ui';
 import { HELP_CONTENT } from '../../data/helpContent';
-import type { AnalysisResponse } from '../../types/api.types';
+import { useSplitAnalysisWithBreakdowns } from '../../hooks/useSplits';
+import type { AnalysisResponse, SplitResponse } from '../../types/api.types';
 
 const TABS = ['Regions', 'Breakdown'] as const;
 type Tab = (typeof TABS)[number];
@@ -13,13 +14,18 @@ type Tab = (typeof TABS)[number];
 interface Props {
   splitId: string;
   analysis: AnalysisResponse;
+  splitData?: SplitResponse;
 }
 
-export default function AnalysisTabView({ analysis }: Props) {
+export default function AnalysisTabView({ splitId, analysis, splitData }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('Regions');
-  // After P4 optimization, analysis always includes breakdowns —
-  // no separate fetch needed for the Breakdown tab.
-  const breakdownData = analysis.session_breakdowns ?? [];
+  const shouldLoadBreakdown = activeTab === 'Breakdown';
+  const { data: fullAnalysis, isLoading: isBreakdownLoading } = useSplitAnalysisWithBreakdowns(
+    splitId,
+    shouldLoadBreakdown,
+    splitData,
+  );
+  const breakdownData = fullAnalysis?.session_breakdowns ?? analysis.session_breakdowns ?? [];
 
   return (
     <View>
@@ -43,6 +49,8 @@ export default function AnalysisTabView({ analysis }: Props) {
       <View style={styles.content}>
         {activeTab === 'Regions' ? (
           <GroupSummaryCards muscles={analysis.muscles ?? []} />
+        ) : isBreakdownLoading ? (
+          <Spinner style={styles.breakdownSpinner} />
         ) : (
           <StimulusBreakdownMobile sessionBreakdowns={breakdownData} />
         )}
@@ -85,5 +93,8 @@ const styles = StyleSheet.create({
   },
   content: {
     minHeight: 100,
+  },
+  breakdownSpinner: {
+    marginTop: spacing.md,
   },
 });

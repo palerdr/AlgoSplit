@@ -86,38 +86,41 @@ def preload_user_exercise_maps(user_id: str) -> UserExerciseMaps:
     custom_map: Dict[str, Dict[str, Any]] = {}
     override_map: Dict[str, str] = {}
 
-    supabase = get_supabase_client()
+    try:
+        supabase = get_supabase_client()
 
-    custom_result = (
-        supabase.table("custom_exercises")
-        .select("*")
-        .eq("user_id", user_id)
-        .execute()
-    )
-    for row in custom_result.data or []:
-        row_dict = _as_dict(row)
-        if row_dict is None:
-            continue
-        exercise_name_value = row_dict.get("exercise_name")
-        exercise_name = exercise_name_value.lower().strip() if isinstance(exercise_name_value, str) else ""
-        if exercise_name:
-            custom_map[exercise_name] = row_dict
+        custom_result = (
+            supabase.table("custom_exercises")
+            .select("*")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        for row in custom_result.data or []:
+            row_dict = _as_dict(row)
+            if row_dict is None:
+                continue
+            exercise_name_value = row_dict.get("exercise_name")
+            exercise_name = exercise_name_value.lower().strip() if isinstance(exercise_name_value, str) else ""
+            if exercise_name:
+                custom_map[exercise_name] = row_dict
 
-    override_result = (
-        supabase.table("exercise_overrides")
-        .select("exercise_name, pattern_override")
-        .eq("user_id", user_id)
-        .execute()
-    )
-    for row in override_result.data or []:
-        row_dict = _as_dict(row)
-        if row_dict is None:
-            continue
-        exercise_name_value = row_dict.get("exercise_name")
-        exercise_name = exercise_name_value.lower().strip() if isinstance(exercise_name_value, str) else ""
-        pattern_override = row_dict.get("pattern_override")
-        if exercise_name and isinstance(pattern_override, str):
-            override_map[exercise_name] = pattern_override
+        override_result = (
+            supabase.table("exercise_overrides")
+            .select("exercise_name, pattern_override")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        for row in override_result.data or []:
+            row_dict = _as_dict(row)
+            if row_dict is None:
+                continue
+            exercise_name_value = row_dict.get("exercise_name")
+            exercise_name = exercise_name_value.lower().strip() if isinstance(exercise_name_value, str) else ""
+            pattern_override = row_dict.get("pattern_override")
+            if exercise_name and isinstance(pattern_override, str):
+                override_map[exercise_name] = pattern_override
+    except Exception as e:
+        print(f"Error preloading user exercise maps: {e}")
 
     return {
         "custom": custom_map,

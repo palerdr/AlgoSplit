@@ -1,546 +1,499 @@
 """
-Parity tests for the analysis engine optimization.
+Regression tests for the analysis engine optimization work.
 
-These tests capture baseline stimulus/atrophy/net values for various split
-configurations and assert they remain stable (within 1e-6) after optimizations.
+These tests compare the current engine output against fixtures generated from
+the production `main` branch so we can refactor the hot path without changing
+stimulus semantics.
 """
 
 import json
 import time
-import pytest
 from pathlib import Path
-
-# Ensure backend is importable
 import sys
+from typing import Any
+
+
 backend_path = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_path))
 
-from core.MainClasses import Split, MuscleRegion
+from core.MainClasses import MuscleRegion, Split
 
 
-# ============================================================================
-# TEST SPLIT DEFINITIONS
-# ============================================================================
+FIXTURE_PATH = Path(__file__).parent / 'fixtures' / 'analysis_engine_main_baseline.json'
+BASELINE_FIXTURES = json.loads(FIXTURE_PATH.read_text(encoding='utf-8'))
 
-def make_ppl_7day():
-    """Standard Push/Pull/Legs on 7-day cycle."""
+
+def make_ppl_7day() -> Split:
     return Split(
-        name="PPL 7-day",
+        name='PPL 7-day',
         days=[
-            ("Push", 1, {
-                "Bench Press": 3,
-                "Incline DB Press": 3,
-                "Lateral Raise": 3,
-                "Tricep Pushdown": 2,
+            ('Push', 1, {
+                'Bench Press': 3,
+                'Incline DB Press': 3,
+                'Lateral Raise': 3,
+                'Tricep Pushdown': 2,
             }),
-            ("Pull", 2, {
-                "Lat Pulldown": 3,
-                "Barbell Row": 3,
-                "Face Pull": 3,
-                "Barbell Curl": 2,
+            ('Pull', 2, {
+                'Lat Pulldown': 3,
+                'Barbell Row': 3,
+                'Face Pull': 3,
+                'Barbell Curl': 2,
             }),
-            ("Legs", 3, {
-                "Squat": 4,
-                "Romanian Deadlift": 3,
-                "Leg Extension": 2,
-                "Leg Curl": 2,
-                "Calf Raise": 3,
+            ('Legs', 3, {
+                'Squat': 4,
+                'Romanian Deadlift': 3,
+                'Leg Extension': 2,
+                'Leg Curl': 2,
+                'Calf Raise': 3,
             }),
-            ("Push2", 5, {
-                "Overhead Press": 3,
-                "Dumbbell Bench Press": 3,
-                "Cable Lateral Raise": 3,
-                "Overhead Tricep Extension": 2,
+            ('Push2', 5, {
+                'Overhead Press': 3,
+                'Dumbbell Bench Press': 3,
+                'Cable Lateral Raise': 3,
+                'Overhead Tricep Extension': 2,
             }),
-            ("Pull2", 6, {
-                "Pull Up": 3,
-                "Cable Row": 3,
-                "Rear Delt Fly": 3,
-                "Hammer Curl": 2,
+            ('Pull2', 6, {
+                'Pull Up': 3,
+                'Cable Row': 3,
+                'Rear Delt Fly': 3,
+                'Hammer Curl': 2,
             }),
-            ("Legs2", 7, {
-                "Leg Press": 4,
-                "Stiff Leg Deadlift": 3,
-                "Leg Extension": 2,
-                "Leg Curl": 2,
-                "Seated Calf Raise": 3,
+            ('Legs2', 7, {
+                'Leg Press': 4,
+                'Stiff Leg Deadlift': 3,
+                'Leg Extension': 2,
+                'Leg Curl': 2,
+                'Seated Calf Raise': 3,
             }),
         ],
         stimulus_duration=48,
         maintenance_volume=3,
-        dataset="average",
+        dataset='average',
         cycle_length=7,
     )
 
 
-def make_5day_cycle():
-    """5-day cycle (Upper/Lower/Push/Pull/Legs) — forces 5 weeks_to_sim."""
+def make_5day_cycle() -> Split:
     return Split(
-        name="5-day cycle",
+        name='5-day cycle',
         days=[
-            ("Upper", 1, {
-                "Bench Press": 3,
-                "Barbell Row": 3,
-                "Overhead Press": 2,
-                "Barbell Curl": 2,
-                "Tricep Pushdown": 2,
+            ('Upper', 1, {
+                'Bench Press': 3,
+                'Barbell Row': 3,
+                'Overhead Press': 2,
+                'Barbell Curl': 2,
+                'Tricep Pushdown': 2,
             }),
-            ("Lower", 2, {
-                "Squat": 4,
-                "Romanian Deadlift": 3,
-                "Leg Extension": 2,
-                "Leg Curl": 2,
+            ('Lower', 2, {
+                'Squat': 4,
+                'Romanian Deadlift': 3,
+                'Leg Extension': 2,
+                'Leg Curl': 2,
             }),
-            ("Rest", 3, {}),
-            ("Push", 4, {
-                "Incline DB Press": 3,
-                "Dumbbell Lateral Raise": 3,
-                "Tricep Pushdown": 3,
+            ('Rest', 3, {}),
+            ('Push', 4, {
+                'Incline DB Press': 3,
+                'Dumbbell Lateral Raise': 3,
+                'Tricep Pushdown': 3,
             }),
-            ("Pull", 5, {
-                "Pull Up": 3,
-                "Cable Row": 3,
-                "Face Pull": 2,
-                "Hammer Curl": 2,
+            ('Pull', 5, {
+                'Pull Up': 3,
+                'Cable Row': 3,
+                'Face Pull': 2,
+                'Hammer Curl': 2,
             }),
         ],
         stimulus_duration=48,
         maintenance_volume=3,
-        dataset="average",
+        dataset='average',
         cycle_length=5,
     )
 
 
-def make_4day_cycle():
-    """4-day cycle (Upper/Lower/Rest/Upper) — forces 4 weeks_to_sim."""
+def make_4day_cycle() -> Split:
     return Split(
-        name="4-day cycle",
+        name='4-day cycle',
         days=[
-            ("Upper", 1, {
-                "Bench Press": 3,
-                "Barbell Row": 3,
-                "Overhead Press": 2,
-                "Barbell Curl": 2,
+            ('Upper', 1, {
+                'Bench Press': 3,
+                'Barbell Row': 3,
+                'Overhead Press': 2,
+                'Barbell Curl': 2,
             }),
-            ("Lower", 2, {
-                "Squat": 4,
-                "Romanian Deadlift": 3,
-                "Leg Extension": 2,
-                "Calf Raise": 3,
+            ('Lower', 2, {
+                'Squat': 4,
+                'Romanian Deadlift': 3,
+                'Leg Extension': 2,
+                'Calf Raise': 3,
             }),
-            ("Rest", 3, {}),
-            ("Upper2", 4, {
-                "Incline DB Press": 3,
-                "Pull Up": 3,
-                "Lateral Raise": 2,
-                "Tricep Pushdown": 2,
+            ('Rest', 3, {}),
+            ('Upper2', 4, {
+                'Incline DB Press': 3,
+                'Pull Up': 3,
+                'Lateral Raise': 2,
+                'Tricep Pushdown': 2,
             }),
         ],
         stimulus_duration=48,
         maintenance_volume=3,
-        dataset="average",
+        dataset='average',
         cycle_length=4,
     )
 
 
-def make_6day_cycle():
-    """6-day cycle — forces 6 weeks_to_sim."""
+def make_6day_cycle() -> Split:
     return Split(
-        name="6-day cycle",
+        name='6-day cycle',
         days=[
-            ("Push", 1, {
-                "Bench Press": 3,
-                "Incline DB Press": 3,
-                "Lateral Raise": 3,
+            ('Push', 1, {
+                'Bench Press': 3,
+                'Incline DB Press': 3,
+                'Lateral Raise': 3,
             }),
-            ("Pull", 2, {
-                "Barbell Row": 3,
-                "Lat Pulldown": 3,
-                "Face Pull": 2,
+            ('Pull', 2, {
+                'Barbell Row': 3,
+                'Lat Pulldown': 3,
+                'Face Pull': 2,
             }),
-            ("Legs", 3, {
-                "Squat": 4,
-                "Leg Curl": 3,
-                "Calf Raise": 3,
+            ('Legs', 3, {
+                'Squat': 4,
+                'Leg Curl': 3,
+                'Calf Raise': 3,
             }),
-            ("Rest", 4, {}),
-            ("Upper", 5, {
-                "Overhead Press": 3,
-                "Pull Up": 3,
-                "Barbell Curl": 2,
+            ('Rest', 4, {}),
+            ('Upper', 5, {
+                'Overhead Press': 3,
+                'Pull Up': 3,
+                'Barbell Curl': 2,
             }),
-            ("Lower", 6, {
-                "Romanian Deadlift": 3,
-                "Leg Press": 3,
-                "Leg Extension": 2,
+            ('Lower', 6, {
+                'Romanian Deadlift': 3,
+                'Leg Press': 3,
+                'Leg Extension': 2,
             }),
         ],
         stimulus_duration=48,
         maintenance_volume=3,
-        dataset="average",
+        dataset='average',
         cycle_length=6,
     )
 
 
-def make_single_session():
-    """Minimal: 1 session, 1-day cycle."""
+def make_single_session() -> Split:
     return Split(
-        name="Single session",
+        name='Single session',
         days=[
-            ("Full Body", 1, {
-                "Bench Press": 3,
-                "Squat": 3,
-                "Barbell Row": 3,
+            ('Full Body', 1, {
+                'Bench Press': 3,
+                'Squat': 3,
+                'Barbell Row': 3,
             }),
         ],
         stimulus_duration=48,
         maintenance_volume=3,
-        dataset="average",
+        dataset='average',
         cycle_length=7,
     )
 
 
-def make_mostly_rest():
-    """Edge case: only 1 training day in a 7-day cycle."""
+def make_mostly_rest() -> Split:
     return Split(
-        name="Mostly rest",
+        name='Mostly rest',
         days=[
-            ("Train", 1, {
-                "Bench Press": 3,
-                "Squat": 3,
+            ('Train', 1, {
+                'Bench Press': 3,
+                'Squat': 3,
             }),
-            ("Rest", 2, {}),
-            ("Rest", 3, {}),
-            ("Rest", 4, {}),
-            ("Rest", 5, {}),
-            ("Rest", 6, {}),
-            ("Rest", 7, {}),
+            ('Rest', 2, {}),
+            ('Rest', 3, {}),
+            ('Rest', 4, {}),
+            ('Rest', 5, {}),
+            ('Rest', 6, {}),
+            ('Rest', 7, {}),
         ],
         stimulus_duration=48,
         maintenance_volume=3,
-        dataset="average",
+        dataset='average',
         cycle_length=7,
     )
 
 
-# ============================================================================
-# HELPERS
-# ============================================================================
-
-def get_muscle_snapshot(split: Split) -> dict:
-    """Capture {region_id: {stimulus, atrophy, net}} for all muscles."""
-    snapshot = {}
-    for name, muscle in split.muscles.items():
-        if isinstance(muscle, MuscleRegion):
-            snapshot[name] = {
-                'stimulus': muscle.stimulus,
-                'atrophy': muscle.atrophy,
-                'net': muscle.net_weekly_stimulus(),
-            }
-    return snapshot
+def normalized_snapshot(split: Split) -> dict:
+    split.simulate_split(collect_breakdowns=False)
+    return {
+        muscle_id: {
+            'stimulus': round(muscle.stimulus, 8),
+            'atrophy': round(muscle.atrophy, 8),
+            'net': round(muscle.net_weekly_stimulus(), 8),
+            'primary_sets': muscle.primary_sets,
+            'weekly_frequency': round(muscle.weekly_frequency, 8),
+        }
+        for muscle_id, muscle in split.muscles.items()
+        if isinstance(muscle, MuscleRegion)
+    }
 
 
-def assert_snapshots_match(snap_a: dict, snap_b: dict, tolerance=1e-6):
-    """Assert two muscle snapshots match within tolerance."""
-    assert set(snap_a.keys()) == set(snap_b.keys()), \
-        f"Muscle set mismatch: {set(snap_a.keys()) ^ set(snap_b.keys())}"
-    for muscle_id in snap_a:
-        for field in ('stimulus', 'atrophy', 'net'):
-            va = snap_a[muscle_id][field]
-            vb = snap_b[muscle_id][field]
-            assert abs(va - vb) <= tolerance, \
-                f"{muscle_id}.{field}: {va} vs {vb} (diff={abs(va-vb)})"
+def normalized_breakdowns(split: Split) -> list[dict]:
+    split.simulate_split(collect_breakdowns=True)
+
+    normalized = []
+    for stats in split.session_stats:
+        exercise_breakdowns = []
+        for exercise in stats.get('exercise_breakdowns', []):
+            muscle_contributions = []
+            for muscle_id, contribution in sorted(exercise.get('muscle_contributions', {}).items()):
+                set_breakdowns = []
+                for set_info in contribution.get('sets', []):
+                    set_breakdowns.append({
+                        'set_number': getattr(set_info, 'set_number'),
+                        'weight': round(getattr(set_info, 'weight'), 8),
+                        'recovery_multiplier': round(getattr(set_info, 'recovery_multiplier'), 8),
+                        'bilateral_multiplier': round(getattr(set_info, 'bilateral_multiplier'), 8),
+                        'local_multiplier': round(getattr(set_info, 'local_multiplier'), 8),
+                        'global_multiplier': round(getattr(set_info, 'global_multiplier'), 8),
+                        'consecutive_day_multiplier': round(getattr(set_info, 'consecutive_day_multiplier'), 8),
+                        'final_stimulus': round(getattr(set_info, 'final_stimulus'), 8),
+                    })
+
+                muscle_contributions.append({
+                    'muscle_id': muscle_id,
+                    'display_name': contribution['display_name'],
+                    'tier': contribution['tier'],
+                    'base_weight': round(contribution['base_weight'], 8),
+                    'leverage_weight': round(contribution['leverage_weight'], 8),
+                    'sets': set_breakdowns,
+                    'total_stimulus': round(contribution['total_stimulus'], 8),
+                })
+
+            exercise_breakdowns.append({
+                'name': exercise['name'],
+                'pattern': exercise['pattern'],
+                'sets': exercise['sets'],
+                'resistance_profile': exercise['resistance_profile'],
+                'is_bilateral': exercise['is_bilateral'],
+                'is_unilateral': exercise['is_unilateral'],
+                'axial_load': round(exercise['axial_load'], 8),
+                'muscle_contributions': muscle_contributions,
+            })
+
+        normalized.append({
+            'time': stats['time'],
+            'total_sets': stats['total_sets'],
+            'muscles_trained': sorted(stats['muscles_trained']),
+            'stimulus_by_muscle': {
+                muscle_id: round(value, 8)
+                for muscle_id, value in sorted(stats['stimulus_by_muscle'].items())
+            },
+            'axial_fatigue': round(stats['axial_fatigue'], 8),
+            'bilateral_compounds': stats['bilateral_compounds'],
+            'bilateral_compound_sets': stats['bilateral_compound_sets'],
+            'consecutive_day_penalty': round(stats['consecutive_day_penalty'], 8),
+            'exercise_breakdowns': exercise_breakdowns,
+            'final_cns_multiplier': round(stats['final_cns_multiplier'], 8),
+            'week': stats['week'],
+            'consecutive_days': stats['consecutive_days'],
+        })
+
+    return normalized
 
 
-# ============================================================================
-# PARITY TESTS — run split twice, verify identical results
-# ============================================================================
+class TestMainBranchParity:
+    def test_ppl_7day_matches_main_baseline(self):
+        assert normalized_snapshot(make_ppl_7day()) == BASELINE_FIXTURES['ppl_7day']
 
-class TestParity:
-    """Each test simulates the same split twice and asserts identical outputs."""
+    def test_cycle_4_day_matches_main_baseline(self):
+        assert normalized_snapshot(make_4day_cycle()) == BASELINE_FIXTURES['cycle_4_day']
 
-    def test_ppl_7day_parity(self):
-        s1 = make_ppl_7day()
-        s1.simulate_split(collect_breakdowns=False)
-        snap1 = get_muscle_snapshot(s1)
+    def test_cycle_5_day_matches_main_baseline(self):
+        assert normalized_snapshot(make_5day_cycle()) == BASELINE_FIXTURES['cycle_5_day']
 
-        s2 = make_ppl_7day()
-        s2.simulate_split(collect_breakdowns=False)
-        snap2 = get_muscle_snapshot(s2)
+    def test_cycle_6_day_matches_main_baseline(self):
+        assert normalized_snapshot(make_6day_cycle()) == BASELINE_FIXTURES['cycle_6_day']
 
-        assert_snapshots_match(snap1, snap2)
+    def test_single_session_breakdown_matches_main_baseline(self):
+        assert normalized_breakdowns(make_single_session()) == BASELINE_FIXTURES['single_session_breakdown']
 
-    def test_5day_cycle_parity(self):
-        s1 = make_5day_cycle()
-        s1.simulate_split(collect_breakdowns=False)
-        snap1 = get_muscle_snapshot(s1)
-
-        s2 = make_5day_cycle()
-        s2.simulate_split(collect_breakdowns=False)
-        snap2 = get_muscle_snapshot(s2)
-
-        assert_snapshots_match(snap1, snap2)
-
-    def test_4day_cycle_parity(self):
-        s1 = make_4day_cycle()
-        s1.simulate_split(collect_breakdowns=False)
-        snap1 = get_muscle_snapshot(s1)
-
-        s2 = make_4day_cycle()
-        s2.simulate_split(collect_breakdowns=False)
-        snap2 = get_muscle_snapshot(s2)
-
-        assert_snapshots_match(snap1, snap2)
-
-    def test_6day_cycle_parity(self):
-        s1 = make_6day_cycle()
-        s1.simulate_split(collect_breakdowns=False)
-        snap1 = get_muscle_snapshot(s1)
-
-        s2 = make_6day_cycle()
-        s2.simulate_split(collect_breakdowns=False)
-        snap2 = get_muscle_snapshot(s2)
-
-        assert_snapshots_match(snap1, snap2)
-
-    def test_single_session_parity(self):
-        s1 = make_single_session()
-        s1.simulate_split(collect_breakdowns=False)
-        snap1 = get_muscle_snapshot(s1)
-
-        s2 = make_single_session()
-        s2.simulate_split(collect_breakdowns=False)
-        snap2 = get_muscle_snapshot(s2)
-
-        assert_snapshots_match(snap1, snap2)
-
-    def test_mostly_rest_parity(self):
-        s1 = make_mostly_rest()
-        s1.simulate_split(collect_breakdowns=False)
-        snap1 = get_muscle_snapshot(s1)
-
-        s2 = make_mostly_rest()
-        s2.simulate_split(collect_breakdowns=False)
-        snap2 = get_muscle_snapshot(s2)
-
-        assert_snapshots_match(snap1, snap2)
-
-
-# ============================================================================
-# BREAKDOWN CORRECTNESS TESTS
-# ============================================================================
 
 class TestBreakdownCorrectness:
-    """Verify breakdown records are internally consistent."""
-
     def test_breakdown_multiplier_chain(self):
-        """Each set's final_stimulus should equal the product of all multipliers × weight."""
         split = make_ppl_7day()
         split.simulate_split(collect_breakdowns=True)
 
         for stats in split.session_stats:
-            if stats is None:
-                continue
-            for ex_bd in stats.get('exercise_breakdowns', []):
-                for muscle_id, mc in ex_bd.get('muscle_contributions', {}).items():
-                    for s in mc.get('sets', []):
-                        # s is a BreakdownRecord (slots dataclass) — use attribute access
-                        expected = (
-                            s.weight
-                            * s.recovery_multiplier
-                            * s.bilateral_multiplier
-                            * s.local_multiplier
-                            * s.global_multiplier
-                            * s.consecutive_day_multiplier
-                        )
-                        assert abs(s.final_stimulus - expected) <= 1e-6, \
-                            f"Multiplier chain mismatch: {s.final_stimulus} vs {expected}"
+            for exercise in stats.get('exercise_breakdowns', []):
+                for muscle_id, contribution in exercise.get('muscle_contributions', {}).items():
+                    set_breakdowns = contribution.get('sets', [])
 
-                    # Verify set_numbers are sequential (no aliasing from BreakdownRecord reuse)
-                    set_numbers = [s.set_number for s in mc.get('sets', [])]
-                    assert set_numbers == list(range(1, len(set_numbers) + 1)), \
-                        f"{muscle_id}: set_numbers should be sequential, got {set_numbers}"
+                    set_ids = [id(set_info) for set_info in set_breakdowns]
+                    assert len(set_ids) == len(set(set_ids)), f'{muscle_id}: set breakdown objects should be distinct'
+
+                    for set_info in set_breakdowns:
+                        expected = (
+                            set_info.weight
+                            * set_info.recovery_multiplier
+                            * set_info.bilateral_multiplier
+                            * set_info.local_multiplier
+                            * set_info.global_multiplier
+                            * set_info.consecutive_day_multiplier
+                        )
+                        assert abs(set_info.final_stimulus - expected) <= 1e-6
+
+                    set_numbers = [set_info.set_number for set_info in set_breakdowns]
+                    assert set_numbers == list(range(1, len(set_numbers) + 1))
 
     def test_breakdown_sum_matches_muscle_stimulus(self):
-        """Sum of breakdown final_stimulus per muscle ≈ muscle.stimulus."""
         split = make_single_session()
         split.simulate_split(collect_breakdowns=True)
 
-        # Aggregate breakdown stimulus per muscle across all sessions
-        bd_totals = {}
+        breakdown_totals: dict[str, float] = {}
         for stats in split.session_stats:
-            if stats is None:
-                continue
-            for ex_bd in stats.get('exercise_breakdowns', []):
-                for muscle_id, mc in ex_bd.get('muscle_contributions', {}).items():
-                    bd_totals[muscle_id] = bd_totals.get(muscle_id, 0.0) + mc.get('total_stimulus', 0.0)
+            for exercise in stats.get('exercise_breakdowns', []):
+                for muscle_id, contribution in exercise.get('muscle_contributions', {}).items():
+                    breakdown_totals[muscle_id] = breakdown_totals.get(muscle_id, 0.0) + contribution.get('total_stimulus', 0.0)
 
-        # Compare to actual muscle stimulus values
-        for muscle_id, bd_total in bd_totals.items():
+        for muscle_id, total_stimulus in breakdown_totals.items():
             muscle = split.muscles.get(muscle_id)
             if muscle and isinstance(muscle, MuscleRegion):
-                # Stimulus in muscle is average across weeks, breakdown is per-week
-                # For single-session 7-day cycle, weeks_to_sim=1, so they should match
-                assert abs(muscle.stimulus - bd_total) <= 1e-4, \
-                    f"{muscle_id}: muscle.stimulus={muscle.stimulus} vs bd_total={bd_total}"
+                assert abs(muscle.stimulus - total_stimulus) <= 1e-4
 
-
-# ============================================================================
-# EDGE CASE TESTS
-# ============================================================================
 
 class TestEdgeCases:
-
     def test_empty_split_no_crash(self):
-        """Split with no exercises doesn't crash."""
         split = Split(
-            name="Empty",
-            days=[("Rest", 1, {})],
+            name='Empty',
+            days=[('Rest', 1, {})],
             stimulus_duration=48,
             maintenance_volume=3,
-            dataset="average",
+            dataset='average',
             cycle_length=7,
         )
         split.simulate_split(collect_breakdowns=True)
-        # Should complete without error
 
     def test_single_exercise_single_set(self):
-        """Minimal exercise configuration produces nonzero stimulus."""
         split = Split(
-            name="Minimal",
-            days=[("Day1", 1, {"Bench Press": 1})],
+            name='Minimal',
+            days=[('Day1', 1, {'Bench Press': 1})],
             stimulus_duration=48,
             maintenance_volume=3,
-            dataset="average",
+            dataset='average',
             cycle_length=7,
         )
         split.simulate_split(collect_breakdowns=False)
-        # At least one muscle should have stimulus > 0
-        has_stimulus = any(
-            m.stimulus > 0 for m in split.muscles.values()
-            if isinstance(m, MuscleRegion)
+
+        assert any(
+            muscle.stimulus > 0
+            for muscle in split.muscles.values()
+            if isinstance(muscle, MuscleRegion)
         )
-        assert has_stimulus, "Single exercise should produce nonzero stimulus"
 
     def test_unrecognized_exercise_skipped(self):
-        """Unknown exercise name doesn't crash, just gets skipped."""
         split = Split(
-            name="Unknown",
-            days=[("Day1", 1, {"xyzzy_fake_exercise_12345": 3})],
+            name='Unknown',
+            days=[('Day1', 1, {'xyzzy_fake_exercise_12345': 3})],
             stimulus_duration=48,
             maintenance_volume=3,
-            dataset="average",
+            dataset='average',
             cycle_length=7,
         )
         split.simulate_split(collect_breakdowns=False)
-        # All muscles should have 0 stimulus (exercise was skipped)
-        total = sum(
-            m.stimulus for m in split.muscles.values()
-            if isinstance(m, MuscleRegion)
+
+        total_stimulus = sum(
+            muscle.stimulus
+            for muscle in split.muscles.values()
+            if isinstance(muscle, MuscleRegion)
         )
-        assert total == 0.0, f"Unrecognized exercise should produce 0 stimulus, got {total}"
+        assert total_stimulus == 0.0
 
     def test_all_unilateral(self):
-        """All unilateral exercises get the unilateral modifier."""
+        unilateral_days: list[tuple[str, int, dict[str, Any]]] = [
+            ('Day1', 1, {
+                'Dumbbell Bench Press': (3, True, None),
+                'Dumbbell Row': (3, True, None),
+                'Dumbbell Lunge': (3, True, None),
+            }),
+        ]
         split = Split(
-            name="Unilateral",
-            days=[("Day1", 1, {
-                "Dumbbell Bench Press": (3, True, None),
-                "Dumbbell Row": (3, True, None),
-                "Dumbbell Lunge": (3, True, None),
-            })],
+            name='Unilateral',
+            days=unilateral_days,
             stimulus_duration=48,
             maintenance_volume=3,
-            dataset="average",
+            dataset='average',
             cycle_length=7,
         )
         split.simulate_split(collect_breakdowns=True)
-        # Check that some muscle has nonzero stimulus
-        has_stimulus = any(
-            m.stimulus > 0 for m in split.muscles.values()
-            if isinstance(m, MuscleRegion)
+
+        assert any(
+            muscle.stimulus > 0
+            for muscle in split.muscles.values()
+            if isinstance(muscle, MuscleRegion)
         )
-        assert has_stimulus, "Unilateral exercises should produce stimulus"
 
     def test_high_volume_diminishing_returns(self):
-        """20+ sets per exercise doesn't crash, stimulus extends via decay curve."""
         split = Split(
-            name="High volume",
-            days=[("Day1", 1, {"Bench Press": 20})],
+            name='High volume',
+            days=[('Day1', 1, {'Bench Press': 20})],
             stimulus_duration=48,
             maintenance_volume=3,
-            dataset="average",
+            dataset='average',
             cycle_length=7,
         )
         split.simulate_split(collect_breakdowns=False)
-        has_stimulus = any(
-            m.stimulus > 0 for m in split.muscles.values()
-            if isinstance(m, MuscleRegion)
+
+        assert any(
+            muscle.stimulus > 0
+            for muscle in split.muscles.values()
+            if isinstance(muscle, MuscleRegion)
         )
-        assert has_stimulus
 
     def test_consecutive_days_penalty_accumulates(self):
-        """5 consecutive training days should have increasing penalty."""
         split = Split(
-            name="5 consecutive",
+            name='5 consecutive',
             days=[
-                ("Day1", 1, {"Bench Press": 3}),
-                ("Day2", 2, {"Bench Press": 3}),
-                ("Day3", 3, {"Bench Press": 3}),
-                ("Day4", 4, {"Bench Press": 3}),
-                ("Day5", 5, {"Bench Press": 3}),
-                ("Rest", 6, {}),
-                ("Rest", 7, {}),
+                ('Day1', 1, {'Bench Press': 3}),
+                ('Day2', 2, {'Bench Press': 3}),
+                ('Day3', 3, {'Bench Press': 3}),
+                ('Day4', 4, {'Bench Press': 3}),
+                ('Day5', 5, {'Bench Press': 3}),
+                ('Rest', 6, {}),
+                ('Rest', 7, {}),
             ],
             stimulus_duration=48,
             maintenance_volume=3,
-            dataset="average",
+            dataset='average',
             cycle_length=7,
         )
         split.simulate_split(collect_breakdowns=True)
 
-        # Check consecutive_day_penalty increases across sessions
-        penalties = []
-        for stats in split.session_stats:
-            if stats is not None:
-                penalties.append(stats.get('consecutive_day_penalty', 1.0))
+        penalties = [
+            stats.get('consecutive_day_penalty', 1.0)
+            for stats in split.session_stats
+            if stats is not None
+        ]
 
-        # Day 1 should have penalty=1.0, subsequent days should have penalty <= 1.0
-        assert len(penalties) >= 2, "Should have multiple sessions"
-        # The first day should have no penalty
-        assert penalties[0] == 1.0, f"First day penalty should be 1.0, got {penalties[0]}"
-        # Subsequent consecutive days should have penalty <= 1.0 (fatigue accumulates)
-        for i, p in enumerate(penalties[1:], start=2):
-            assert p <= 1.0, f"Day {i} penalty should be <= 1.0, got {p}"
+        assert len(penalties) >= 2
+        assert penalties[0] == 1.0
+        for penalty in penalties[1:]:
+            assert penalty <= 1.0
 
-
-# ============================================================================
-# TIMING / PROFILING HELPERS (not assertions, just print)
-# ============================================================================
 
 class TestTiming:
-    """Capture baseline timing for before/after comparison."""
-
     def test_timing_ppl_7day(self):
-        """Baseline: PPL 7-day with breakdowns."""
-        t0 = time.perf_counter()
-        s = make_ppl_7day()
-        s.simulate_split(collect_breakdowns=True)
-        t1 = time.perf_counter()
-        print(f"\n[TIMING] PPL 7-day (breakdowns): {(t1-t0)*1000:.1f}ms")
+        start = time.perf_counter()
+        split = make_ppl_7day()
+        split.simulate_split(collect_breakdowns=True)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        print(f'\n[TIMING] PPL 7-day (breakdowns): {elapsed_ms:.1f}ms')
 
     def test_timing_5day_cycle(self):
-        """Baseline: 5-day cycle with breakdowns."""
-        t0 = time.perf_counter()
-        s = make_5day_cycle()
-        s.simulate_split(collect_breakdowns=True)
-        t1 = time.perf_counter()
-        print(f"\n[TIMING] 5-day cycle (breakdowns): {(t1-t0)*1000:.1f}ms")
+        start = time.perf_counter()
+        split = make_5day_cycle()
+        split.simulate_split(collect_breakdowns=True)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        print(f'\n[TIMING] 5-day cycle (breakdowns): {elapsed_ms:.1f}ms')
 
     def test_timing_ppl_no_breakdowns(self):
-        """Baseline: PPL 7-day without breakdowns."""
-        t0 = time.perf_counter()
-        s = make_ppl_7day()
-        s.simulate_split(collect_breakdowns=False)
-        t1 = time.perf_counter()
-        print(f"\n[TIMING] PPL 7-day (no breakdowns): {(t1-t0)*1000:.1f}ms")
+        start = time.perf_counter()
+        split = make_ppl_7day()
+        split.simulate_split(collect_breakdowns=False)
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        print(f'\n[TIMING] PPL 7-day (no breakdowns): {elapsed_ms:.1f}ms')
