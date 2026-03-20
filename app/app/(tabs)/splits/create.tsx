@@ -146,7 +146,7 @@ export default function CreateSplitScreen() {
     );
     if (emptyNamedSession) {
       showSaveError(
-        `"${emptyNamedSession.name}" has no exercises. Missing days are implied rest days, so you do not need to create rest-day sessions.`,
+        `"${emptyNamedSession.name}" has no exercises. Rest days are implicit, so leave them out. Auto cycle length ends on your last training day, and a longer cycle length extends the split with trailing rest days.`,
       );
       return;
     }
@@ -210,7 +210,7 @@ export default function CreateSplitScreen() {
         />
 
         <Text style={styles.restHint}>
-          Missing days are treated as rest days. Use the three-bar handle to reorder sessions.
+          Missing days are rest days. Auto cycle length ends on your last training day; a longer cycle length adds trailing rest days. Use the three-bar handle to reorder sessions.
         </Text>
 
         <DraggableFlatList
