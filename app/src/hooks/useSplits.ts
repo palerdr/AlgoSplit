@@ -82,23 +82,21 @@ export function useSplitAnalysis(
   splitData?: SplitResponse
 ) {
   return useQuery({
-    queryKey: [...splitKeys.analysis(id!), 'lite', splitData?.updated_at ?? 'server'],
+    queryKey: [...splitKeys.analysis(id!), splitData?.updated_at ?? 'server'],
     queryFn: () => {
       if (splitData) {
-        return analyzeSplitFromDefinition(splitToRequestPayload(splitData, false), false);
+        return analyzeSplitFromDefinition(splitToRequestPayload(splitData, true), true);
       }
-      return analyzeSplit(id!, false);
+      return analyzeSplit(id!, true);
     },
     enabled: !!id && enabled,
   });
 }
 
 export function useSplitAnalysisWithBreakdowns(id: string | undefined, enabled = true) {
-  return useQuery({
-    queryKey: [...splitKeys.analysis(id!), 'full'],
-    queryFn: () => analyzeSplit(id!, true),
-    enabled: !!id && enabled,
-  });
+  // After P4 optimization, useSplitAnalysis always includes breakdowns.
+  // This hook now delegates to the same cache key — no separate fetch.
+  return useSplitAnalysis(id, enabled);
 }
 
 export function useReplaceSplit(options?: { invalidateLists?: boolean }) {
