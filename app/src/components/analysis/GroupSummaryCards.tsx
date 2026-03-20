@@ -117,7 +117,7 @@ export default function GroupSummaryCards({ muscles }: Props) {
         </View>
       </View>
       <Text style={styles.modeHint}>
-        {metricMode === 'raw' ? 'Raw stimulus before atrophy' : 'Net stimulus after atrophy'}
+        {metricMode === 'raw' ? 'Raw stimulus before atrophy' : 'Net stimulus after end-of-week atrophy'}
       </Text>
       {sorted.map((group) => {
         const value = metricMode === 'raw' ? group.rawStimulus : group.netStimulus;
