@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
-  ScrollView,
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
+import { ScrollView } from 'react-native-gesture-handler';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -39,6 +39,33 @@ export default function CreateSplitScreen() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState('');
   const [isDraggingExercises, setIsDraggingExercises] = useState(false);
+
+  // Gesture coordination: RNGH ScrollView ref lets DraggableFlatList coexist with scroll
+  const scrollRef = useRef<ScrollView>(null);
+  const dragResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleDragStart = useCallback(() => {
+    setIsDraggingExercises(true);
+    if (dragResetTimerRef.current) clearTimeout(dragResetTimerRef.current);
+    dragResetTimerRef.current = setTimeout(() => {
+      setIsDraggingExercises(false);
+      dragResetTimerRef.current = null;
+    }, 2500);
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    if (dragResetTimerRef.current) {
+      clearTimeout(dragResetTimerRef.current);
+      dragResetTimerRef.current = null;
+    }
+    setIsDraggingExercises(false);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (dragResetTimerRef.current) clearTimeout(dragResetTimerRef.current);
+    };
+  }, []);
 
   const updateSession = (index: number, session: SessionInput) => {
     const updated = [...sessions];
@@ -102,6 +129,7 @@ export default function CreateSplitScreen() {
       </View>
 
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -124,8 +152,9 @@ export default function CreateSplitScreen() {
             onUpdate={(s) => updateSession(i, s)}
             onRemove={() => removeSession(i)}
             canRemove={sessions.length > 1}
-            onDragStart={() => setIsDraggingExercises(true)}
-            onDragEnd={() => setIsDraggingExercises(false)}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+            simultaneousHandlers={scrollRef}
           />
         ))}
 

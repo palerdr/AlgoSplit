@@ -15,6 +15,7 @@ interface Props {
   defaultExpanded?: boolean;
   onDragStart?: () => void;
   onDragEnd?: () => void;
+  simultaneousHandlers?: React.Ref<any>;
 }
 
 export default function SessionEditorMobile({
@@ -25,6 +26,7 @@ export default function SessionEditorMobile({
   defaultExpanded = true,
   onDragStart,
   onDragEnd,
+  simultaneousHandlers,
 }: Props) {
   const [expanded, setExpanded] = useState(defaultExpanded);
 
@@ -151,7 +153,8 @@ export default function SessionEditorMobile({
               onDragEnd?.();
             }}
             scrollEnabled={false}
-            activationDistance={10}
+            simultaneousHandlers={simultaneousHandlers}
+            activationDistance={14}
             autoscrollThreshold={40}
             autoscrollSpeed={150}
             keyboardShouldPersistTaps="handled"
