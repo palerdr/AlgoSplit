@@ -356,6 +356,11 @@ class TestBreakdownCorrectness:
                         assert abs(s.final_stimulus - expected) <= 1e-6, \
                             f"Multiplier chain mismatch: {s.final_stimulus} vs {expected}"
 
+                    # Verify set_numbers are sequential (no aliasing from BreakdownRecord reuse)
+                    set_numbers = [s.set_number for s in mc.get('sets', [])]
+                    assert set_numbers == list(range(1, len(set_numbers) + 1)), \
+                        f"{muscle_id}: set_numbers should be sequential, got {set_numbers}"
+
     def test_breakdown_sum_matches_muscle_stimulus(self):
         """Sum of breakdown final_stimulus per muscle ≈ muscle.stimulus."""
         split = make_single_session()
@@ -500,10 +505,13 @@ class TestEdgeCases:
             if stats is not None:
                 penalties.append(stats.get('consecutive_day_penalty', 1.0))
 
-        # Day 1 should have penalty=1.0, subsequent days should have penalty < 1.0
+        # Day 1 should have penalty=1.0, subsequent days should have penalty <= 1.0
         assert len(penalties) >= 2, "Should have multiple sessions"
         # The first day should have no penalty
         assert penalties[0] == 1.0, f"First day penalty should be 1.0, got {penalties[0]}"
+        # Subsequent consecutive days should have penalty <= 1.0 (fatigue accumulates)
+        for i, p in enumerate(penalties[1:], start=2):
+            assert p <= 1.0, f"Day {i} penalty should be <= 1.0, got {p}"
 
 
 # ============================================================================

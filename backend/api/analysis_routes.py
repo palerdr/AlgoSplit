@@ -555,29 +555,17 @@ def _build_session_breakdowns(split: Split, request: SplitRequest) -> List[Sessi
             for muscle_id, mc_data in ex_bd.get('muscle_contributions', {}).items():
                 sets_list = []
                 for s in mc_data.get('sets', []):
-                    # s is either a BreakdownRecord (slots dataclass) or a dict (legacy)
-                    if hasattr(s, 'set_number'):
-                        sets_list.append(SetBreakdown(
-                            set_number=s.set_number,
-                            weight=s.weight,
-                            recovery_multiplier=s.recovery_multiplier,
-                            bilateral_multiplier=s.bilateral_multiplier,
-                            local_multiplier=s.local_multiplier,
-                            global_multiplier=s.global_multiplier,
-                            consecutive_day_multiplier=s.consecutive_day_multiplier,
-                            final_stimulus=s.final_stimulus,
-                        ))
-                    else:
-                        sets_list.append(SetBreakdown(
-                            set_number=s.get('set_number', 0),
-                            weight=s.get('weight', 0.0),
-                            recovery_multiplier=s.get('recovery_multiplier', 1.0),
-                            bilateral_multiplier=s.get('bilateral_multiplier', 1.0),
-                            local_multiplier=s.get('local_multiplier', 1.0),
-                            global_multiplier=s.get('global_multiplier', 1.0),
-                            consecutive_day_multiplier=s.get('consecutive_day_multiplier', 1.0),
-                            final_stimulus=s.get('final_stimulus', 0.0),
-                        ))
+                    # s is a BreakdownRecord (slots dataclass)
+                    sets_list.append(SetBreakdown(
+                        set_number=s.set_number,
+                        weight=s.weight,
+                        recovery_multiplier=s.recovery_multiplier,
+                        bilateral_multiplier=s.bilateral_multiplier,
+                        local_multiplier=s.local_multiplier,
+                        global_multiplier=s.global_multiplier,
+                        consecutive_day_multiplier=s.consecutive_day_multiplier,
+                        final_stimulus=s.final_stimulus,
+                    ))
                 contributions.append(MuscleContribution(
                     muscle_id=muscle_id,
                     display_name=mc_data.get('display_name', muscle_id),
