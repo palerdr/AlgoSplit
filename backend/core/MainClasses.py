@@ -6,6 +6,7 @@ using a granular 29-region anatomical muscle model.
 """
 
 from collections import defaultdict
+from dataclasses import dataclass
 import numpy as np
 import time as _time
 from typing import Dict, List, Set, Optional, Any, Tuple
@@ -266,6 +267,24 @@ def classify_volume_tier(
     return 'minimalistic'
 
 
+# ============================================================================
+# BREAKDOWN RECORD (Slots dataclass — faster than dict for per-set breakdown)
+# ============================================================================
+
+@dataclass(slots=True)
+class BreakdownRecord:
+    """Per-set breakdown of stimulus modifiers. Replaces dict allocation in hot loop."""
+    set_number: int
+    weight: float
+    recovery_multiplier: float
+    bilateral_multiplier: float
+    local_multiplier: float
+    global_multiplier: float
+    consecutive_day_multiplier: float
+    tier_beta: float
+    final_stimulus: float
+
+
 class MuscleRegion:
     """
     Granular muscle region with tiered stimulus tracking.
@@ -296,7 +315,7 @@ class MuscleRegion:
         # Session tracking
         self.residuals = 0
         self.sets_this_session = 0
-        self._last_breakdown: Optional[Dict[str, Any]] = None
+        self._last_breakdown: Optional[BreakdownRecord] = None
 
         # Weekly tracking
         self.primary_sets = 0
@@ -426,17 +445,19 @@ class MuscleRegion:
         final_stimulus = global_mult * local_mult * consecutive_mult * stimulus_amount
         self.stimulus += final_stimulus
 
-        # Store breakdown only when requested.
+        # Store breakdown only when requested (using slots dataclass — no .copy() needed).
         if collect_breakdown:
-            self._last_breakdown = {
-                'recovery_multiplier': recovery_ratio,
-                'bilateral_multiplier': bilateral_mod,
-                'local_multiplier': local_mult,
-                'global_multiplier': global_mult,
-                'consecutive_day_multiplier': consecutive_mult,
-                'tier_beta': beta,
-                'final_stimulus': final_stimulus,
-            }
+            self._last_breakdown = BreakdownRecord(
+                set_number=0,  # Placeholder — caller sets actual set_number
+                weight=0.0,    # Placeholder — caller sets actual weight
+                recovery_multiplier=recovery_ratio,
+                bilateral_multiplier=bilateral_mod,
+                local_multiplier=local_mult,
+                global_multiplier=global_mult,
+                consecutive_day_multiplier=consecutive_mult,
+                tier_beta=beta,
+                final_stimulus=final_stimulus,
+            )
         else:
             self._last_breakdown = None
 
@@ -720,14 +741,14 @@ class Session:
                         session_stats['stimulus_by_muscle'][muscle_id] += stimulus
                         session_stats['muscles_trained'].add(muscle_id)
 
-                    # Collect breakdown data
+                    # Collect breakdown data (BreakdownRecord — no .copy() needed)
                     if collect_breakdowns and exercise_bd is not None and muscle._last_breakdown is not None:
-                        bd = muscle._last_breakdown.copy()
-                        bd['set_number'] = set_num + 1
-                        bd['weight'] = weight
+                        bd = muscle._last_breakdown
+                        bd.set_number = set_num + 1
+                        bd.weight = weight
                         mc = exercise_bd['muscle_contributions'][muscle_id]
                         mc['sets'].append(bd)
-                        mc['total_stimulus'] += bd['final_stimulus']
+                        mc['total_stimulus'] += bd.final_stimulus
 
             # Frequency tracks direct/prime training, not secondary stimulus.
             for muscle_id in tiered_targets.get('prime', {}).keys():

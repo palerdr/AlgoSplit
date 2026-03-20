@@ -344,16 +344,17 @@ class TestBreakdownCorrectness:
             for ex_bd in stats.get('exercise_breakdowns', []):
                 for muscle_id, mc in ex_bd.get('muscle_contributions', {}).items():
                     for s in mc.get('sets', []):
+                        # s is a BreakdownRecord (slots dataclass) — use attribute access
                         expected = (
-                            s['weight']
-                            * s['recovery_multiplier']
-                            * s['bilateral_multiplier']
-                            * s['local_multiplier']
-                            * s['global_multiplier']
-                            * s['consecutive_day_multiplier']
+                            s.weight
+                            * s.recovery_multiplier
+                            * s.bilateral_multiplier
+                            * s.local_multiplier
+                            * s.global_multiplier
+                            * s.consecutive_day_multiplier
                         )
-                        assert abs(s['final_stimulus'] - expected) <= 1e-6, \
-                            f"Multiplier chain mismatch: {s['final_stimulus']} vs {expected}"
+                        assert abs(s.final_stimulus - expected) <= 1e-6, \
+                            f"Multiplier chain mismatch: {s.final_stimulus} vs {expected}"
 
     def test_breakdown_sum_matches_muscle_stimulus(self):
         """Sum of breakdown final_stimulus per muscle ≈ muscle.stimulus."""
