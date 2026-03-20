@@ -1,20 +1,21 @@
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable, TouchableOpacity } from 'react-native';
 import { colors, borders, spacing } from '../../theme';
-import type { MuscleGroupSummary } from '../../types/api.types';
+import type { MuscleStats } from '../../types/api.types';
 
-function getStimulusColor(value: number, maxValue: number): string {
-  if (maxValue <= 0) return '#4B5563';
-  const pct = Math.max(0, Math.min(1, value / maxValue));
-  if (pct >= 0.8) return '#22C55E';
-  if (pct >= 0.6) return '#4ADE80';
-  if (pct >= 0.4) return '#86EFAC';
-  if (pct >= 0.2) return '#F59E0B';
-  return '#EF4444';
-}
+type MetricMode = 'raw' | 'net';
 
 interface Props {
-  groups: MuscleGroupSummary[];
+  muscles: MuscleStats[];
+}
+
+interface AggregatedGroup {
+  group: string;
+  label: string;
+  regions: string[];
+  rawStimulus: number;
+  atrophy: number;
+  netStimulus: number;
 }
 
 const GROUP_LABELS: Record<string, string> = {
@@ -39,16 +40,53 @@ function formatGroupLabel(group: string): string {
   return GROUP_LABELS[group] ?? group.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-export default function GroupSummaryCards({ groups }: Props) {
-  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+function getStimulusColor(value: number, maxValue: number): string {
+  if (maxValue <= 0) return '#4B5563';
+  const pct = Math.max(0, Math.min(1, value / maxValue));
+  if (pct >= 0.8) return '#22C55E';
+  if (pct >= 0.6) return '#4ADE80';
+  if (pct >= 0.4) return '#86EFAC';
+  if (pct >= 0.2) return '#F59E0B';
+  return '#EF4444';
+}
 
+function buildGroups(muscles: MuscleStats[]): AggregatedGroup[] {
+  const byGroup = new Map<string, AggregatedGroup>();
+
+  for (const muscle of muscles) {
+    const existing = byGroup.get(muscle.parent_group);
+    if (existing) {
+      existing.rawStimulus += muscle.stimulus;
+      existing.atrophy += muscle.atrophy;
+      existing.netStimulus += muscle.net_stimulus;
+      existing.regions.push(muscle.region_id);
+    } else {
+      byGroup.set(muscle.parent_group, {
+        group: muscle.parent_group,
+        label: formatGroupLabel(muscle.parent_group),
+        regions: [muscle.region_id],
+        rawStimulus: muscle.stimulus,
+        atrophy: muscle.atrophy,
+        netStimulus: muscle.net_stimulus,
+      });
+    }
+  }
+
+  return Array.from(byGroup.values());
+}
+
+export default function GroupSummaryCards({ muscles }: Props) {
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const [metricMode, setMetricMode] = useState<MetricMode>('raw');
+
+  const groups = useMemo(() => buildGroups(muscles), [muscles]);
   const sorted = useMemo(
-    () => [...groups].sort((a, b) => b.total_net_stimulus - a.total_net_stimulus),
-    [groups],
+    () => [...groups].sort((a, b) => (metricMode === 'raw' ? b.rawStimulus - a.rawStimulus : b.netStimulus - a.netStimulus)),
+    [groups, metricMode],
   );
   const maxStimulus = useMemo(
-    () => Math.max(...sorted.map((group) => group.total_net_stimulus), 1),
-    [sorted],
+    () => Math.max(...sorted.map((group) => (metricMode === 'raw' ? group.rawStimulus : group.netStimulus)), 1),
+    [sorted, metricMode],
   );
 
   if (sorted.length === 0) {
@@ -61,36 +99,61 @@ export default function GroupSummaryCards({ groups }: Props) {
 
   return (
     <View style={styles.chartCard}>
-      {sorted.map((g) => {
-        const barColor = getStimulusColor(g.total_net_stimulus, maxStimulus);
-        const widthPct = Math.max((g.total_net_stimulus / maxStimulus) * 100, 3);
-        const isActive = activeGroup === g.group;
+      <View style={styles.headerRow}>
+        <Text style={styles.headerTitle}>Stimulus by Group</Text>
+        <View style={styles.toggleWrap}>
+          <TouchableOpacity
+            style={[styles.toggleBtn, metricMode === 'raw' && styles.toggleBtnActive]}
+            onPress={() => setMetricMode('raw')}
+          >
+            <Text style={[styles.toggleText, metricMode === 'raw' && styles.toggleTextActive]}>Raw</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.toggleBtn, metricMode === 'net' && styles.toggleBtnActive]}
+            onPress={() => setMetricMode('net')}
+          >
+            <Text style={[styles.toggleText, metricMode === 'net' && styles.toggleTextActive]}>Net</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <Text style={styles.helperText}>
+        {metricMode === 'raw'
+          ? 'Raw stimulus before atrophy. Better for seeing what the split is actually applying.'
+          : 'Net stimulus after atrophy across the cycle.'}
+      </Text>
+
+      {sorted.map((group) => {
+        const value = metricMode === 'raw' ? group.rawStimulus : group.netStimulus;
+        const barColor = getStimulusColor(value, maxStimulus);
+        const widthPct = Math.max((value / maxStimulus) * 100, 3);
+        const isActive = activeGroup === group.group;
 
         return (
           <Pressable
-            key={g.group}
+            key={group.group}
             style={styles.row}
-            onHoverIn={() => setActiveGroup(g.group)}
-            onHoverOut={() => setActiveGroup((current) => (current === g.group ? null : current))}
-            onPressIn={() => setActiveGroup(g.group)}
-            onPressOut={() => setActiveGroup((current) => (current === g.group ? null : current))}
+            onHoverIn={() => setActiveGroup(group.group)}
+            onHoverOut={() => setActiveGroup((current) => (current === group.group ? null : current))}
+            onPressIn={() => setActiveGroup(group.group)}
+            onPressOut={() => setActiveGroup((current) => (current === group.group ? null : current))}
           >
             <View style={styles.rowHeader}>
               <Text style={styles.groupName} numberOfLines={1}>
-                {formatGroupLabel(g.group)}
+                {group.label}
               </Text>
-              <Text style={styles.meta}>{g.total_net_stimulus.toFixed(2)}</Text>
+              <Text style={styles.meta}>{value.toFixed(2)}</Text>
             </View>
 
             <Text style={styles.subMeta} numberOfLines={1}>
-              {g.regions.length} regions
+              {group.regions.length} regions{metricMode === 'net' ? ` · ${group.atrophy.toFixed(2)} atrophy` : ''}
             </Text>
 
             <View style={styles.track}>
               <View style={[styles.fill, { width: `${widthPct}%`, backgroundColor: barColor }]} />
               {isActive ? (
                 <View style={styles.valuePill}>
-                  <Text style={styles.valueText}>{g.total_net_stimulus.toFixed(2)}</Text>
+                  <Text style={styles.valueText}>{value.toFixed(2)}</Text>
                 </View>
               ) : null}
             </View>
@@ -110,6 +173,45 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.md,
     gap: 10,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 10,
+  },
+  headerTitle: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  helperText: {
+    color: colors.textSecondary,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  toggleWrap: {
+    flexDirection: 'row',
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: borders.radius.md,
+    padding: 3,
+    gap: 3,
+  },
+  toggleBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: borders.radius.sm,
+  },
+  toggleBtnActive: {
+    backgroundColor: colors.greenMuted,
+  },
+  toggleText: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  toggleTextActive: {
+    color: colors.green,
   },
   row: {
     gap: 6,

@@ -42,7 +42,7 @@ export default function AnalysisTabView({ splitId, analysis }: Props) {
 
       <View style={styles.content}>
         {activeTab === 'Groups' ? (
-          <GroupSummaryCards groups={analysis.group_summaries ?? []} />
+          <GroupSummaryCards muscles={analysis.muscles ?? []} />
         ) : isBreakdownLoading ? (
           <Spinner style={styles.breakdownSpinner} />
         ) : (
