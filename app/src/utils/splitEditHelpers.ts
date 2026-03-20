@@ -10,6 +10,10 @@ export function generateExerciseId(): string {
   return `ex_${Date.now()}_${++_idCounter}`;
 }
 
+export function generateSessionId(): string {
+  return `session_${Date.now()}_${++_idCounter}`;
+}
+
 interface EditableState {
   name: string;
   sessions: SessionInput[];
@@ -26,6 +30,7 @@ export function splitResponseToEditable(split: SplitResponse): EditableState {
   return {
     name: split.name,
     sessions: split.sessions.map((s) => ({
+      id: s.id ?? generateSessionId(),
       name: s.name,
       day: s.day_number,
       exercises: s.exercises.map((ex) => ({

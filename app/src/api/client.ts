@@ -217,7 +217,32 @@ export function getErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
     const data = error.response?.data;
     if (typeof data === 'object' && data !== null && 'detail' in data) {
-      return String(data.detail);
+      const detail = (data as { detail: unknown }).detail;
+      if (typeof detail === 'string') {
+        return detail;
+      }
+      if (Array.isArray(detail) && detail.length > 0) {
+        const first = detail[0];
+        if (typeof first === 'string') {
+          return first;
+        }
+        if (typeof first === 'object' && first !== null && 'msg' in first) {
+          return String((first as { msg: unknown }).msg);
+        }
+      }
+      if (typeof detail === 'object' && detail !== null) {
+        if ('message' in detail) {
+          const message = (detail as { message: unknown }).message;
+          if (typeof message === 'string') return message;
+        }
+        if ('unrecognized_exercises' in detail) {
+          const items = (detail as { unrecognized_exercises?: unknown }).unrecognized_exercises;
+          if (Array.isArray(items) && items.length > 0) {
+            return `Unrecognized exercises: ${items.join(', ')}`;
+          }
+        }
+      }
+      return 'Request failed. Please review your split inputs and try again.';
     }
     if (error.message) {
       return error.message;

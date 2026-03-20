@@ -14,6 +14,8 @@ interface Props {
   canRemove: boolean;
   defaultExpanded?: boolean;
   simultaneousHandlers?: React.Ref<any> | React.Ref<any>[];
+  dragSession?: () => void;
+  isSessionActive?: boolean;
   onDragStart?: () => void;
   onDragEnd?: () => void;
 }
@@ -25,6 +27,8 @@ export default function SessionEditorMobile({
   canRemove,
   defaultExpanded = true,
   simultaneousHandlers,
+  dragSession,
+  isSessionActive = false,
   onDragStart,
   onDragEnd,
 }: Props) {
@@ -79,6 +83,22 @@ export default function SessionEditorMobile({
       <TouchableOpacity style={styles.header} onPress={() => setExpanded(!expanded)}>
         {/* Top row: chevron, day picker, session name, trash */}
         <View style={styles.headerTopRow}>
+          <TouchableOpacity
+            style={styles.sessionDragHandle}
+            onPress={(e) => e.stopPropagation()}
+            onLongPress={(e) => {
+              e.stopPropagation();
+              dragSession?.();
+            }}
+            delayLongPress={180}
+            hitSlop={8}
+          >
+            <Ionicons
+              name="reorder-three-outline"
+              size={18}
+              color={isSessionActive ? colors.green : colors.textSecondary}
+            />
+          </TouchableOpacity>
           <Ionicons
             name={expanded ? 'chevron-down' : 'chevron-forward'}
             size={16}
@@ -99,7 +119,7 @@ export default function SessionEditorMobile({
             <TouchableOpacity
               onPress={(e) => {
                 e.stopPropagation();
-                onUpdate({ ...session, day: session.day + 1 });
+                onUpdate({ ...session, day: Math.min(7, session.day + 1) });
               }}
               hitSlop={8}
             >
@@ -191,6 +211,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     overflow: 'hidden',
+  },
+  sessionDragHandle: {
+    paddingHorizontal: 2,
+    paddingVertical: 4,
   },
   dayPicker: {
     flexDirection: 'row',

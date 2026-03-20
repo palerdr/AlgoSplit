@@ -67,7 +67,7 @@ class SessionCreate(BaseModel):
     """Session to be added to a split"""
 
     name: str = Field(..., min_length=1, description="Session name (e.g., 'Push Day')")
-    day_number: int = Field(..., gt=0, description="Day number in the cycle")
+    day_number: int = Field(..., ge=1, le=7, description="Day number in the weekly cycle (1-7)")
     exercises: List[ExerciseCreate] = Field(..., min_items=1, description="Exercises in this session")
 
     model_config = {
@@ -123,7 +123,7 @@ class SplitCreate(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=200, description="Split name")
     cycle_length: Optional[int] = Field(
-        default=None, ge=1, le=14, description="Cycle length in days (auto-calculated from sessions if not provided)"
+        default=None, ge=1, le=7, description="Cycle length in days (max 7; auto-calculated from sessions if not provided)"
     )
     stimulus_duration: int = Field(
         default=48, gt=0, description="Hours of elevated protein synthesis"
@@ -173,7 +173,7 @@ class SplitUpdate(BaseModel):
     """Request to update an existing split"""
 
     name: Optional[str] = Field(None, min_length=1, max_length=200)
-    cycle_length: Optional[int] = Field(None, ge=1, le=14)
+    cycle_length: Optional[int] = Field(None, ge=1, le=7)
     stimulus_duration: Optional[int] = Field(None, gt=0)
     maintenance_volume: Optional[int] = Field(None, ge=0)
     dataset: Optional[str] = Field(None, pattern="^(schoenfeld|pelland|average)$")

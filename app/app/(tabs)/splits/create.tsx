@@ -7,6 +7,7 @@ import {
   Alert,
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
+import DraggableFlatList from 'react-native-draggable-flatlist';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,12 +16,25 @@ import SessionEditorMobile from '../../../src/components/splits/SessionEditorMob
 import { useCreateSplit } from '../../../src/hooks/useSplits';
 import { useSettingsStore } from '../../../src/stores/settingsStore';
 import { getErrorMessage } from '../../../src/api/client';
-import { generateExerciseId } from '../../../src/utils/splitEditHelpers';
+import { generateExerciseId, generateSessionId } from '../../../src/utils/splitEditHelpers';
 import { colors, typography, spacing, borders } from '../../../src/theme';
 import type { SessionInput } from '../../../src/types/api.types';
 
 function makeDefaultSession(): SessionInput {
-  return { name: '', day: 1, exercises: [{ id: generateExerciseId(), name: '', sets: 3 }] };
+  return {
+    id: generateSessionId(),
+    name: '',
+    day: 1,
+    exercises: [{ id: generateExerciseId(), name: '', sets: 3 }],
+  };
+}
+
+function nextAvailableDay(sessions: SessionInput[]): number | null {
+  const usedDays = new Set(sessions.map((session) => session.day));
+  for (let day = 1; day <= 7; day += 1) {
+    if (!usedDays.has(day)) return day;
+  }
+  return null;
 }
 
 export default function CreateSplitScreen() {
@@ -40,6 +54,7 @@ export default function CreateSplitScreen() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState('');
   const [isDraggingExercises, setIsDraggingExercises] = useState(false);
+  const [isDraggingSessions, setIsDraggingSessions] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const dragResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -60,25 +75,53 @@ export default function CreateSplitScreen() {
     setIsDraggingExercises(false);
   }, []);
 
+  const handleSessionDragStart = useCallback(() => {
+    setIsDraggingSessions(true);
+  }, []);
+
+  const handleSessionDragEnd = useCallback(() => {
+    setIsDraggingSessions(false);
+  }, []);
+
   useEffect(() => {
     return () => {
       if (dragResetTimerRef.current) clearTimeout(dragResetTimerRef.current);
     };
   }, []);
 
-  const updateSession = (index: number, session: SessionInput) => {
+  const updateSession = (sessionId: string | undefined, fallbackIndex: number, session: SessionInput) => {
     const updated = [...sessions];
-    updated[index] = session;
+    const index = sessionId
+      ? updated.findIndex((item) => item.id === sessionId)
+      : fallbackIndex;
+    if (index < 0 || index >= updated.length) return;
+    updated[index] = { ...session, id: updated[index].id };
     setSessions(updated);
   };
 
-  const removeSession = (index: number) => {
-    setSessions(sessions.filter((_, i) => i !== index));
+  const removeSession = (sessionId: string | undefined, fallbackIndex: number) => {
+    if (sessionId) {
+      setSessions(sessions.filter((item) => item.id !== sessionId));
+      return;
+    }
+    setSessions(sessions.filter((_, i) => i !== fallbackIndex));
   };
 
   const addSession = () => {
-    const nextDay = sessions.length > 0 ? Math.max(...sessions.map((s) => s.day)) + 1 : 1;
-    setSessions([...sessions, { name: '', day: nextDay, exercises: [{ id: generateExerciseId(), name: '', sets: 3 }] }]);
+    const day = nextAvailableDay(sessions);
+    if (day == null) {
+      Alert.alert('Maximum reached', 'Splits are capped at 7 days.');
+      return;
+    }
+    setSessions([
+      ...sessions,
+      {
+        id: generateSessionId(),
+        name: '',
+        day,
+        exercises: [{ id: generateExerciseId(), name: '', sets: 3 }],
+      },
+    ]);
   };
 
   const handleSave = async () => {
@@ -92,9 +135,22 @@ export default function CreateSplitScreen() {
       showSaveError('Split name is required');
       return;
     }
-    const hasValidSession = sessions.some(
-      (s) => s.name.trim() && s.exercises.some((e) => e.name.trim()),
+    const namedSessions = sessions.filter((session) => session.name.trim());
+    const dayOutOfRange = namedSessions.find((session) => session.day < 1 || session.day > 7);
+    if (dayOutOfRange) {
+      showSaveError('Session days must be between 1 and 7.');
+      return;
+    }
+    const emptyNamedSession = namedSessions.find(
+      (session) => !session.exercises.some((exercise) => exercise.name.trim()),
     );
+    if (emptyNamedSession) {
+      showSaveError(
+        `"${emptyNamedSession.name}" has no exercises. Missing days are implied rest days, so you do not need to create rest-day sessions.`,
+      );
+      return;
+    }
+    const hasValidSession = namedSessions.length > 0;
     if (!hasValidSession) {
       showSaveError('Add at least one session with a named exercise');
       return;
@@ -103,14 +159,17 @@ export default function CreateSplitScreen() {
     setError('');
     try {
       const parsedCycleLength = parseInt(cycleLength, 10);
+      if (Number.isFinite(parsedCycleLength) && parsedCycleLength > 7) {
+        showSaveError('Cycle length must be 7 days or fewer.');
+        return;
+      }
       const result = await createMutation.mutateAsync({
         name: splitName.trim(),
-        sessions: sessions
-          .filter((s) => s.name.trim())
-          .map((s) => ({
-            ...s,
-            name: s.name.trim(),
-            exercises: s.exercises.filter((e) => e.name.trim()),
+        sessions: namedSessions
+          .map((session) => ({
+            name: session.name.trim(),
+            day: Math.max(1, Math.min(7, session.day)),
+            exercises: session.exercises.filter((exercise) => exercise.name.trim()),
           })),
         dataset,
         cycle_length: Number.isFinite(parsedCycleLength) ? parsedCycleLength : undefined,
@@ -138,7 +197,7 @@ export default function CreateSplitScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        scrollEnabled={!isDraggingExercises}
+        scrollEnabled={!isDraggingExercises && !isDraggingSessions}
       >
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -150,18 +209,47 @@ export default function CreateSplitScreen() {
           containerStyle={styles.nameInput}
         />
 
-        {sessions.map((session, i) => (
-          <SessionEditorMobile
-            key={i}
-            session={session}
-            onUpdate={(s) => updateSession(i, s)}
-            onRemove={() => removeSession(i)}
-            canRemove={sessions.length > 1}
-            simultaneousHandlers={scrollRef}
-            onDragStart={handleDragStart}
-            onDragEnd={handleDragEnd}
-          />
-        ))}
+        <Text style={styles.restHint}>
+          Missing days are treated as rest days. Use the three-bar handle to reorder sessions.
+        </Text>
+
+        <DraggableFlatList
+          data={sessions}
+          keyExtractor={(item, index) => item.id ?? `session_${index}`}
+          renderItem={({ item, drag, isActive, getIndex }) => {
+            const index = getIndex() ?? 0;
+            return (
+              <SessionEditorMobile
+                session={item}
+                onUpdate={(session) => updateSession(item.id, index, session)}
+                onRemove={() => removeSession(item.id, index)}
+                canRemove={sessions.length > 1}
+                simultaneousHandlers={scrollRef}
+                dragSession={drag}
+                isSessionActive={isActive}
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+              />
+            );
+          }}
+          onDragBegin={handleSessionDragStart}
+          onRelease={handleSessionDragEnd}
+          onDragEnd={({ data }) => {
+            const daySlots = [...sessions]
+              .map((session) => session.day)
+              .sort((a, b) => a - b);
+            const reordered = data.map((session, index) => ({
+              ...session,
+              day: daySlots[index] ?? Math.min(index + 1, 7),
+            }));
+            setSessions(reordered);
+            handleSessionDragEnd();
+          }}
+          scrollEnabled={false}
+          activationDistance={14}
+          keyboardShouldPersistTaps="handled"
+          simultaneousHandlers={scrollRef}
+        />
 
         <TouchableOpacity style={styles.addSessionBtn} onPress={addSession}>
           <Ionicons name="add-circle-outline" size={20} color={colors.green} />
@@ -256,6 +344,11 @@ const styles = StyleSheet.create({
   },
   nameInput: {
     marginBottom: 20,
+  },
+  restHint: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    marginBottom: 10,
   },
   error: {
     color: colors.red,

@@ -185,3 +185,12 @@ def test_batch_update_exercise_accepts_custom_exercise_name(monkeypatch, client)
     split_resp = client.get(f"/api/splits/{split_id}")
     assert split_resp.status_code == 200
     assert split_resp.json()["sessions"][0]["exercises"][0]["exercise_name"] == "My Custom Cable Fly"
+
+
+def test_create_split_rejects_day_above_7(client):
+    payload = _create_payload("Weekly Cap")
+    payload["sessions"][0]["day_number"] = 8
+
+    response = client.post("/api/splits", json=payload)
+
+    assert response.status_code == 422

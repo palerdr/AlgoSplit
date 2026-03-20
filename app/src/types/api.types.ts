@@ -192,6 +192,7 @@ export interface ExerciseInput {
 }
 
 export interface SessionInput {
+  id?: string; // Stable client-side ID for session drag-and-drop
   name: string;
   day: number;
   exercises: ExerciseInput[];

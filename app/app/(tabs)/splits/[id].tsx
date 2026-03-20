@@ -8,6 +8,7 @@ import {
   Alert,
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
+import DraggableFlatList from 'react-native-draggable-flatlist';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -31,6 +32,7 @@ import {
   editableToSplitRequest,
   hasChanges as checkHasChanges,
   generateExerciseId,
+  generateSessionId,
 } from '../../../src/utils/splitEditHelpers';
 import { colors, borders, spacing } from '../../../src/theme';
 import { triggerExpandTransition } from '../../../src/utils/workoutTransition';
@@ -116,6 +118,14 @@ function isNotFoundError(error: unknown): boolean {
   return isAxiosError(error) && error.response?.status === 404;
 }
 
+function nextAvailableDay(sessions: SessionInput[]): number | null {
+  const usedDays = new Set(sessions.map((session) => session.day));
+  for (let day = 1; day <= 7; day += 1) {
+    if (!usedDays.has(day)) return day;
+  }
+  return null;
+}
+
 export default function SplitDetailScreen() {
   const raw = useLocalSearchParams<{ id: string }>().id;
   const id = Array.isArray(raw) ? raw[0] : raw;
@@ -138,6 +148,7 @@ export default function SplitDetailScreen() {
   // Collapsible detailed analysis
   const [showDetailedAnalysis, setShowDetailedAnalysis] = useState(false);
   const [isDraggingExercises, setIsDraggingExercises] = useState(false);
+  const [isDraggingSessions, setIsDraggingSessions] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const dragResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -156,6 +167,14 @@ export default function SplitDetailScreen() {
       dragResetTimerRef.current = null;
     }
     setIsDraggingExercises(false);
+  }, []);
+
+  const handleSessionDragStart = useCallback(() => {
+    setIsDraggingSessions(true);
+  }, []);
+
+  const handleSessionDragEnd = useCallback(() => {
+    setIsDraggingSessions(false);
   }, []);
 
   useEffect(() => {
@@ -229,10 +248,39 @@ export default function SplitDetailScreen() {
   const handleSave = useCallback(async () => {
     if (!id || !dirty || !split) return;
     try {
+      const namedSessions = editSessions.filter((session) => session.name.trim());
+      if (namedSessions.length === 0) {
+        Alert.alert('Error', 'Add at least one session with a named exercise.');
+        return;
+      }
+
+      const dayOutOfRange = namedSessions.find((session) => session.day < 1 || session.day > 7);
+      if (dayOutOfRange) {
+        Alert.alert('Error', 'Session days must be between 1 and 7.');
+        return;
+      }
+
+      const emptyNamedSession = namedSessions.find(
+        (session) => !session.exercises.some((exercise) => exercise.name.trim()),
+      );
+      if (emptyNamedSession) {
+        Alert.alert(
+          'Error',
+          `"${emptyNamedSession.name}" has no exercises. Missing days are implied rest days, so you do not need to create rest-day sessions.`,
+        );
+        return;
+      }
+
+      const normalizedSessions = namedSessions.map((session) => ({
+        ...session,
+        day: Math.max(1, Math.min(7, session.day)),
+        exercises: session.exercises.filter((exercise) => exercise.name.trim()),
+      }));
+
       const originalEditable = splitResponseToEditable(split);
       const { canUseFastPath, updates } = buildFastExercisePatches(
         originalEditable.sessions,
-        editSessions
+        normalizedSessions
       );
 
       const metadataUpdate: SplitUpdate = {};
@@ -243,6 +291,10 @@ export default function SplitDetailScreen() {
       }
       const nextDataset = advDataset;
       const parsedCycleLength = parseInt(advCycleLength, 10);
+      if (Number.isFinite(parsedCycleLength) && parsedCycleLength > 7) {
+        Alert.alert('Error', 'Cycle length must be 7 days or fewer.');
+        return;
+      }
       const nextCycleLength = Number.isFinite(parsedCycleLength) ? parsedCycleLength : null;
       const nextStimulus = parseInt(advStimulusDuration, 10) || 48;
       const nextMaintenance = parseInt(advMaintenanceVolume, 10) || 3;
@@ -285,7 +337,7 @@ export default function SplitDetailScreen() {
         id,
         data: editableToSplitRequest({
           name: editName,
-          sessions: editSessions,
+          sessions: normalizedSessions,
           dataset: advDataset,
           cycle_length: nextCycleLength ?? undefined,
           stimulus_duration: parseInt(advStimulusDuration, 10) || 48,
@@ -326,7 +378,7 @@ export default function SplitDetailScreen() {
         overrides?.cycle_length ??
         (() => {
           const parsed = parseInt(advCycleLength, 10);
-          return Number.isFinite(parsed) ? parsed : null;
+          return Number.isFinite(parsed) ? Math.min(7, Math.max(1, parsed)) : null;
         })();
       const nextStimulusDuration =
         overrides?.stimulus_duration ?? (parseInt(advStimulusDuration, 10) || 48);
@@ -374,7 +426,10 @@ export default function SplitDetailScreen() {
   const handleAdvCycleLengthBlur = useCallback(() => {
     if (!isEditing && split) {
       const parsed = parseInt(advCycleLength, 10);
-      const nextCycleLength = Number.isFinite(parsed) ? parsed : null;
+      const nextCycleLength = Number.isFinite(parsed) ? Math.min(7, Math.max(1, parsed)) : null;
+      if (Number.isFinite(parsed) && parsed !== nextCycleLength) {
+        setAdvCycleLength(String(nextCycleLength));
+      }
       if (nextCycleLength !== (split.cycle_length ?? null)) {
         saveAdvancedSettings({ cycle_length: nextCycleLength });
       }
@@ -402,21 +457,33 @@ export default function SplitDetailScreen() {
     }
   };
 
-  const updateSession = (index: number, session: SessionInput) => {
+  const updateSession = (sessionId: string | undefined, fallbackIndex: number, session: SessionInput) => {
     const updated = [...editSessions];
-    updated[index] = session;
+    const index = sessionId
+      ? updated.findIndex((item) => item.id === sessionId)
+      : fallbackIndex;
+    if (index < 0 || index >= updated.length) return;
+    updated[index] = { ...session, id: updated[index].id };
     setEditSessions(updated);
   };
 
-  const removeSession = (index: number) => {
-    setEditSessions(editSessions.filter((_, i) => i !== index));
+  const removeSession = (sessionId: string | undefined, fallbackIndex: number) => {
+    if (sessionId) {
+      setEditSessions(editSessions.filter((item) => item.id !== sessionId));
+      return;
+    }
+    setEditSessions(editSessions.filter((_, i) => i !== fallbackIndex));
   };
 
   const addSession = () => {
-    const nextDay = editSessions.length > 0 ? Math.max(...editSessions.map((s) => s.day)) + 1 : 1;
+    const day = nextAvailableDay(editSessions);
+    if (day == null) {
+      Alert.alert('Maximum reached', 'Splits are capped at 7 days.');
+      return;
+    }
     setEditSessions([
       ...editSessions,
-      { name: '', day: nextDay, exercises: [{ id: generateExerciseId(), name: '', sets: 3 }] },
+      { id: generateSessionId(), name: '', day, exercises: [{ id: generateExerciseId(), name: '', sets: 3 }] },
     ]);
   };
 
@@ -538,7 +605,7 @@ export default function SplitDetailScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        scrollEnabled={!isDraggingExercises}
+        scrollEnabled={!isDraggingExercises && !isDraggingSessions}
       >
         {isEditing ? (
           <>
@@ -551,19 +618,48 @@ export default function SplitDetailScreen() {
               onChangeText={setEditName}
             />
 
+            <Text style={styles.restHint}>
+              Missing days are treated as rest days. Use the three-bar handle to reorder sessions.
+            </Text>
+
             {/* Edit: Sessions */}
-            {editSessions.map((session, i) => (
-              <SessionEditorMobile
-                key={i}
-                session={session}
-                onUpdate={(s) => updateSession(i, s)}
-                onRemove={() => removeSession(i)}
-                canRemove={editSessions.length > 1}
-                simultaneousHandlers={scrollRef}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-              />
-            ))}
+            <DraggableFlatList
+              data={editSessions}
+              keyExtractor={(item, index) => item.id ?? `session_${index}`}
+              renderItem={({ item, drag, isActive, getIndex }) => {
+                const index = getIndex() ?? 0;
+                return (
+                  <SessionEditorMobile
+                    session={item}
+                    onUpdate={(session) => updateSession(item.id, index, session)}
+                    onRemove={() => removeSession(item.id, index)}
+                    canRemove={editSessions.length > 1}
+                    simultaneousHandlers={scrollRef}
+                    dragSession={drag}
+                    isSessionActive={isActive}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                  />
+                );
+              }}
+              onDragBegin={handleSessionDragStart}
+              onRelease={handleSessionDragEnd}
+              onDragEnd={({ data }) => {
+                const daySlots = [...editSessions]
+                  .map((session) => session.day)
+                  .sort((a, b) => a - b);
+                const reordered = data.map((session, index) => ({
+                  ...session,
+                  day: daySlots[index] ?? Math.min(index + 1, 7),
+                }));
+                setEditSessions(reordered);
+                handleSessionDragEnd();
+              }}
+              scrollEnabled={false}
+              activationDistance={14}
+              keyboardShouldPersistTaps="handled"
+              simultaneousHandlers={scrollRef}
+            />
 
             <TouchableOpacity style={styles.addSessionBtn} onPress={addSession}>
               <Ionicons name="add-circle-outline" size={20} color={colors.green} />
@@ -976,6 +1072,11 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.borderLight,
     paddingVertical: 8,
     marginBottom: 20,
+  },
+  restHint: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    marginBottom: 10,
   },
   addSessionBtn: {
     flexDirection: 'row',
