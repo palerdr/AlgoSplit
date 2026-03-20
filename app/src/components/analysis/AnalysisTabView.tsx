@@ -7,7 +7,7 @@ import { Spinner } from '../ui';
 import { useSplitAnalysisWithBreakdowns } from '../../hooks/useSplits';
 import type { AnalysisResponse } from '../../types/api.types';
 
-const TABS = ['Groups', 'Breakdown'] as const;
+const TABS = ['Regions', 'Breakdown'] as const;
 type Tab = (typeof TABS)[number];
 
 interface Props {
@@ -16,7 +16,7 @@ interface Props {
 }
 
 export default function AnalysisTabView({ splitId, analysis }: Props) {
-  const [activeTab, setActiveTab] = useState<Tab>('Groups');
+  const [activeTab, setActiveTab] = useState<Tab>('Regions');
   const shouldLoadBreakdown = activeTab === 'Breakdown';
   const { data: fullAnalysis, isLoading: isBreakdownLoading } = useSplitAnalysisWithBreakdowns(
     splitId,
@@ -41,7 +41,7 @@ export default function AnalysisTabView({ splitId, analysis }: Props) {
       </View>
 
       <View style={styles.content}>
-        {activeTab === 'Groups' ? (
+        {activeTab === 'Regions' ? (
           <GroupSummaryCards muscles={analysis.muscles ?? []} />
         ) : isBreakdownLoading ? (
           <Spinner style={styles.breakdownSpinner} />

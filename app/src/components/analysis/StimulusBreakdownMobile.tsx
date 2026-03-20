@@ -50,13 +50,19 @@ interface GroupContribution {
   exerciseName: string;
   sessionName: string;
   totalStimulus: number;
-  muscles: string[];
+}
+
+interface RegionAggregation {
+  muscleId: string;
+  displayName: string;
+  totalStimulus: number;
+  contributions: GroupContribution[];
 }
 
 interface MuscleGroupAggregation {
   group: string;
   totalStimulus: number;
-  contributions: GroupContribution[];
+  regions: RegionAggregation[];
 }
 
 function getCnsColor(multiplier: number): string {
@@ -74,36 +80,54 @@ function buildMuscleGroupAggregations(sessionBreakdowns: SessionBreakdown[]): Mu
 
   for (const session of sessionBreakdowns) {
     for (const exercise of session.exercises) {
-      const exerciseGroups = new Map<string, GroupContribution>();
       for (const contribution of exercise.muscle_contributions) {
         const group = getParentGroup(contribution.muscle_id);
-        const existing = exerciseGroups.get(group);
-        if (existing) {
-          existing.totalStimulus += contribution.total_stimulus;
-          if (!existing.muscles.includes(contribution.display_name)) {
-            existing.muscles.push(contribution.display_name);
-          }
-        } else {
-          exerciseGroups.set(group, {
-            key: `${session.session_name}:${exercise.name}:${group}`,
-            exerciseName: exercise.name,
-            sessionName: session.session_name,
-            totalStimulus: contribution.total_stimulus,
-            muscles: [contribution.display_name],
-          });
-        }
-      }
-
-      for (const [group, groupContribution] of exerciseGroups) {
         const existingGroup = groups.get(group);
         if (existingGroup) {
-          existingGroup.totalStimulus += groupContribution.totalStimulus;
-          existingGroup.contributions.push(groupContribution);
+          existingGroup.totalStimulus += contribution.total_stimulus;
+          const existingRegion = existingGroup.regions.find((region) => region.muscleId === contribution.muscle_id);
+          if (existingRegion) {
+            existingRegion.totalStimulus += contribution.total_stimulus;
+            existingRegion.contributions.push({
+              key: `${session.session_name}:${exercise.name}:${contribution.muscle_id}`,
+              exerciseName: exercise.name,
+              sessionName: session.session_name,
+              totalStimulus: contribution.total_stimulus,
+            });
+          } else {
+            existingGroup.regions.push({
+              muscleId: contribution.muscle_id,
+              displayName: contribution.display_name,
+              totalStimulus: contribution.total_stimulus,
+              contributions: [
+                {
+                  key: `${session.session_name}:${exercise.name}:${contribution.muscle_id}`,
+                  exerciseName: exercise.name,
+                  sessionName: session.session_name,
+                  totalStimulus: contribution.total_stimulus,
+                },
+              ],
+            });
+          }
         } else {
           groups.set(group, {
             group,
-            totalStimulus: groupContribution.totalStimulus,
-            contributions: [groupContribution],
+            totalStimulus: contribution.total_stimulus,
+            regions: [
+              {
+                muscleId: contribution.muscle_id,
+                displayName: contribution.display_name,
+                totalStimulus: contribution.total_stimulus,
+                contributions: [
+                  {
+                    key: `${session.session_name}:${exercise.name}:${contribution.muscle_id}`,
+                    exerciseName: exercise.name,
+                    sessionName: session.session_name,
+                    totalStimulus: contribution.total_stimulus,
+                  },
+                ],
+              },
+            ],
           });
         }
       }
@@ -113,7 +137,12 @@ function buildMuscleGroupAggregations(sessionBreakdowns: SessionBreakdown[]): Mu
   return Array.from(groups.values())
     .map((group) => ({
       ...group,
-      contributions: [...group.contributions].sort((a, b) => b.totalStimulus - a.totalStimulus),
+      regions: [...group.regions]
+        .map((region) => ({
+          ...region,
+          contributions: [...region.contributions].sort((a, b) => b.totalStimulus - a.totalStimulus),
+        }))
+        .sort((a, b) => b.totalStimulus - a.totalStimulus),
     }))
     .sort((a, b) => b.totalStimulus - a.totalStimulus);
 }
@@ -223,18 +252,43 @@ function MuscleGroupCard({ group }: { group: MuscleGroupAggregation }) {
 
       {expanded && (
         <View style={styles.groupContributionList}>
-          {group.contributions.map((contribution) => (
-            <View key={contribution.key} style={styles.groupContributionCard}>
-              <View style={styles.groupContributionHeader}>
-                <View style={styles.groupContributionInfo}>
-                  <Text style={styles.groupContributionExercise}>{contribution.exerciseName}</Text>
-                  <Text style={styles.groupContributionSession}>{contribution.sessionName}</Text>
-                </View>
-                <Text style={styles.groupContributionValue}>{contribution.totalStimulus.toFixed(2)}</Text>
+          {group.regions.map((region) => (
+            <RegionCard key={region.muscleId} region={region} />
+          ))}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function RegionCard({ region }: { region: RegionAggregation }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <View style={styles.groupContributionCard}>
+      <TouchableOpacity style={styles.groupContributionHeader} onPress={() => setExpanded(!expanded)}>
+        <View style={styles.groupContributionInfo}>
+          <Text style={styles.groupContributionExercise}>{region.displayName}</Text>
+          <Text style={styles.groupContributionSession}>{region.contributions.length} exercise contributions</Text>
+        </View>
+        <View style={styles.groupContributionRight}>
+          <Text style={styles.groupContributionValue}>{region.totalStimulus.toFixed(2)}</Text>
+          <Ionicons
+            name={expanded ? 'chevron-down' : 'chevron-forward'}
+            size={14}
+            color={colors.textMuted}
+          />
+        </View>
+      </TouchableOpacity>
+      {expanded && (
+        <View style={styles.regionContributionList}>
+          {region.contributions.map((contribution) => (
+            <View key={contribution.key} style={styles.regionContributionRow}>
+              <View style={styles.groupContributionInfo}>
+                <Text style={styles.regionContributionExercise}>{contribution.exerciseName}</Text>
+                <Text style={styles.groupContributionSession}>{contribution.sessionName}</Text>
               </View>
-              <Text style={styles.groupContributionMuscles}>
-                {contribution.muscles.join(', ')}
-              </Text>
+              <Text style={styles.groupContributionValue}>{contribution.totalStimulus.toFixed(2)}</Text>
             </View>
           ))}
         </View>
@@ -256,7 +310,7 @@ function ViewToggle({ mode, onChange }: { mode: ViewMode; onChange: (mode: ViewM
         style={[styles.toggleBtn, mode === 'muscle' && styles.toggleBtnActive]}
         onPress={() => onChange('muscle')}
       >
-        <Text style={[styles.toggleText, mode === 'muscle' && styles.toggleTextActive]}>By Muscle Group</Text>
+        <Text style={[styles.toggleText, mode === 'muscle' && styles.toggleTextActive]}>By Group</Text>
       </TouchableOpacity>
     </View>
   );
@@ -297,7 +351,7 @@ export default function StimulusBreakdownMobile({ sessionBreakdowns }: Props) {
         <Text style={styles.breakdownHint}>
           {viewMode === 'exercise'
             ? 'Inspect stimulus by split day and exercise.'
-            : 'Inspect total stimulus by muscle group and how each exercise contributed.'}
+            : 'Inspect each muscle group, then drill into the sub-regions and exercise contributions inside it.'}
         </Text>
         <ViewToggle mode={viewMode} onChange={setViewMode} />
       </View>
@@ -610,6 +664,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
+  groupContributionRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   groupContributionInfo: {
     flex: 1,
   },
@@ -627,9 +686,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  groupContributionMuscles: {
+  regionContributionList: {
+    marginTop: 6,
+    paddingTop: 6,
+    borderTopWidth: borders.width.thin,
+    borderTopColor: colors.border,
+    gap: 8,
+  },
+  regionContributionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  regionContributionExercise: {
     color: colors.textSecondary,
-    fontSize: 11,
-    lineHeight: 16,
+    fontSize: 12,
+    fontWeight: '600',
   },
 });

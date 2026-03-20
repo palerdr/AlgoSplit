@@ -9,37 +9,6 @@ interface Props {
   muscles: MuscleStats[];
 }
 
-interface AggregatedGroup {
-  group: string;
-  label: string;
-  regions: string[];
-  rawStimulus: number;
-  atrophy: number;
-  netStimulus: number;
-}
-
-const GROUP_LABELS: Record<string, string> = {
-  chest: 'Chest',
-  shoulders: 'Shoulders',
-  upper_back: 'Upper Back',
-  lower_back: 'Lower Back',
-  lats: 'Lats',
-  triceps: 'Triceps',
-  elbow_flexors: 'Elbow Flexors',
-  forearms: 'Forearms',
-  glutes: 'Glutes',
-  quads: 'Quads',
-  hamstrings: 'Hamstrings',
-  calves: 'Calves',
-  adductors: 'Adductors',
-  abs: 'Abs',
-  core: 'Core',
-};
-
-function formatGroupLabel(group: string): string {
-  return GROUP_LABELS[group] ?? group.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
 function getStimulusColor(value: number, maxValue: number): string {
   if (maxValue <= 0) return '#4B5563';
   const pct = Math.max(0, Math.min(1, value / maxValue));
@@ -50,49 +19,23 @@ function getStimulusColor(value: number, maxValue: number): string {
   return '#EF4444';
 }
 
-function buildGroups(muscles: MuscleStats[]): AggregatedGroup[] {
-  const byGroup = new Map<string, AggregatedGroup>();
-
-  for (const muscle of muscles) {
-    const existing = byGroup.get(muscle.parent_group);
-    if (existing) {
-      existing.rawStimulus += muscle.stimulus;
-      existing.atrophy += muscle.atrophy;
-      existing.netStimulus += muscle.net_stimulus;
-      existing.regions.push(muscle.region_id);
-    } else {
-      byGroup.set(muscle.parent_group, {
-        group: muscle.parent_group,
-        label: formatGroupLabel(muscle.parent_group),
-        regions: [muscle.region_id],
-        rawStimulus: muscle.stimulus,
-        atrophy: muscle.atrophy,
-        netStimulus: muscle.net_stimulus,
-      });
-    }
-  }
-
-  return Array.from(byGroup.values());
-}
-
 export default function GroupSummaryCards({ muscles }: Props) {
-  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const [activeRegion, setActiveRegion] = useState<string | null>(null);
   const [metricMode, setMetricMode] = useState<MetricMode>('raw');
 
-  const groups = useMemo(() => buildGroups(muscles), [muscles]);
   const sorted = useMemo(
-    () => [...groups].sort((a, b) => (metricMode === 'raw' ? b.rawStimulus - a.rawStimulus : b.netStimulus - a.netStimulus)),
-    [groups, metricMode],
+    () => [...muscles].sort((a, b) => (metricMode === 'raw' ? b.stimulus - a.stimulus : b.net_stimulus - a.net_stimulus)),
+    [muscles, metricMode],
   );
   const maxStimulus = useMemo(
-    () => Math.max(...sorted.map((group) => (metricMode === 'raw' ? group.rawStimulus : group.netStimulus)), 1),
+    () => Math.max(...sorted.map((muscle) => (metricMode === 'raw' ? muscle.stimulus : muscle.net_stimulus)), 1),
     [sorted, metricMode],
   );
 
   if (sorted.length === 0) {
     return (
       <View style={styles.emptyState}>
-        <Text style={styles.emptyText}>No group data available yet.</Text>
+        <Text style={styles.emptyText}>No region data available yet.</Text>
       </View>
     );
   }
@@ -100,7 +43,7 @@ export default function GroupSummaryCards({ muscles }: Props) {
   return (
     <View style={styles.chartCard}>
       <View style={styles.headerRow}>
-        <Text style={styles.headerTitle}>Stimulus by Group</Text>
+        <Text style={styles.headerTitle}>Stimulus by Region</Text>
         <View style={styles.toggleWrap}>
           <TouchableOpacity
             style={[styles.toggleBtn, metricMode === 'raw' && styles.toggleBtnActive]}
@@ -119,30 +62,32 @@ export default function GroupSummaryCards({ muscles }: Props) {
       <Text style={styles.modeHint}>
         {metricMode === 'raw' ? 'Raw stimulus before atrophy' : 'Net stimulus after end-of-week atrophy'}
       </Text>
-      {sorted.map((group) => {
-        const value = metricMode === 'raw' ? group.rawStimulus : group.netStimulus;
+
+      {sorted.map((muscle) => {
+        const value = metricMode === 'raw' ? muscle.stimulus : muscle.net_stimulus;
         const barColor = getStimulusColor(value, maxStimulus);
         const widthPct = Math.max((value / maxStimulus) * 100, 3);
-        const isActive = activeGroup === group.group;
+        const isActive = activeRegion === muscle.region_id;
 
         return (
           <Pressable
-            key={group.group}
+            key={muscle.region_id}
             style={styles.row}
-            onHoverIn={() => setActiveGroup(group.group)}
-            onHoverOut={() => setActiveGroup((current) => (current === group.group ? null : current))}
-            onPressIn={() => setActiveGroup(group.group)}
-            onPressOut={() => setActiveGroup((current) => (current === group.group ? null : current))}
+            onHoverIn={() => setActiveRegion(muscle.region_id)}
+            onHoverOut={() => setActiveRegion((current) => (current === muscle.region_id ? null : current))}
+            onPressIn={() => setActiveRegion(muscle.region_id)}
+            onPressOut={() => setActiveRegion((current) => (current === muscle.region_id ? null : current))}
           >
             <View style={styles.rowHeader}>
-              <Text style={styles.groupName} numberOfLines={1}>
-                {group.label}
+              <Text style={styles.regionName} numberOfLines={1}>
+                {muscle.display_name}
               </Text>
               <Text style={styles.meta}>{value.toFixed(2)}</Text>
             </View>
 
             <Text style={styles.subMeta} numberOfLines={1}>
-              {group.regions.length} regions{metricMode === 'net' ? ` · ${group.atrophy.toFixed(2)} atrophy` : ''}
+              {muscle.parent_group.replace(/_/g, ' ')}
+              {metricMode === 'net' ? ` · ${muscle.atrophy.toFixed(2)} atrophy` : ''}
             </Text>
 
             <View style={styles.track}>
@@ -217,7 +162,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 8,
   },
-  groupName: {
+  regionName: {
     color: colors.text,
     fontSize: 13,
     fontWeight: '700',
@@ -232,6 +177,7 @@ const styles = StyleSheet.create({
     color: colors.textDim,
     fontSize: 10,
     marginTop: -2,
+    textTransform: 'capitalize',
   },
   track: {
     height: 16,
