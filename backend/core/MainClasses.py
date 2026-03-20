@@ -655,64 +655,68 @@ class Session:
             if is_bilateral_compound(pattern_name, is_unilateral):
                 fatigue_state.add_bilateral_compound(sets)
 
+            # --- P1: Hoist loop invariants ---
+            # Build flat work list once per exercise (tier, muscle, weight, hours_since are
+            # all invariant across sets of the same exercise).
+            work_items = []
+            for tier in ('prime', 'secondary', 'tertiary', 'quaternary'):
+                tier_targets = tiered_targets.get(tier, {})
+                for muscle_id, weight in tier_targets.items():
+                    muscle = muscles.get(muscle_id)
+                    if not muscle:
+                        continue
+                    hours_since = (self.time - muscle.last_trained_time) if muscle.last_trained_time is not None else None
+                    work_items.append((muscle, muscle_id, weight, tier, hours_since))
+
+            # Pre-allocate breakdown muscle_contributions entries
+            if collect_breakdowns and exercise_bd is not None:
+                for muscle, muscle_id, weight, tier, hours_since in work_items:
+                    if muscle_id not in exercise_bd['muscle_contributions']:
+                        base_weight = pre_leverage_targets.get(tier, {}).get(muscle_id, weight)
+                        exercise_bd['muscle_contributions'][muscle_id] = {
+                            'display_name': muscle.display_name,
+                            'tier': tier,
+                            'base_weight': base_weight,
+                            'leverage_weight': weight,
+                            'sets': [],
+                            'total_stimulus': 0.0,
+                        }
+
             # Process each set
             for set_num in range(sets):
                 global_sets += 1
                 fatigue_state.add_sets(1)
 
-                # Apply stimulus to each muscle by tier
-                for tier in ['prime', 'secondary', 'tertiary', 'quaternary']:
-                    tier_targets = tiered_targets.get(tier, {})
+                for muscle, muscle_id, weight, tier, hours_since in work_items:
+                    _apply_stimulus_calls += 1
+                    stimulus = muscle.apply_stimulus(
+                        stimulus_amount=weight,
+                        tier=tier,
+                        is_unilateral=is_unilateral,
+                        is_bilateral=is_bilateral,
+                        resistance_profile=resistance_profile,
+                        hours_since_training=hours_since,
+                        stimulus_duration=stimulus_duration,
+                        global_set_number=global_sets,
+                        axial_fatigue=fatigue_state.axial_fatigue,
+                        dataset=dataset,
+                        current_session_time=self.time,
+                        consecutive_day_penalty=consecutive_day_penalty,
+                        collect_breakdown=collect_breakdowns,
+                    )
 
-                    for muscle_id, weight in tier_targets.items():
-                        muscle = muscles.get(muscle_id)
-                        if not muscle:
-                            continue
+                    if collect_breakdowns:
+                        session_stats['stimulus_by_muscle'][muscle_id] += stimulus
+                        session_stats['muscles_trained'].add(muscle_id)
 
-                        hours_since = None
-                        if muscle.last_trained_time is not None:
-                            hours_since = self.time - muscle.last_trained_time
-
-                        _apply_stimulus_calls += 1
-                        stimulus = muscle.apply_stimulus(
-                            stimulus_amount=weight,
-                            tier=tier,
-                            is_unilateral=is_unilateral,
-                            is_bilateral=is_bilateral,
-                            resistance_profile=resistance_profile,
-                            hours_since_training=hours_since,
-                            stimulus_duration=stimulus_duration,
-                            global_set_number=global_sets,
-                            axial_fatigue=fatigue_state.axial_fatigue,
-                            dataset=dataset,
-                            current_session_time=self.time,
-                            consecutive_day_penalty=consecutive_day_penalty,
-                            collect_breakdown=collect_breakdowns,
-                        )
-
-                        if collect_breakdowns:
-                            session_stats['stimulus_by_muscle'][muscle_id] += stimulus
-                            session_stats['muscles_trained'].add(muscle_id)
-
-                        # Collect breakdown data
-                        if collect_breakdowns and exercise_bd is not None and muscle._last_breakdown is not None:
-                            bd = muscle._last_breakdown.copy()
-                            bd['set_number'] = set_num + 1
-                            bd['weight'] = weight
-
-                            if muscle_id not in exercise_bd['muscle_contributions']:
-                                base_weight = pre_leverage_targets.get(tier, {}).get(muscle_id, weight)
-                                exercise_bd['muscle_contributions'][muscle_id] = {
-                                    'display_name': muscle.display_name,
-                                    'tier': tier,
-                                    'base_weight': base_weight,
-                                    'leverage_weight': weight,
-                                    'sets': [],
-                                    'total_stimulus': 0.0,
-                                }
-                            mc = exercise_bd['muscle_contributions'][muscle_id]
-                            mc['sets'].append(bd)
-                            mc['total_stimulus'] += bd['final_stimulus']
+                    # Collect breakdown data
+                    if collect_breakdowns and exercise_bd is not None and muscle._last_breakdown is not None:
+                        bd = muscle._last_breakdown.copy()
+                        bd['set_number'] = set_num + 1
+                        bd['weight'] = weight
+                        mc = exercise_bd['muscle_contributions'][muscle_id]
+                        mc['sets'].append(bd)
+                        mc['total_stimulus'] += bd['final_stimulus']
 
             # Frequency tracks direct/prime training, not secondary stimulus.
             for muscle_id in tiered_targets.get('prime', {}).keys():
