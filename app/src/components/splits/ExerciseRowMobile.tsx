@@ -96,8 +96,11 @@ export default function ExerciseRowMobile({
       <View style={styles.row1}>
         {Platform.OS === 'web' ? (
           <View
-            style={[styles.dragHandle, { cursor: 'grab', userSelect: 'none' } as any]}
+            style={[styles.dragHandle, { cursor: 'grab', userSelect: 'none', touchAction: 'none' } as any]}
             onPointerDown={(e: any) => {
+              // Prevent browser from starting a scroll gesture (which would
+              // fire pointercancel and stop all subsequent pointermove events).
+              e.preventDefault();
               // Release implicit pointer capture set by RNW so that
               // document-level pointermove can hit-test sibling elements.
               try { (e.target as HTMLElement).releasePointerCapture(e.nativeEvent.pointerId); } catch {}
@@ -224,7 +227,7 @@ const styles = StyleSheet.create({
   dragHandle: {
     paddingHorizontal: 2,
     paddingVertical: 4,
-    ...Platform.select({ web: { cursor: 'grab' } as any, default: {} }),
+    ...Platform.select({ web: { cursor: 'grab', touchAction: 'none' } as any, default: {} }),
   },
   nameWrap: {
     flex: 1,

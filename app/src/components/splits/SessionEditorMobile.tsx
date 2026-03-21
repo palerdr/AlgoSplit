@@ -199,15 +199,16 @@ export default function SessionEditorMobile({
   }, [session, onUpdate]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, draggingExerciseId && styles.containerDragging]}>
       {/* Header */}
       <TouchableOpacity style={styles.header} onPress={() => setExpanded(!expanded)}>
         {/* Top row: chevron, day picker, session name, trash */}
         <View style={styles.headerTopRow}>
           {Platform.OS === 'web' ? (
             <View
-              style={[styles.sessionDragHandle, { cursor: 'grab', userSelect: 'none' } as any]}
+              style={[styles.sessionDragHandle, { cursor: 'grab', userSelect: 'none', touchAction: 'none' } as any]}
               onPointerDown={(e: any) => {
+                e.preventDefault();
                 e.stopPropagation();
                 try { (e.target as HTMLElement).releasePointerCapture(e.nativeEvent.pointerId); } catch {}
                 dragSession?.();
@@ -376,6 +377,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     overflow: 'hidden',
   },
+  containerDragging: {
+    overflow: 'visible' as const,
+  },
   header: {
     padding: spacing.md,
     gap: 4,
@@ -389,7 +393,7 @@ const styles = StyleSheet.create({
   sessionDragHandle: {
     paddingHorizontal: 2,
     paddingVertical: 4,
-    ...Platform.select({ web: { cursor: 'grab' } as any, default: {} }),
+    ...Platform.select({ web: { cursor: 'grab', touchAction: 'none' } as any, default: {} }),
   },
   dayPicker: {
     flexDirection: 'row',
