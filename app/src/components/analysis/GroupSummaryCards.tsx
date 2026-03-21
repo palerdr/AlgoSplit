@@ -45,8 +45,10 @@ export default function GroupSummaryCards({ muscles }: Props) {
   return (
     <View style={styles.chartCard}>
       <View style={styles.headerRow}>
-        <Text style={styles.headerTitle}>Stimulus by Region</Text>
-        <InfoButton title={HELP_CONTENT['splits.stimulusByGroup'].title} body={HELP_CONTENT['splits.stimulusByGroup'].body} size={15} />
+        <View style={styles.headerTitleRow}>
+          <Text style={styles.headerTitle}>Stimulus by Region</Text>
+          <InfoButton title={HELP_CONTENT['splits.stimulusByGroup'].title} body={HELP_CONTENT['splits.stimulusByGroup'].body} size={15} />
+        </View>
         <View style={styles.toggleWrap}>
           <TouchableOpacity
             style={[styles.toggleBtn, metricMode === 'raw' && styles.toggleBtnActive]}
@@ -123,6 +125,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 10,
+  },
+  headerTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   headerTitle: {
     color: colors.text,
