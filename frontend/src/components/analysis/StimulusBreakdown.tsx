@@ -384,7 +384,6 @@ interface MuscleAggregation {
     stimulus: number;
     sets: number;
     mc: MuscleContribution;
-    consecutiveDayPenalty: number;
   }>;
 }
 
@@ -392,7 +391,6 @@ function buildMuscleAggregations(sessions: SessionBreakdown[]): MuscleAggregatio
   const muscleMap = new Map<string, MuscleAggregation>();
 
   for (const session of sessions) {
-    const penalty = session.consecutive_day_penalty ?? 1.0;
     for (const exercise of session.exercises) {
       for (const mc of exercise.muscle_contributions) {
         let agg = muscleMap.get(mc.muscle_id);
@@ -414,7 +412,6 @@ function buildMuscleAggregations(sessions: SessionBreakdown[]): MuscleAggregatio
           stimulus: mc.total_stimulus,
           sets: mc.sets.length,
           mc,
-          consecutiveDayPenalty: penalty,
         });
       }
     }

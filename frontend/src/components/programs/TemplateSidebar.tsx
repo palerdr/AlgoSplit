@@ -62,7 +62,8 @@ function SplitRow({
   );
 }
 
-export function TemplateSidebar(_props: TemplateSidebarProps) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function TemplateSidebar({ programId: _programId }: TemplateSidebarProps) {
   const [expandedSplits, setExpandedSplits] = useState<Set<string>>(new Set());
 
   const { data, isLoading } = useQuery({
@@ -73,7 +74,7 @@ export function TemplateSidebar(_props: TemplateSidebarProps) {
   const toggleSplit = (id: string) => {
     setExpandedSplits(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) { next.delete(id); } else { next.add(id); }
       return next;
     });
   };
