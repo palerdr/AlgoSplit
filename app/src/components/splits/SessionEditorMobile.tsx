@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DraggableFlatList, { NestableDraggableFlatList } from 'react-native-draggable-flatlist';
@@ -65,23 +65,6 @@ export default function SessionEditorMobile({
     }
   }, [session, onUpdate]);
 
-  useEffect(() => {
-    if (!isWeb || !draggingExerciseId || typeof window === 'undefined') return;
-
-    const stopExerciseDrag = () => {
-      setDraggingExerciseId(null);
-      onDragEnd?.();
-    };
-
-    window.addEventListener('pointerup', stopExerciseDrag);
-    window.addEventListener('mouseup', stopExerciseDrag);
-
-    return () => {
-      window.removeEventListener('pointerup', stopExerciseDrag);
-      window.removeEventListener('mouseup', stopExerciseDrag);
-    };
-  }, [draggingExerciseId, isWeb, onDragEnd, onUpdate, session]);
-
   const handleWebExerciseMove = useCallback((targetId: string) => {
     if (!draggingExerciseId || draggingExerciseId === targetId) return;
 
@@ -90,6 +73,104 @@ export default function SessionEditorMobile({
       exercises: reorderExercises(session.exercises, draggingExerciseId, targetId),
     });
   }, [draggingExerciseId, onUpdate, session]);
+
+  // Refs keep closures up-to-date without re-running the drag effect mid-drag
+  const moveRef = useRef(handleWebExerciseMove);
+  moveRef.current = handleWebExerciseMove;
+  const dragEndRef = useRef(onDragEnd);
+  dragEndRef.current = onDragEnd;
+  const exDragRef = useRef<{ startY: number; el: HTMLElement | null; initialized: boolean }>({
+    startY: 0, el: null, initialized: false,
+  });
+
+  useEffect(() => {
+    if (!isWeb || !draggingExerciseId || typeof window === 'undefined') return;
+
+    // Acquire the dragged wrapper element and apply "lifted" visual
+    const dragEl = document.getElementById(`drag-ex-${draggingExerciseId}`);
+    exDragRef.current = { startY: 0, el: dragEl, initialized: false };
+    if (dragEl) {
+      dragEl.style.zIndex = '999';
+      dragEl.style.position = 'relative';
+      dragEl.style.boxShadow = '0 8px 24px rgba(0,0,0,0.25)';
+      dragEl.style.opacity = '0.95';
+    }
+
+    const stopExerciseDrag = () => {
+      const { el } = exDragRef.current;
+      if (el) {
+        el.style.transition = 'transform 0.15s ease-out, box-shadow 0.15s, opacity 0.15s';
+        el.style.transform = '';
+        el.style.boxShadow = '';
+        el.style.opacity = '';
+        setTimeout(() => { el.style.transition = ''; el.style.zIndex = ''; el.style.position = ''; }, 160);
+      }
+      exDragRef.current = { startY: 0, el: null, initialized: false };
+      setDraggingExerciseId(null);
+      dragEndRef.current?.();
+    };
+
+    const handlePointerMove = (e: PointerEvent) => {
+      const state = exDragRef.current;
+      // Capture start position on first move
+      if (!state.initialized) {
+        state.initialized = true;
+        state.startY = e.clientY;
+      }
+      // Translate dragged element to follow pointer
+      if (state.el) {
+        state.el.style.transition = 'none';
+        state.el.style.transform = `translateY(${e.clientY - state.startY}px) scale(1.02)`;
+      }
+
+      // Hide dragged el from hit-test so elementFromPoint finds what's underneath
+      if (state.el) state.el.style.pointerEvents = 'none';
+      const hitEl = document.elementFromPoint(e.clientX, e.clientY);
+      if (state.el) state.el.style.pointerEvents = '';
+
+      if (!hitEl) return;
+      const wrapper = (hitEl as HTMLElement).closest?.('[id^="drag-ex-"]');
+      if (wrapper) {
+        const targetId = wrapper.id.replace('drag-ex-', '');
+        if (targetId && targetId !== draggingExerciseId) {
+          // Only swap once the pointer crosses the target's vertical center
+          const targetRect = wrapper.getBoundingClientRect();
+          const targetCenterY = targetRect.top + targetRect.height / 2;
+          const movingDown = e.clientY > state.startY;
+          if (movingDown ? e.clientY < targetCenterY : e.clientY > targetCenterY) return;
+
+          const oldRect = state.el?.getBoundingClientRect();
+          moveRef.current(targetId);
+          // Recalibrate position after React commits the DOM reorder
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (!exDragRef.current.el) return; // drag ended, skip
+            const newEl = document.getElementById(`drag-ex-${draggingExerciseId}`);
+            if (newEl && oldRect) {
+              const newRect = newEl.getBoundingClientRect();
+              state.startY += newRect.top - oldRect.top;
+              state.el = newEl;
+              newEl.style.transition = 'none';
+              newEl.style.transform = `translateY(${e.clientY - state.startY}px) scale(1.02)`;
+              newEl.style.zIndex = '999';
+              newEl.style.position = 'relative';
+              newEl.style.opacity = '0.95';
+              newEl.style.boxShadow = '0 8px 24px rgba(0,0,0,0.25)';
+            }
+          }));
+        }
+      }
+    };
+
+    document.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopExerciseDrag);
+    window.addEventListener('mouseup', stopExerciseDrag);
+
+    return () => {
+      document.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopExerciseDrag);
+      window.removeEventListener('mouseup', stopExerciseDrag);
+    };
+  }, [draggingExerciseId, isWeb]);
 
   const totalSets = session.exercises.reduce((sum, e) => sum + e.sets, 0);
 
@@ -124,35 +205,45 @@ export default function SessionEditorMobile({
   }, [session, onUpdate]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, draggingExerciseId && styles.containerDragging]}>
       {/* Header */}
       <TouchableOpacity style={styles.header} onPress={() => setExpanded(!expanded)}>
         {/* Top row: chevron, day picker, session name, trash */}
         <View style={styles.headerTopRow}>
-          <TouchableOpacity
-            style={styles.sessionDragHandle}
-            onPress={(e) => e.stopPropagation()}
-            onPressIn={(e) => {
-              e.stopPropagation();
-              if (Platform.OS === 'web') {
+          {Platform.OS === 'web' ? (
+            <View
+              style={[styles.sessionDragHandle, { cursor: 'grab', userSelect: 'none', touchAction: 'none' } as any]}
+              onPointerDown={(e: any) => {
+                e.preventDefault();
+                e.stopPropagation();
+                try { (e.target as HTMLElement).releasePointerCapture(e.nativeEvent.pointerId); } catch {}
                 dragSession?.();
-              }
-            }}
-            onLongPress={(e) => {
-              e.stopPropagation();
-              if (Platform.OS !== 'web') {
+              }}
+            >
+              <Ionicons
+                name="reorder-three-outline"
+                size={18}
+                color={isSessionActive ? colors.green : colors.textSecondary}
+              />
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.sessionDragHandle}
+              onPress={(e) => e.stopPropagation()}
+              onLongPress={(e) => {
+                e.stopPropagation();
                 dragSession?.();
-              }
-            }}
-            delayLongPress={180}
-            hitSlop={8}
-          >
-            <Ionicons
-              name="reorder-three-outline"
-              size={18}
-              color={isSessionActive ? colors.green : colors.textSecondary}
-            />
-          </TouchableOpacity>
+              }}
+              delayLongPress={180}
+              hitSlop={8}
+            >
+              <Ionicons
+                name="reorder-three-outline"
+                size={18}
+                color={isSessionActive ? colors.green : colors.textSecondary}
+              />
+            </TouchableOpacity>
+          )}
           <Ionicons
             name={expanded ? 'chevron-down' : 'chevron-forward'}
             size={16}
@@ -215,7 +306,7 @@ export default function SessionEditorMobile({
               return (
                 <View
                   key={exerciseId}
-                  onPointerMove={() => handleWebExerciseMove(exerciseId)}
+                  nativeID={`drag-ex-${exerciseId}`}
                 >
                   <ExerciseRowMobile
                     exercise={item}
@@ -292,6 +383,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     overflow: 'hidden',
   },
+  containerDragging: {
+    overflow: 'visible' as const,
+  },
   header: {
     padding: spacing.md,
     gap: 4,
@@ -305,6 +399,7 @@ const styles = StyleSheet.create({
   sessionDragHandle: {
     paddingHorizontal: 2,
     paddingVertical: 4,
+    ...Platform.select({ web: { cursor: 'grab', touchAction: 'none' } as any, default: {} }),
   },
   dayPicker: {
     flexDirection: 'row',

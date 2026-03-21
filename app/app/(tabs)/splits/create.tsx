@@ -126,28 +126,104 @@ export default function CreateSplitScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!isWeb || !draggingSessionId || typeof window === 'undefined') return;
-
-    const stopSessionDrag = () => {
-      setDraggingSessionId(null);
-      handleSessionDragEnd();
-    };
-
-    window.addEventListener('pointerup', stopSessionDrag);
-    window.addEventListener('mouseup', stopSessionDrag);
-
-    return () => {
-      window.removeEventListener('pointerup', stopSessionDrag);
-      window.removeEventListener('mouseup', stopSessionDrag);
-    };
-  }, [draggingSessionId, handleSessionDragEnd, isWeb]);
-
   const handleWebSessionMove = useCallback((targetId: string) => {
     if (!draggingSessionId || draggingSessionId === targetId) return;
 
     setSessions((previous) => reorderSessionsWithStableDays(previous, draggingSessionId, targetId));
   }, [draggingSessionId]);
+
+  // Refs keep closures up-to-date without re-running the drag effect mid-drag
+  const sessionMoveRef = useRef(handleWebSessionMove);
+  sessionMoveRef.current = handleWebSessionMove;
+  const sessionDragEndRef = useRef(handleSessionDragEnd);
+  sessionDragEndRef.current = handleSessionDragEnd;
+  const sessionDragRef = useRef<{ startY: number; el: HTMLElement | null; initialized: boolean }>({
+    startY: 0, el: null, initialized: false,
+  });
+
+  useEffect(() => {
+    if (!isWeb || !draggingSessionId || typeof window === 'undefined') return;
+
+    const dragEl = document.getElementById(`drag-session-${draggingSessionId}`);
+    sessionDragRef.current = { startY: 0, el: dragEl, initialized: false };
+    if (dragEl) {
+      dragEl.style.zIndex = '999';
+      dragEl.style.position = 'relative';
+      dragEl.style.boxShadow = '0 8px 24px rgba(0,0,0,0.25)';
+      dragEl.style.opacity = '0.95';
+    }
+
+    const stopSessionDrag = () => {
+      const { el } = sessionDragRef.current;
+      if (el) {
+        el.style.transition = 'transform 0.15s ease-out, box-shadow 0.15s, opacity 0.15s';
+        el.style.transform = '';
+        el.style.boxShadow = '';
+        el.style.opacity = '';
+        setTimeout(() => { el.style.transition = ''; el.style.zIndex = ''; el.style.position = ''; }, 160);
+      }
+      sessionDragRef.current = { startY: 0, el: null, initialized: false };
+      setDraggingSessionId(null);
+      sessionDragEndRef.current();
+    };
+
+    const handlePointerMove = (e: PointerEvent) => {
+      const state = sessionDragRef.current;
+      if (!state.initialized) {
+        state.initialized = true;
+        state.startY = e.clientY;
+      }
+      if (state.el) {
+        state.el.style.transition = 'none';
+        state.el.style.transform = `translateY(${e.clientY - state.startY}px) scale(1.01)`;
+      }
+
+      if (state.el) state.el.style.pointerEvents = 'none';
+      const hitEl = document.elementFromPoint(e.clientX, e.clientY);
+      if (state.el) state.el.style.pointerEvents = '';
+
+      if (!hitEl) return;
+      const wrapper = (hitEl as HTMLElement).closest?.('[id^="drag-session-"]');
+      if (wrapper) {
+        const targetId = wrapper.id.replace('drag-session-', '');
+        if (targetId && targetId !== draggingSessionId) {
+          // Only swap once the pointer crosses the target's vertical center
+          const targetRect = wrapper.getBoundingClientRect();
+          const targetCenterY = targetRect.top + targetRect.height / 2;
+          const movingDown = e.clientY > state.startY;
+          if (movingDown ? e.clientY < targetCenterY : e.clientY > targetCenterY) return;
+
+          const oldRect = state.el?.getBoundingClientRect();
+          sessionMoveRef.current(targetId);
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (!sessionDragRef.current.el) return; // drag ended, skip
+            const newEl = document.getElementById(`drag-session-${draggingSessionId}`);
+            if (newEl && oldRect) {
+              const newRect = newEl.getBoundingClientRect();
+              state.startY += newRect.top - oldRect.top;
+              state.el = newEl;
+              newEl.style.transition = 'none';
+              newEl.style.transform = `translateY(${e.clientY - state.startY}px) scale(1.01)`;
+              newEl.style.zIndex = '999';
+              newEl.style.position = 'relative';
+              newEl.style.opacity = '0.95';
+              newEl.style.boxShadow = '0 8px 24px rgba(0,0,0,0.25)';
+            }
+          }));
+        }
+      }
+    };
+
+    document.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopSessionDrag);
+    window.addEventListener('mouseup', stopSessionDrag);
+
+    return () => {
+      document.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopSessionDrag);
+      window.removeEventListener('mouseup', stopSessionDrag);
+    };
+  }, [draggingSessionId, isWeb]);
 
   const updateSession = (sessionId: string | undefined, fallbackIndex: number, session: SessionInput) => {
     const updated = [...sessions];
@@ -282,7 +358,7 @@ export default function CreateSplitScreen() {
             return (
               <View
                 key={sessionId}
-                onPointerMove={() => handleWebSessionMove(sessionId)}
+                nativeID={`drag-session-${sessionId}`}
               >
                 <SessionEditorMobile
                   session={session}

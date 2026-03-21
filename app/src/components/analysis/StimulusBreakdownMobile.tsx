@@ -351,7 +351,7 @@ export default function StimulusBreakdownMobile({ sessionBreakdowns }: Props) {
         <Text style={styles.breakdownHint}>
           {viewMode === 'exercise'
             ? 'Inspect stimulus by split day and exercise.'
-            : 'Inspect each muscle group, then drill into the sub-regions and exercise contributions inside it.'}
+            : 'Inspect each muscle group, sub-regions, and exercise contributions.'}
         </Text>
         <ViewToggle mode={viewMode} onChange={setViewMode} />
       </View>

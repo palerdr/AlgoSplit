@@ -1,9 +1,10 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   TextInput,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   Platform,
 } from 'react-native';
@@ -93,23 +94,31 @@ export default function ExerciseRowMobile({
     <View style={[styles.container, isActive && styles.containerActive]}>
       {/* Row 1: Drag handle + Name + Remove */}
       <View style={styles.row1}>
-        <TouchableOpacity
-          style={styles.dragHandle}
-          onPressIn={() => {
-            if (Platform.OS === 'web') {
+        {Platform.OS === 'web' ? (
+          <View
+            style={[styles.dragHandle, { cursor: 'grab', userSelect: 'none', touchAction: 'none' } as any]}
+            onPointerDown={(e: any) => {
+              // Prevent browser from starting a scroll gesture (which would
+              // fire pointercancel and stop all subsequent pointermove events).
+              e.preventDefault();
+              // Release implicit pointer capture set by RNW so that
+              // document-level pointermove can hit-test sibling elements.
+              try { (e.target as HTMLElement).releasePointerCapture(e.nativeEvent.pointerId); } catch {}
               drag?.();
-            }
-          }}
-          onLongPress={() => {
-            if (Platform.OS !== 'web') {
-              drag?.();
-            }
-          }}
-          delayLongPress={180}
-          hitSlop={8}
-        >
-          <Ionicons name="reorder-three-outline" size={18} color={colors.textSecondary} />
-        </TouchableOpacity>
+            }}
+          >
+            <Ionicons name="reorder-three-outline" size={18} color={isActive ? colors.green : colors.textSecondary} />
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={styles.dragHandle}
+            onLongPress={() => drag?.()}
+            delayLongPress={180}
+            hitSlop={8}
+          >
+            <Ionicons name="reorder-three-outline" size={18} color={isActive ? colors.green : colors.textSecondary} />
+          </TouchableOpacity>
+        )}
         <View style={styles.nameWrap}>
           <TextInput
             style={styles.nameInput}
@@ -218,6 +227,7 @@ const styles = StyleSheet.create({
   dragHandle: {
     paddingHorizontal: 2,
     paddingVertical: 4,
+    ...Platform.select({ web: { cursor: 'grab', touchAction: 'none' } as any, default: {} }),
   },
   nameWrap: {
     flex: 1,
