@@ -283,6 +283,12 @@ export default function SplitDetailScreen() {
       if (wrapper) {
         const targetId = wrapper.id.replace('drag-session-', '');
         if (targetId && targetId !== draggingSessionId) {
+          // Only swap once the pointer crosses the target's vertical center
+          const targetRect = wrapper.getBoundingClientRect();
+          const targetCenterY = targetRect.top + targetRect.height / 2;
+          const movingDown = e.clientY > state.startY;
+          if (movingDown ? e.clientY < targetCenterY : e.clientY > targetCenterY) return;
+
           const oldRect = state.el?.getBoundingClientRect();
           sessionMoveRef.current(targetId);
           requestAnimationFrame(() => requestAnimationFrame(() => {
