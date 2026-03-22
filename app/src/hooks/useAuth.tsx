@@ -71,7 +71,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (res.refresh_token) await tokenStore.setRefreshToken(res.refresh_token);
         scheduleRefresh(res.expires_in);
       } catch {
-        // Refresh failed — interceptor will handle 401 on next request
+        // Refresh failed — reschedule so the chain doesn't die permanently.
+        // The interceptor handles 401s reactively, but if no API calls are
+        // made for hours (e.g. long editing session), we need the proactive
+        // chain to keep retrying.
+        scheduleRefresh(60);
       }
     }, delay);
   }, []);
@@ -87,7 +91,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (res.refresh_token) await tokenStore.setRefreshToken(res.refresh_token);
       scheduleRefresh(res.expires_in);
     } catch {
-      // Refresh failed — interceptor will handle 401 on next request
+      // Refresh failed — still schedule a retry so the chain stays alive
+      scheduleRefresh(60);
     }
   }, [scheduleRefresh]);
 

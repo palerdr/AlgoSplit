@@ -142,10 +142,10 @@ export default function WorkoutScreen() {
     }
   };
 
-  const handleMinimize = () => router.back();
+  const handleMinimize = () => router.dismiss();
 
   const handleCancel = () => {
-    router.back();
+    router.dismiss();
     setTimeout(() => cancelWorkout(), 0);
   };
 
@@ -168,7 +168,7 @@ export default function WorkoutScreen() {
       {
         onSuccess: () => {
           cancelWorkout();
-          router.back();
+          router.dismiss();
         },
         onError: (err) => {
           setError(err instanceof Error ? err.message : 'Failed to save workout');
@@ -229,7 +229,7 @@ export default function WorkoutScreen() {
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyTitle}>No Active Workout</Text>
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity onPress={() => router.dismiss()}>
             <Text style={styles.goBackText}>Go Back</Text>
           </TouchableOpacity>
         </View>
