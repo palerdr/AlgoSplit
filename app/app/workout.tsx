@@ -57,8 +57,6 @@ export default function WorkoutScreen() {
   const exerciseCount = exercises.length;
   const sessionName = activeWorkout?.sessionName ?? 'Workout';
   const startedAt = activeWorkout?.startedAt ?? new Date().toISOString();
-  const dragStartX = useRef(0);
-  const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.25;
   const isRestoringIndex = useRef(false);
   const restoredWorkoutKey = useRef<string | null>(null);
 
@@ -92,28 +90,15 @@ export default function WorkoutScreen() {
     if (currentIndex > max) setCurrentIndex(max);
   }, [exerciseCount, currentIndex, setCurrentIndex]);
 
-  const handleScrollBeginDrag = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      dragStartX.current = e.nativeEvent.contentOffset.x;
-    },
-    [],
-  );
-
+  // Eagerly sync currentIndex when the user lifts their finger.
+  // snapToInterval handles the actual scroll snapping; this is a fallback
+  // for the edge case where the finger lands exactly on a snap point and
+  // onMomentumScrollEnd never fires (no animation needed → no momentum).
   const handleScrollEndDrag = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const offsetX = e.nativeEvent.contentOffset.x;
-      const dx = Math.abs(offsetX - dragStartX.current);
-      if (dx < SWIPE_THRESHOLD) {
-        // Snap back — drag was too short
-        const page = Math.round(dragStartX.current / SCREEN_WIDTH);
-        flatListRef.current?.scrollToIndex({ index: page, animated: true });
-      } else {
-        // Swipe accepted — sync index immediately instead of waiting for momentum
-        const direction = offsetX > dragStartX.current ? 1 : -1;
-        const fromPage = Math.round(dragStartX.current / SCREEN_WIDTH);
-        const targetPage = Math.max(0, Math.min(exerciseCount, fromPage + direction));
-        setCurrentIndex(targetPage);
-      }
+      const nextIndex = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+      const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
+      setCurrentIndex(clampedIndex);
     },
     [exerciseCount, setCurrentIndex],
   );
@@ -288,7 +273,6 @@ export default function WorkoutScreen() {
             renderItem={renderPage}
             keyExtractor={(item) => String(item)}
             horizontal
-            pagingEnabled
             snapToInterval={SCREEN_WIDTH}
             snapToAlignment="start"
             disableIntervalMomentum
@@ -296,7 +280,6 @@ export default function WorkoutScreen() {
             bounces={false}
             directionalLockEnabled
             showsHorizontalScrollIndicator={false}
-            onScrollBeginDrag={handleScrollBeginDrag}
             onScrollEndDrag={handleScrollEndDrag}
             onMomentumScrollEnd={handleMomentumScrollEnd}
             getItemLayout={(_, index) => ({
