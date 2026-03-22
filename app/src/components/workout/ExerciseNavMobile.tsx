@@ -23,6 +23,10 @@ export default function ExerciseNavMobile({
 }: ExerciseNavMobileProps) {
   const isSummary = currentIndex === totalExercises;
   const isLastExercise = currentIndex === totalExercises - 1;
+  const dotCount = totalExercises + 1;
+  // Shrink dots when many exercises to prevent clipping the nav buttons
+  const dotSize = dotCount > 10 ? 5 : 7;
+  const dotGap = dotCount > 10 ? 3 : 6;
 
   return (
     <View style={styles.container}>
@@ -35,10 +39,10 @@ export default function ExerciseNavMobile({
         <Text style={[styles.navText, currentIndex === 0 && styles.navTextDisabled]}>Prev</Text>
       </TouchableOpacity>
 
-      <View style={styles.dots}>
-        {Array.from({ length: totalExercises + 1 }).map((_, i) => (
+      <View style={[styles.dots, { gap: dotGap }]}>
+        {Array.from({ length: dotCount }).map((_, i) => (
           <TouchableOpacity key={i} onPress={() => onJump(i)} hitSlop={4}>
-            <View style={[styles.dot, i === currentIndex && styles.dotActive]} />
+            <View style={[styles.dot, { width: dotSize, height: dotSize, borderRadius: dotSize / 2 }, i === currentIndex && styles.dotActive]} />
           </TouchableOpacity>
         ))}
       </View>
@@ -109,8 +113,10 @@ const styles = StyleSheet.create({
   },
   dots: {
     flexDirection: 'row',
-    gap: 6,
     alignItems: 'center',
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
   },
   dot: {
     width: 7,

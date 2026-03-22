@@ -94,6 +94,7 @@ interface WorkoutState {
   ) => void;
   cancelWorkout: () => void;
   addExercise: (name: string, opts?: { unilateral?: boolean }) => void;
+  insertExercise: (name: string, afterIndex: number, opts?: { unilateral?: boolean }) => void;
   removeExercise: (exerciseId: string) => void;
   addSet: (exerciseId: string) => void;
   removeSet: (exerciseId: string, setIndex: number) => void;
@@ -207,6 +208,19 @@ export const useWorkoutStore = create<WorkoutState>()(
             exercises: [...activeWorkout.exercises, { id: generateId(), name, sets: initialSets, notes: '', unilateral: isUni || undefined }],
           },
         });
+      },
+
+      insertExercise: (name, afterIndex, opts) => {
+        const { activeWorkout } = get();
+        if (!activeWorkout) return;
+        const isUni = opts?.unilateral ?? false;
+        const initialSets: SetData[] = isUni
+          ? [{ reps: 0, weight: 0, completed: false }, { reps: 0, weight: 0, completed: false }]
+          : [{ reps: 0, weight: 0, completed: false }];
+        const newExercise: WorkoutExercise = { id: generateId(), name, sets: initialSets, notes: '', unilateral: isUni || undefined };
+        const exercises = [...activeWorkout.exercises];
+        exercises.splice(afterIndex + 1, 0, newExercise);
+        set({ activeWorkout: { ...activeWorkout, exercises } });
       },
 
       removeExercise: (exerciseId) => {
