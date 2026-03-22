@@ -99,14 +99,21 @@ export default function WorkoutScreen() {
 
   const handleScrollEndDrag = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const dx = Math.abs(e.nativeEvent.contentOffset.x - dragStartX.current);
+      const offsetX = e.nativeEvent.contentOffset.x;
+      const dx = Math.abs(offsetX - dragStartX.current);
       if (dx < SWIPE_THRESHOLD) {
         // Snap back — drag was too short
         const page = Math.round(dragStartX.current / SCREEN_WIDTH);
         flatListRef.current?.scrollToIndex({ index: page, animated: true });
+      } else {
+        // Swipe accepted — sync index immediately instead of waiting for momentum
+        const direction = offsetX > dragStartX.current ? 1 : -1;
+        const fromPage = Math.round(dragStartX.current / SCREEN_WIDTH);
+        const targetPage = Math.max(0, Math.min(exerciseCount, fromPage + direction));
+        setCurrentIndex(targetPage);
       }
     },
-    [],
+    [exerciseCount, setCurrentIndex],
   );
 
   const handleMomentumScrollEnd = useCallback(
@@ -114,11 +121,9 @@ export default function WorkoutScreen() {
       if (isRestoringIndex.current) return;
       const nextIndex = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
       const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
-      if (clampedIndex !== currentIndex) {
-        setCurrentIndex(clampedIndex);
-      }
+      setCurrentIndex(clampedIndex);
     },
-    [currentIndex, exerciseCount, setCurrentIndex],
+    [exerciseCount, setCurrentIndex],
   );
 
   const scrollToIndex = useCallback(
