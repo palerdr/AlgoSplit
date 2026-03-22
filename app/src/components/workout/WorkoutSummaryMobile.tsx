@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { WorkoutExercise } from '../../stores/workoutStore';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -9,14 +9,12 @@ interface WorkoutSummaryMobileProps {
   sessionName: string;
   startedAt: string;
   exercises: WorkoutExercise[];
-  onAddExercise: () => void;
 }
 
 export default function WorkoutSummaryMobile({
   sessionName,
   startedAt,
   exercises,
-  onAddExercise,
 }: WorkoutSummaryMobileProps) {
   const weightUnit = useSettingsStore((s) => s.weightUnit);
   const elapsedMin = Math.round((Date.now() - new Date(startedAt).getTime()) / 60000);
@@ -70,10 +68,6 @@ export default function WorkoutSummaryMobile({
         })
       )}
 
-      <TouchableOpacity style={styles.addBtn} onPress={onAddExercise}>
-        <Ionicons name="add" size={16} color={colors.textSecondary} />
-        <Text style={styles.addText}>Add Exercise</Text>
-      </TouchableOpacity>
     </ScrollView>
   );
 }
@@ -153,22 +147,5 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontSize: 12,
     fontVariant: ['tabular-nums'],
-  },
-  addBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 14,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.borderLight,
-    borderRadius: 10,
-    marginTop: 8,
-  },
-  addText: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    fontWeight: '600',
   },
 });

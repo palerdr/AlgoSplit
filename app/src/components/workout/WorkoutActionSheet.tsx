@@ -4,6 +4,7 @@ import { colors } from '../../theme';
 
 interface WorkoutActionSheetProps {
   visible: boolean;
+  onAddAfter?: () => void;
   onReset: () => void;
   onSwap: () => void;
   onDelete: () => void;
@@ -12,6 +13,7 @@ interface WorkoutActionSheetProps {
 
 export default function WorkoutActionSheet({
   visible,
+  onAddAfter,
   onReset,
   onSwap,
   onDelete,
@@ -23,6 +25,15 @@ export default function WorkoutActionSheet({
     <>
       <Pressable style={styles.overlay} onPress={onClose} />
       <View style={styles.dropdown}>
+        {onAddAfter && (
+          <>
+            <TouchableOpacity style={styles.item} onPress={onAddAfter}>
+              <Ionicons name="add-circle-outline" size={16} color={colors.text} />
+              <Text style={styles.itemText}>Add Exercise</Text>
+            </TouchableOpacity>
+            <View style={styles.sep} />
+          </>
+        )}
         <TouchableOpacity style={styles.item} onPress={onReset}>
           <Ionicons name="refresh-outline" size={16} color={colors.text} />
           <Text style={styles.itemText}>Reset Progress</Text>

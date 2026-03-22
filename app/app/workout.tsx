@@ -32,6 +32,7 @@ export default function WorkoutScreen() {
 
   const activeWorkout = useWorkoutStore((s) => s.activeWorkout);
   const addExercise = useWorkoutStore((s) => s.addExercise);
+  const insertExercise = useWorkoutStore((s) => s.insertExercise);
   const cancelWorkout = useWorkoutStore((s) => s.cancelWorkout);
   const getWorkoutData = useWorkoutStore((s) => s.getWorkoutData);
   const storedIndex = useWorkoutStore((s) => s.currentExerciseIndex);
@@ -48,6 +49,7 @@ export default function WorkoutScreen() {
   const currentIndex = storedIndex;
   const setCurrentIndex = setStoredIndex;
   const [showPicker, setShowPicker] = useState(false);
+  const insertAfterIndex = useRef<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pagerHeight, setPagerHeight] = useState(0);
 
@@ -135,13 +137,24 @@ export default function WorkoutScreen() {
   );
 
   const handleAddExercise = (name: string) => {
-    addExercise(name);
-    setShowPicker(false);
-    // Scroll to the newly added exercise — read store directly to avoid stale closure
-    setTimeout(() => {
-      const count = useWorkoutStore.getState().activeWorkout?.exercises.length ?? 0;
-      scrollToIndex(count - 1);
-    }, 100);
+    const afterIdx = insertAfterIndex.current;
+    if (afterIdx != null) {
+      insertExercise(name, afterIdx);
+      insertAfterIndex.current = null;
+      setShowPicker(false);
+      // Scroll to the newly inserted exercise (afterIdx + 1)
+      setTimeout(() => {
+        scrollToIndex(afterIdx + 1);
+      }, 100);
+    } else {
+      addExercise(name);
+      setShowPicker(false);
+      // Scroll to the newly added exercise at end
+      setTimeout(() => {
+        const count = useWorkoutStore.getState().activeWorkout?.exercises.length ?? 0;
+        scrollToIndex(count - 1);
+      }, 100);
+    }
   };
 
   const handleMinimize = () => router.back();
@@ -197,7 +210,6 @@ export default function WorkoutScreen() {
               sessionName={sessionName}
               startedAt={startedAt}
               exercises={exercises}
-              onAddExercise={() => setShowPicker(true)}
             />
           </View>
         </View>
@@ -213,6 +225,7 @@ export default function WorkoutScreen() {
           <ExerciseViewMobile
             exercise={exercise}
             previousExerciseData={previousData?.[exercise.name]}
+            onAddAfter={() => { insertAfterIndex.current = index; setShowPicker(true); }}
           />
         </View>
       </View>
@@ -317,7 +330,7 @@ export default function WorkoutScreen() {
       <ExercisePickerModal
         visible={showPicker}
         onSelect={handleAddExercise}
-        onClose={() => setShowPicker(false)}
+        onClose={() => { setShowPicker(false); insertAfterIndex.current = null; }}
       />
     </View>
   );
