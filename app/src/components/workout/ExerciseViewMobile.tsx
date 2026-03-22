@@ -10,9 +10,10 @@ import { colors } from '../../theme';
 interface ExerciseViewMobileProps {
   exercise: WorkoutExercise;
   previousExerciseData?: { reps: number[]; weight: number[]; rir?: (number | null)[] };
+  onAddAfter?: () => void;
 }
 
-function ExerciseViewMobile({ exercise, previousExerciseData }: ExerciseViewMobileProps) {
+function ExerciseViewMobile({ exercise, previousExerciseData, onAddAfter }: ExerciseViewMobileProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [showSwapPicker, setShowSwapPicker] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -143,6 +144,7 @@ function ExerciseViewMobile({ exercise, previousExerciseData }: ExerciseViewMobi
 
       <WorkoutActionSheet
         visible={showMenu}
+        onAddAfter={onAddAfter ? () => { setShowMenu(false); onAddAfter(); } : undefined}
         onReset={() => { setShowMenu(false); setConfirmReset(true); }}
         onSwap={() => { setShowMenu(false); setShowSwapPicker(true); }}
         onDelete={() => { removeExercise(exercise.id); setShowMenu(false); }}

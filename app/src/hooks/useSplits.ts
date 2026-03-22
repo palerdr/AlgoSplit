@@ -152,7 +152,6 @@ export function useReplaceSplit(options?: { invalidateLists?: boolean }) {
         const liteNext = updateSplitInListCache(litePrevious, result);
         if (liteNext) queryClient.setQueryData(splitKeys.list(false), liteNext);
       }
-      queryClient.invalidateQueries({ queryKey: splitKeys.analysis(variables.id) });
     },
   });
 }
@@ -175,7 +174,6 @@ export function useUpdateSplit(options?: { invalidateLists?: boolean }) {
         const liteNext = updateSplitInListCache(litePrevious, result);
         if (liteNext) queryClient.setQueryData(splitKeys.list(false), liteNext);
       }
-      queryClient.invalidateQueries({ queryKey: splitKeys.analysis(variables.id) });
     },
   });
 }
@@ -186,8 +184,6 @@ export function useUpdateSplitExercises() {
     mutationFn: ({ id, updates }: { id: string; updates: SplitExerciseBatchUpdateItem[] }) =>
       updateSplitExercises(id, updates),
     onSuccess: async (_result, variables) => {
-      queryClient.invalidateQueries({ queryKey: splitKeys.detail(variables.id) });
-      queryClient.invalidateQueries({ queryKey: splitKeys.analysis(variables.id) });
       await queryClient.refetchQueries({ queryKey: splitKeys.detail(variables.id), exact: true });
     },
   });
