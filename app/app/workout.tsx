@@ -43,7 +43,16 @@ export default function WorkoutScreen() {
   // Fetch previous workout data for "last time" shadow values
   const { data: fetchedPrevData } = usePreviousWorkoutData(activeWorkout?.sessionName);
 
-  // Merge fetched previous data into the store if not already set
+  // Persist fetched previous data into the workout store so it survives
+  // tab switches without waiting for a fresh query re-fetch.
+  useEffect(() => {
+    if (!fetchedPrevData || !activeWorkout || activeWorkout.previousData) return;
+    useWorkoutStore.setState((s) => {
+      if (!s.activeWorkout || s.activeWorkout.previousData) return s;
+      return { activeWorkout: { ...s.activeWorkout, previousData: fetchedPrevData } };
+    });
+  }, [fetchedPrevData, activeWorkout?.startedAt]);
+
   const previousData = activeWorkout?.previousData ?? fetchedPrevData ?? undefined;
 
   const currentIndex = storedIndex;
@@ -57,23 +66,34 @@ export default function WorkoutScreen() {
   const exerciseCount = exercises.length;
   const sessionName = activeWorkout?.sessionName ?? 'Workout';
   const startedAt = activeWorkout?.startedAt ?? new Date().toISOString();
-  const isRestoringIndex = useRef(false);
+  const isRestoringIndex = useRef(true);
   const restoredWorkoutKey = useRef<string | null>(null);
   const scrollSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Restore persisted page index once per active workout, after pager layout.
+  // isRestoringIndex starts true to block scroll events that fire before this
+  // effect runs (e.g. FlatList mounting at offset 0 on tab switch).
   useEffect(() => {
     const workoutKey = activeWorkout?.startedAt;
     if (!workoutKey) {
+      isRestoringIndex.current = false;
       restoredWorkoutKey.current = null;
       return;
     }
-    if (restoredWorkoutKey.current === workoutKey) return;
+    if (restoredWorkoutKey.current === workoutKey) {
+      isRestoringIndex.current = false;
+      return;
+    }
     if (exerciseCount === 0 || pagerHeight === 0) return;
 
     const target = Math.min(useWorkoutStore.getState().currentExerciseIndex, exerciseCount);
-    isRestoringIndex.current = true;
     restoredWorkoutKey.current = workoutKey;
+
+    // Clear any pending scroll-settle timer from the initial mount at offset 0
+    if (scrollSettleTimer.current) {
+      clearTimeout(scrollSettleTimer.current);
+      scrollSettleTimer.current = null;
+    }
 
     requestAnimationFrame(() => {
       flatListRef.current?.scrollToIndex({ index: target, animated: false });
@@ -151,7 +171,7 @@ export default function WorkoutScreen() {
     }
   };
 
-  const handleMinimize = () => router.dismiss();
+  const handleMinimize = () => router.back();
 
   const handleCancel = () => {
     router.dismiss();
