@@ -79,6 +79,15 @@ export function LoginPage() {
               {...register('password')}
             />
 
+            <div className="text-right">
+              <Link
+                to="/forgot-password"
+                className="text-sm text-crimson hover:text-crimson-hover font-medium"
+              >
+                Forgot password?
+              </Link>
+            </div>
+
             <Button
               type="submit"
               className="w-full"

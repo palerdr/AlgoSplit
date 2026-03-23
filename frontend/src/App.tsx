@@ -5,7 +5,7 @@ import { AuthProvider, ProtectedRoute } from '@/features/auth';
 import { AppShell } from '@/components/layout';
 
 // Auth pages - eagerly loaded (needed immediately)
-import { LoginPage, SignupPage } from '@/pages';
+import { LoginPage, SignupPage, ForgotPasswordPage, ResetPasswordPage } from '@/pages';
 
 // Core pages - eagerly loaded (most frequently accessed)
 import { DashboardPage } from '@/pages';
@@ -132,7 +132,7 @@ function AppRoutes() {
     if (!sessionStorage.getItem('algosplit-session')) {
       sessionStorage.setItem('algosplit-session', '1');
       const path = window.location.pathname;
-      if (path !== '/' && path !== '/dashboard' && path !== '/login' && path !== '/signup') {
+      if (path !== '/' && path !== '/dashboard' && path !== '/login' && path !== '/signup' && path !== '/forgot-password' && path !== '/reset-password') {
         navigate('/dashboard', { replace: true });
       }
     }
@@ -143,6 +143,8 @@ function AppRoutes() {
       {/* Public routes */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
 
       {/* Protected routes */}
       <Route element={<ProtectedRoute />}>
