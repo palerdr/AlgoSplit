@@ -61,7 +61,7 @@ RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true"
 
 # Rule order matters; first match wins.
 RATE_LIMIT_RULES = [
-    RateLimitRule(prefixes=["/auth/login", "/auth/signup"], limit=5, window=60, scope="ip"),
+    RateLimitRule(prefixes=["/auth/login", "/auth/signup", "/auth/forgot-password", "/auth/reset-password"], limit=5, window=60, scope="ip"),
     RateLimitRule(
         prefixes=["/api/analyze-split", "/api/parse-exercise", "/api/analyze-workouts"],
         limit=200,
