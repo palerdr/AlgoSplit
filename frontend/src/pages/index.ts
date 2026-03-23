@@ -1,6 +1,8 @@
 // Auth pages
 export { LoginPage } from './auth/LoginPage';
 export { SignupPage } from './auth/SignupPage';
+export { ForgotPasswordPage } from './auth/ForgotPasswordPage';
+export { ResetPasswordPage } from './auth/ResetPasswordPage';
 
 // Dashboard
 export { DashboardPage } from './dashboard/DashboardPage';

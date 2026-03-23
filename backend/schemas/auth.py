@@ -93,6 +93,19 @@ class UserInfo(BaseModel):
     }
 
 
+class ForgotPasswordRequest(BaseModel):
+    """Request body for forgot password"""
+
+    email: EmailStr = Field(..., description="User's email address")
+
+
+class ResetPasswordRequest(BaseModel):
+    """Request body for resetting password with a new one"""
+
+    access_token: str = Field(..., description="Access token from Supabase reset link")
+    new_password: str = Field(..., min_length=8, description="New password (min 8 characters)")
+
+
 class ErrorResponse(BaseModel):
     """Error response"""
 

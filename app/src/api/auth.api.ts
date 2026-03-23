@@ -33,3 +33,7 @@ export async function logout(): Promise<void> {
 export async function deleteAccount(): Promise<void> {
   await apiClient.delete('/auth/account');
 }
+
+export async function forgotPassword(email: string): Promise<void> {
+  await apiClient.post('/auth/forgot-password', { email });
+}

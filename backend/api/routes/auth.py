@@ -12,6 +12,8 @@ from schemas.auth import (
     SignUpRequest,
     LoginRequest,
     RefreshRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
     AuthResponse,
     UserInfo,
     ErrorResponse,
@@ -272,6 +274,93 @@ async def refresh(request: RefreshRequest, http_response: Response):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Failed to refresh token",
+        )
+
+
+@router.post(
+    "/forgot-password",
+    status_code=status.HTTP_200_OK,
+    responses={
+        500: {"model": ErrorResponse, "description": "Server error"},
+    },
+    summary="Request a password reset email",
+    description="Send a password reset link to the user's email address",
+)
+async def forgot_password(request: ForgotPasswordRequest):
+    """
+    Request a password reset email.
+
+    Always returns 200 regardless of whether the email exists,
+    to prevent email enumeration attacks.
+    """
+    try:
+        supabase = get_supabase_client()
+        supabase.auth.reset_password_email(request.email)
+    except Exception:
+        # Swallow errors to prevent email enumeration
+        logger.debug("Password reset request for %s (may or may not exist)", request.email)
+
+    return {"message": "If an account with that email exists, a reset link has been sent."}
+
+
+@router.post(
+    "/reset-password",
+    status_code=status.HTTP_200_OK,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid or expired token"},
+        500: {"model": ErrorResponse, "description": "Server error"},
+    },
+    summary="Reset password with token",
+    description="Set a new password using the access token from the reset email link",
+)
+async def reset_password(request: ResetPasswordRequest):
+    """
+    Reset a user's password using the access token from the Supabase reset link.
+
+    The frontend extracts the access_token from the URL fragment after the user
+    clicks the reset link in their email.
+    """
+    try:
+        admin = get_supabase_admin()
+        # Decode the token to get the user ID, then update via admin
+        from jose import jwt, JWTError
+        import os
+
+        # Verify the token is valid by decoding it
+        # We use the admin client to update the password by user ID
+        try:
+            payload = jwt.decode(
+                request.access_token,
+                os.getenv("SUPABASE_JWT_SECRET", ""),
+                algorithms=["HS256"],
+                audience="authenticated",
+            )
+            user_id = payload.get("sub")
+            if not user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid reset token",
+                )
+        except JWTError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or expired reset token",
+            )
+
+        admin.auth.admin.update_user_by_id(
+            user_id,
+            {"password": request.new_password},
+        )
+
+        return {"message": "Password has been reset successfully."}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Password reset failed")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to reset password: {str(e)}",
         )
 
 

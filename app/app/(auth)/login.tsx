@@ -62,6 +62,11 @@ export default function LoginScreen() {
         />
         <Button title="Log In" onPress={handleLogin} loading={loading} style={styles.button} />
         <Button
+          title="Forgot Password?"
+          variant="ghost"
+          onPress={() => router.push('/(auth)/forgot-password')}
+        />
+        <Button
           title="Create Account"
           variant="ghost"
           onPress={() => router.push('/(auth)/signup')}

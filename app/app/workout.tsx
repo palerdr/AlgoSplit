@@ -59,6 +59,7 @@ export default function WorkoutScreen() {
   const startedAt = activeWorkout?.startedAt ?? new Date().toISOString();
   const isRestoringIndex = useRef(false);
   const restoredWorkoutKey = useRef<string | null>(null);
+  const scrollSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Restore persisted page index once per active workout, after pager layout.
   useEffect(() => {
@@ -90,21 +91,29 @@ export default function WorkoutScreen() {
     if (currentIndex > max) setCurrentIndex(max);
   }, [exerciseCount, currentIndex, setCurrentIndex]);
 
-  // Eagerly sync currentIndex when the user lifts their finger.
-  // snapToInterval handles the actual scroll snapping; this is a fallback
-  // for the edge case where the finger lands exactly on a snap point and
-  // onMomentumScrollEnd never fires (no animation needed → no momentum).
-  const handleScrollEndDrag = useCallback(
+  // Debounced scroll handler: fires on every scroll frame, but only commits
+  // the index once scrolling settles (no new events for 80ms). This is the
+  // fallback for cases where onMomentumScrollEnd doesn't fire (known RN
+  // issue with pagingEnabled when the finger lifts exactly on a snap point).
+  const handleScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const nextIndex = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
-      const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
-      setCurrentIndex(clampedIndex);
+      if (isRestoringIndex.current) return;
+      const offsetX = e.nativeEvent.contentOffset.x;
+      if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
+      scrollSettleTimer.current = setTimeout(() => {
+        const nextIndex = Math.round(offsetX / SCREEN_WIDTH);
+        const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
+        setCurrentIndex(clampedIndex);
+      }, 80);
     },
     [exerciseCount, setCurrentIndex],
   );
 
+  // Fast path: fires immediately after the page snap animation finishes,
+  // cancels the debounce timer so we don't double-update.
   const handleMomentumScrollEnd = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
       if (isRestoringIndex.current) return;
       const nextIndex = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
       const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
@@ -277,7 +286,8 @@ export default function WorkoutScreen() {
             bounces={false}
             directionalLockEnabled
             showsHorizontalScrollIndicator={false}
-            onScrollEndDrag={handleScrollEndDrag}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
             onMomentumScrollEnd={handleMomentumScrollEnd}
             getItemLayout={(_, index) => ({
               length: SCREEN_WIDTH,
