@@ -273,10 +273,7 @@ export default function WorkoutScreen() {
             renderItem={renderPage}
             keyExtractor={(item) => String(item)}
             horizontal
-            snapToInterval={SCREEN_WIDTH}
-            snapToAlignment="start"
-            disableIntervalMomentum
-            decelerationRate="fast"
+            pagingEnabled
             bounces={false}
             directionalLockEnabled
             showsHorizontalScrollIndicator={false}
