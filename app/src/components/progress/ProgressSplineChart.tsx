@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet, type LayoutChangeEvent } from 'react-native';
 import Svg, { Path, Circle, Line, Text as SvgText, G } from 'react-native-svg';
 import { colors } from '../../theme';
 import { useSettingsStore } from '../../stores/settingsStore';
@@ -101,7 +101,7 @@ export default function ProgressSplineChart({ points }: Props) {
   if (points.length === 0) return null;
 
   return (
-    <View style={styles.container} onLayout={(e) => setContainerWidth(e.nativeEvent.layout.width)}>
+    <Pressable style={styles.container} onLayout={(e: LayoutChangeEvent) => setContainerWidth(e.nativeEvent.layout.width)} onPress={() => setTappedIndex(null)}>
       {containerWidth > 0 && (
         <Svg width={containerWidth} height={CHART_HEIGHT}>
           {/* Grid lines */}
@@ -215,7 +215,7 @@ export default function ProgressSplineChart({ points }: Props) {
           </Text>
         </Pressable>
       )}
-    </View>
+    </Pressable>
   );
 }
 

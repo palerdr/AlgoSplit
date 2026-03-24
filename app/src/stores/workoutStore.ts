@@ -68,11 +68,11 @@ function toWorkoutCompletionIso(workoutDate?: string): string | undefined {
 
 function buildExerciseNotesKey(
   splitId?: string,
-  sessionId?: string,
-  templateExerciseId?: string,
+  sessionName?: string,
+  exerciseName?: string,
 ): string | null {
-  if (!splitId || !sessionId || !templateExerciseId) return null;
-  return `${splitId}:${sessionId}:${templateExerciseId}`;
+  if (!splitId || !sessionName || !exerciseName) return null;
+  return `${splitId}:${sessionName}:${exerciseName}`;
 }
 
 interface WorkoutState {
@@ -153,7 +153,7 @@ export const useWorkoutStore = create<WorkoutState>()(
         const { selectedWorkoutDate, exerciseNotesByKey } = get();
         set({ currentExerciseIndex: 0 });
         const workoutExercises: WorkoutExercise[] = exercises.map((ex) => {
-          const noteKey = buildExerciseNotesKey(splitId, sessionId, ex.templateExerciseId);
+          const noteKey = buildExerciseNotesKey(splitId, sessionName, ex.name);
           const persistedNotes = noteKey ? (exerciseNotesByKey[noteKey] ?? '') : '';
           let sets: SetData[];
           if (ex.unilateral) {
@@ -314,8 +314,8 @@ export const useWorkoutStore = create<WorkoutState>()(
         const exercise = activeWorkout.exercises.find((ex) => ex.id === exerciseId);
         const noteKey = buildExerciseNotesKey(
           activeWorkout.splitId,
-          activeWorkout.sessionId,
-          exercise?.templateExerciseId,
+          activeWorkout.sessionName,
+          exercise?.name,
         );
         set({
           activeWorkout: {
