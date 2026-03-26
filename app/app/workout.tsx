@@ -60,31 +60,37 @@ export default function WorkoutScreen() {
   const startedAt = activeWorkout?.startedAt ?? new Date().toISOString();
 
   // Capture persisted index at mount time before any scroll events can corrupt it.
-  // Used for initialScrollIndex so the FlatList starts at the right page natively.
   const initialTargetIndex = useRef(useWorkoutStore.getState().currentExerciseIndex);
   const initialPagerIndex = Math.max(0, Math.min(exerciseCount, initialTargetIndex.current));
 
-  // Block scroll handlers until the FlatList has settled at its initial position.
-  // Without this, scroll events during mount/layout can overwrite the persisted
-  // index with 0 before the FlatList finishes positioning at initialScrollIndex.
+  // Block scroll handlers until we've imperatively restored the scroll position.
+  // Without this, scroll events during mount/layout overwrite the persisted index.
   const isRestoringIndex = useRef(true);
+  const hasRestoredScroll = useRef(false);
   const scrollSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Release the scroll guard once the FlatList has laid out and settled.
+  // After layout, imperatively scroll to the persisted index.
+  // initialScrollIndex is unreliable with initialNumToRender={1}, so this
+  // is the guaranteed fallback that actually positions the FlatList.
   useEffect(() => {
     if (!activeWorkout) {
       isRestoringIndex.current = false;
       return;
     }
-    if (pagerHeight === 0) return; // Wait for layout
+    if (exerciseCount === 0 || pagerHeight === 0) return; // Wait for layout
+    if (hasRestoredScroll.current) return; // Only restore once per mount
 
-    // Give the FlatList time to settle at initialScrollIndex before
-    // allowing scroll handlers to update the index.
-    const timer = setTimeout(() => {
-      isRestoringIndex.current = false;
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [activeWorkout, pagerHeight]);
+    const target = Math.max(0, Math.min(exerciseCount, initialTargetIndex.current));
+    hasRestoredScroll.current = true;
+
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToIndex({ index: target, animated: false });
+      setCurrentIndex(target);
+      setTimeout(() => {
+        isRestoringIndex.current = false;
+      }, 200);
+    });
+  }, [activeWorkout, exerciseCount, pagerHeight, setCurrentIndex]);
 
   // Clamp currentIndex if exercises removed
   useEffect(() => {
