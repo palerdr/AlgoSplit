@@ -52,13 +52,39 @@ export default function WorkoutScreen() {
   const insertAfterIndex = useRef<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pagerHeight, setPagerHeight] = useState(0);
+  const [pagerWidth, setPagerWidth] = useState(SCREEN_WIDTH);
 
   const exercises = activeWorkout?.exercises ?? [];
   const exerciseCount = exercises.length;
   const sessionName = activeWorkout?.sessionName ?? 'Workout';
   const startedAt = activeWorkout?.startedAt ?? new Date().toISOString();
-  const initialPagerIndexRef = useRef(useWorkoutStore.getState().currentExerciseIndex);
-  const initialPagerIndex = Math.max(0, Math.min(exerciseCount, initialPagerIndexRef.current));
+
+  // Capture persisted index at mount time before any scroll events can corrupt it.
+  // Used for initialScrollIndex so the FlatList starts at the right page natively.
+  const initialTargetIndex = useRef(useWorkoutStore.getState().currentExerciseIndex);
+  const initialPagerIndex = Math.max(0, Math.min(exerciseCount, initialTargetIndex.current));
+
+  // Block scroll handlers until the FlatList has settled at its initial position.
+  // Without this, scroll events during mount/layout can overwrite the persisted
+  // index with 0 before the FlatList finishes positioning at initialScrollIndex.
+  const isRestoringIndex = useRef(true);
+  const scrollSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Release the scroll guard once the FlatList has laid out and settled.
+  useEffect(() => {
+    if (!activeWorkout) {
+      isRestoringIndex.current = false;
+      return;
+    }
+    if (pagerHeight === 0) return; // Wait for layout
+
+    // Give the FlatList time to settle at initialScrollIndex before
+    // allowing scroll handlers to update the index.
+    const timer = setTimeout(() => {
+      isRestoringIndex.current = false;
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [activeWorkout, pagerHeight]);
 
   // Clamp currentIndex if exercises removed
   useEffect(() => {
@@ -67,37 +93,47 @@ export default function WorkoutScreen() {
     if (currentIndex > max) setCurrentIndex(max);
   }, [exerciseCount, currentIndex, setCurrentIndex]);
 
-  // Eagerly sync currentIndex when the user lifts their finger.
-  // snapToInterval handles the actual scroll snapping; this is a fallback
-  // for the edge case where the finger lands exactly on a snap point and
-  // onMomentumScrollEnd never fires (no animation needed → no momentum).
-  const handleScrollEndDrag = useCallback(
+  // Debounced scroll handler: fires on every scroll frame, but only commits
+  // the index once scrolling settles (no new events for 80ms). This is the
+  // fallback for cases where onMomentumScrollEnd doesn't fire (known RN
+  // issue with pagingEnabled when the finger lifts exactly on a snap point).
+  const handleScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const nextIndex = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
-      const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
-      setCurrentIndex(clampedIndex);
+      if (isRestoringIndex.current) return;
+      const offsetX = e.nativeEvent.contentOffset.x;
+      if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
+      scrollSettleTimer.current = setTimeout(() => {
+        const nextIndex = Math.round(offsetX / pagerWidth);
+        const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
+        setCurrentIndex(clampedIndex);
+      }, 80);
     },
-    [exerciseCount, setCurrentIndex],
+    [exerciseCount, pagerWidth, setCurrentIndex],
   );
 
+  // Fast path: fires immediately after the page snap animation finishes,
+  // cancels the debounce timer so we don't double-update.
   const handleMomentumScrollEnd = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      const nextIndex = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+      if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
+      if (isRestoringIndex.current) return;
+      const nextIndex = Math.round(e.nativeEvent.contentOffset.x / pagerWidth);
       const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
       setCurrentIndex(clampedIndex);
     },
-    [exerciseCount, setCurrentIndex],
+    [exerciseCount, pagerWidth, setCurrentIndex],
   );
 
+  // Fallback if initialScrollIndex can't reach the target (e.g. items not yet rendered)
   const handleScrollToIndexFailed = useCallback(
     (info: { index: number }) => {
       const targetIndex = Math.max(0, Math.min(exerciseCount, info.index));
       requestAnimationFrame(() => {
-        flatListRef.current?.scrollToOffset({ offset: targetIndex * SCREEN_WIDTH, animated: false });
+        flatListRef.current?.scrollToOffset({ offset: targetIndex * pagerWidth, animated: false });
         setCurrentIndex(targetIndex);
       });
     },
-    [exerciseCount, setCurrentIndex],
+    [exerciseCount, pagerWidth, setCurrentIndex],
   );
 
   const scrollToIndex = useCallback(
@@ -173,7 +209,7 @@ export default function WorkoutScreen() {
   );
 
   const renderPage = useCallback(({ index }: { item: number; index: number }) => {
-    const pageStyle = { width: SCREEN_WIDTH, height: pagerHeight || undefined, paddingBottom: pagerHeight ? pagerHeight * 0.2 : 0 };
+    const pageStyle = { width: pagerWidth, height: pagerHeight || undefined, paddingBottom: pagerHeight ? pagerHeight * 0.2 : 0 };
 
     if (index === exerciseCount) {
       return (
@@ -190,7 +226,7 @@ export default function WorkoutScreen() {
     }
 
     const exercise = exercises[index];
-    if (!exercise) return <View style={{ width: SCREEN_WIDTH }} />;
+    if (!exercise) return <View style={{ width: pagerWidth }} />;
 
     return (
       <View style={[styles.pageWrapper, pageStyle]}>
@@ -207,6 +243,7 @@ export default function WorkoutScreen() {
     exerciseCount,
     exercises,
     pagerHeight,
+    pagerWidth,
     previousData,
     sessionName,
     startedAt,
@@ -262,27 +299,31 @@ export default function WorkoutScreen() {
             keyExtractor={(item) => String(item)}
             horizontal
             initialScrollIndex={initialPagerIndex}
-            snapToInterval={SCREEN_WIDTH}
+            pagingEnabled
+            snapToInterval={pagerWidth}
             snapToAlignment="start"
-            disableIntervalMomentum
             decelerationRate="fast"
+            disableIntervalMomentum
             bounces={false}
             directionalLockEnabled
             showsHorizontalScrollIndicator={false}
-            onScrollEndDrag={handleScrollEndDrag}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
             onMomentumScrollEnd={handleMomentumScrollEnd}
             onScrollToIndexFailed={handleScrollToIndexFailed}
             getItemLayout={(_, index) => ({
-              length: SCREEN_WIDTH,
-              offset: SCREEN_WIDTH * index,
+              length: pagerWidth,
+              offset: pagerWidth * index,
               index,
             })}
             initialNumToRender={1}
             maxToRenderPerBatch={1}
             windowSize={3}
-            removeClippedSubviews
             style={styles.pager}
-            onLayout={(e) => setPagerHeight(e.nativeEvent.layout.height)}
+            onLayout={(e) => {
+              setPagerWidth(e.nativeEvent.layout.width);
+              setPagerHeight(e.nativeEvent.layout.height);
+            }}
             keyboardShouldPersistTaps="handled"
           />
 
