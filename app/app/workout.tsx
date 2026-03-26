@@ -43,16 +43,7 @@ export default function WorkoutScreen() {
   // Fetch previous workout data for "last time" shadow values
   const { data: fetchedPrevData } = usePreviousWorkoutData(activeWorkout?.sessionName);
 
-  // Persist fetched previous data into the workout store so it survives
-  // tab switches without waiting for a fresh query re-fetch.
-  useEffect(() => {
-    if (!fetchedPrevData || !activeWorkout || activeWorkout.previousData) return;
-    useWorkoutStore.setState((s) => {
-      if (!s.activeWorkout || s.activeWorkout.previousData) return s;
-      return { activeWorkout: { ...s.activeWorkout, previousData: fetchedPrevData } };
-    });
-  }, [fetchedPrevData, activeWorkout?.startedAt]);
-
+  // Merge fetched previous data into the store if not already set
   const previousData = activeWorkout?.previousData ?? fetchedPrevData ?? undefined;
 
   const currentIndex = storedIndex;
@@ -66,24 +57,8 @@ export default function WorkoutScreen() {
   const exerciseCount = exercises.length;
   const sessionName = activeWorkout?.sessionName ?? 'Workout';
   const startedAt = activeWorkout?.startedAt ?? new Date().toISOString();
-  const scrollSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Block scroll-driven index updates until the FlatList has settled at its
-  // initialScrollIndex.  Cleared once by the first onMomentumScrollEnd or a
-  // short timeout after layout, whichever comes first.
-  const isRestoringIndex = useRef(true);
-
-  // Compute the initialScrollIndex once at mount time so the FlatList starts
-  // at the persisted page natively — no post-mount scrollToIndex needed.
-  const initialScrollIndex = useRef(
-    Math.min(useWorkoutStore.getState().currentExerciseIndex, Math.max(exerciseCount, 1)),
-  ).current;
-
-  // Clear the restoration guard after the FlatList has settled.
-  useEffect(() => {
-    if (!pagerHeight) return;                 // wait for layout
-    const id = setTimeout(() => { isRestoringIndex.current = false; }, 200);
-    return () => clearTimeout(id);
-  }, [pagerHeight]);
+  const initialPagerIndexRef = useRef(useWorkoutStore.getState().currentExerciseIndex);
+  const initialPagerIndex = Math.max(0, Math.min(exerciseCount, initialPagerIndexRef.current));
 
   // Clamp currentIndex if exercises removed
   useEffect(() => {
@@ -92,30 +67,12 @@ export default function WorkoutScreen() {
     if (currentIndex > max) setCurrentIndex(max);
   }, [exerciseCount, currentIndex, setCurrentIndex]);
 
-  // Debounced scroll handler: fires on every scroll frame, but only commits
-  // the index once scrolling settles (no new events for 80ms). This is the
-  // fallback for cases where onMomentumScrollEnd doesn't fire (known RN
-  // issue with pagingEnabled when the finger lifts exactly on a snap point).
-  const handleScroll = useCallback(
+  // Eagerly sync currentIndex when the user lifts their finger.
+  // snapToInterval handles the actual scroll snapping; this is a fallback
+  // for the edge case where the finger lands exactly on a snap point and
+  // onMomentumScrollEnd never fires (no animation needed → no momentum).
+  const handleScrollEndDrag = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (isRestoringIndex.current) return;
-      const offsetX = e.nativeEvent.contentOffset.x;
-      if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
-      scrollSettleTimer.current = setTimeout(() => {
-        const nextIndex = Math.round(offsetX / SCREEN_WIDTH);
-        const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
-        setCurrentIndex(clampedIndex);
-      }, 80);
-    },
-    [exerciseCount, setCurrentIndex],
-  );
-
-  // Fast path: fires immediately after the page snap animation finishes,
-  // cancels the debounce timer so we don't double-update.
-  const handleMomentumScrollEnd = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
-      isRestoringIndex.current = false;
       const nextIndex = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
       const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
       setCurrentIndex(clampedIndex);
@@ -123,12 +80,33 @@ export default function WorkoutScreen() {
     [exerciseCount, setCurrentIndex],
   );
 
+  const handleMomentumScrollEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const nextIndex = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+      const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
+      setCurrentIndex(clampedIndex);
+    },
+    [exerciseCount, setCurrentIndex],
+  );
+
+  const handleScrollToIndexFailed = useCallback(
+    (info: { index: number }) => {
+      const targetIndex = Math.max(0, Math.min(exerciseCount, info.index));
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToOffset({ offset: targetIndex * SCREEN_WIDTH, animated: false });
+        setCurrentIndex(targetIndex);
+      });
+    },
+    [exerciseCount, setCurrentIndex],
+  );
+
   const scrollToIndex = useCallback(
     (index: number) => {
-      flatListRef.current?.scrollToIndex({ index, animated: true });
-      setCurrentIndex(index);
+      const targetIndex = Math.max(0, Math.min(exerciseCount, index));
+      flatListRef.current?.scrollToIndex({ index: targetIndex, animated: true });
+      setCurrentIndex(targetIndex);
     },
-    [],
+    [exerciseCount, setCurrentIndex],
   );
 
   const handleAddExercise = (name: string) => {
@@ -152,7 +130,7 @@ export default function WorkoutScreen() {
     }
   };
 
-  const handleMinimize = () => router.back();
+  const handleMinimize = () => router.dismiss();
 
   const handleCancel = () => {
     router.dismiss();
@@ -283,19 +261,22 @@ export default function WorkoutScreen() {
             renderItem={renderPage}
             keyExtractor={(item) => String(item)}
             horizontal
-            pagingEnabled
+            initialScrollIndex={initialPagerIndex}
+            snapToInterval={SCREEN_WIDTH}
+            snapToAlignment="start"
+            disableIntervalMomentum
+            decelerationRate="fast"
             bounces={false}
             directionalLockEnabled
             showsHorizontalScrollIndicator={false}
-            onScroll={handleScroll}
-            scrollEventThrottle={16}
+            onScrollEndDrag={handleScrollEndDrag}
             onMomentumScrollEnd={handleMomentumScrollEnd}
+            onScrollToIndexFailed={handleScrollToIndexFailed}
             getItemLayout={(_, index) => ({
               length: SCREEN_WIDTH,
               offset: SCREEN_WIDTH * index,
               index,
             })}
-            initialScrollIndex={initialScrollIndex}
             initialNumToRender={1}
             maxToRenderPerBatch={1}
             windowSize={3}
