@@ -30,6 +30,18 @@ export default function WorkoutScreen() {
   const insets = useSafeAreaInsets();
   const flatListRef = useRef<FlatList>(null);
 
+  // Wait for Zustand to hydrate from AsyncStorage before reading any state.
+  // On Safari, switching tabs evicts the page — the full app reloads and
+  // the store starts with defaults (index 0, activeWorkout null) until
+  // AsyncStorage hydration completes. Without this gate, refs and the
+  // FlatList capture stale default values.
+  const [hydrated, setHydrated] = useState(useWorkoutStore.persist.hasHydrated());
+  useEffect(() => {
+    if (hydrated) return;
+    const unsub = useWorkoutStore.persist.onFinishHydration(() => setHydrated(true));
+    return unsub;
+  }, [hydrated]);
+
   const activeWorkout = useWorkoutStore((s) => s.activeWorkout);
   const addExercise = useWorkoutStore((s) => s.addExercise);
   const insertExercise = useWorkoutStore((s) => s.insertExercise);
@@ -59,32 +71,37 @@ export default function WorkoutScreen() {
   const sessionName = activeWorkout?.sessionName ?? 'Workout';
   const startedAt = activeWorkout?.startedAt ?? new Date().toISOString();
 
-  // Capture persisted index at mount time before any scroll events can corrupt it.
-  // Used for initialScrollIndex so the FlatList starts at the right page natively.
-  const initialTargetIndex = useRef(useWorkoutStore.getState().currentExerciseIndex);
-  const initialPagerIndex = Math.max(0, Math.min(exerciseCount, initialTargetIndex.current));
-
-  // Block scroll handlers until the FlatList has settled at its initial position.
-  // Without this, scroll events during mount/layout can overwrite the persisted
-  // index with 0 before the FlatList finishes positioning at initialScrollIndex.
+  // Block scroll handlers until we've imperatively restored the scroll position.
+  // Without this, scroll events during mount/layout overwrite the persisted index.
   const isRestoringIndex = useRef(true);
+  const hasRestoredScroll = useRef(false);
   const scrollSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Release the scroll guard once the FlatList has laid out and settled.
+  // After hydration + layout, imperatively scroll to the persisted index.
+  // We read the index HERE (not in a ref at mount time) because on a full
+  // page reload the store hasn't hydrated yet when the ref initializes.
   useEffect(() => {
+    if (!hydrated) return;
     if (!activeWorkout) {
       isRestoringIndex.current = false;
       return;
     }
-    if (pagerHeight === 0) return; // Wait for layout
+    if (exerciseCount === 0 || pagerHeight === 0) return; // Wait for layout
+    if (hasRestoredScroll.current) return; // Only restore once per mount
 
-    // Give the FlatList time to settle at initialScrollIndex before
-    // allowing scroll handlers to update the index.
-    const timer = setTimeout(() => {
-      isRestoringIndex.current = false;
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [activeWorkout, pagerHeight]);
+    // Read the index NOW — after hydration, this is the real persisted value
+    const storedIdx = useWorkoutStore.getState().currentExerciseIndex;
+    const target = Math.max(0, Math.min(exerciseCount, storedIdx));
+    hasRestoredScroll.current = true;
+
+    requestAnimationFrame(() => {
+      flatListRef.current?.scrollToIndex({ index: target, animated: false });
+      setCurrentIndex(target);
+      setTimeout(() => {
+        isRestoringIndex.current = false;
+      }, 200);
+    });
+  }, [hydrated, activeWorkout, exerciseCount, pagerHeight, setCurrentIndex]);
 
   // Clamp currentIndex if exercises removed
   useEffect(() => {
@@ -249,14 +266,20 @@ export default function WorkoutScreen() {
     startedAt,
   ]);
 
-  if (!activeWorkout) {
+  if (!hydrated || !activeWorkout) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyTitle}>No Active Workout</Text>
-          <TouchableOpacity onPress={() => router.dismiss()}>
-            <Text style={styles.goBackText}>Go Back</Text>
-          </TouchableOpacity>
+          {hydrated ? (
+            <>
+              <Text style={styles.emptyTitle}>No Active Workout</Text>
+              <TouchableOpacity onPress={() => router.dismiss()}>
+                <Text style={styles.goBackText}>Go Back</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <Text style={styles.emptyTitle}>Loading...</Text>
+          )}
         </View>
       </View>
     );
@@ -298,7 +321,6 @@ export default function WorkoutScreen() {
             renderItem={renderPage}
             keyExtractor={(item) => String(item)}
             horizontal
-            initialScrollIndex={initialPagerIndex}
             pagingEnabled
             snapToInterval={pagerWidth}
             snapToAlignment="start"
