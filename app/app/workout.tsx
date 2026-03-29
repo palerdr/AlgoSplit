@@ -349,6 +349,7 @@ export default function WorkoutScreen() {
             scrollEventThrottle={16}
             onMomentumScrollEnd={handleMomentumScrollEnd}
             onScrollToIndexFailed={handleScrollToIndexFailed}
+            initialScrollIndex={Math.max(0, Math.min(exerciseCount, storedIndex))}
             getItemLayout={(_, index) => ({
               length: pagerWidth,
               offset: pagerWidth * index,
