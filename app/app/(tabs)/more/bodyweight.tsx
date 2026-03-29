@@ -176,7 +176,7 @@ export default function BodyweightScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.replace('/(tabs)/index')} hitSlop={12}>
+        <TouchableOpacity onPress={() => router.replace('/(tabs)')} hitSlop={12}>
           <Ionicons name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Bodyweight</Text>

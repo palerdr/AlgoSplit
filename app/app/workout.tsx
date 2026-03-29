@@ -55,7 +55,16 @@ export default function WorkoutScreen() {
   // Fetch previous workout data for "last time" shadow values
   const { data: fetchedPrevData } = usePreviousWorkoutData(activeWorkout?.sessionName);
 
-  // Merge fetched previous data into the store if not already set
+  // Persist fetched previous data into the workout store so it survives
+  // tab switches without waiting for a fresh query re-fetch.
+  useEffect(() => {
+    if (!fetchedPrevData || !activeWorkout || activeWorkout.previousData) return;
+    useWorkoutStore.setState((s) => {
+      if (!s.activeWorkout || s.activeWorkout.previousData) return s;
+      return { activeWorkout: { ...s.activeWorkout, previousData: fetchedPrevData } };
+    });
+  }, [fetchedPrevData, activeWorkout?.startedAt]);
+
   const previousData = activeWorkout?.previousData ?? fetchedPrevData ?? undefined;
 
   const currentIndex = storedIndex;
@@ -65,6 +74,7 @@ export default function WorkoutScreen() {
   const [error, setError] = useState<string | null>(null);
   const [pagerHeight, setPagerHeight] = useState(0);
   const [pagerWidth, setPagerWidth] = useState(SCREEN_WIDTH);
+  const isDismissing = useRef(false);
 
   const exercises = activeWorkout?.exercises ?? [];
   const exerciseCount = exercises.length;
@@ -155,11 +165,10 @@ export default function WorkoutScreen() {
 
   const scrollToIndex = useCallback(
     (index: number) => {
-      const targetIndex = Math.max(0, Math.min(exerciseCount, index));
-      flatListRef.current?.scrollToIndex({ index: targetIndex, animated: true });
-      setCurrentIndex(targetIndex);
+      flatListRef.current?.scrollToIndex({ index, animated: true });
+      setCurrentIndex(index);
     },
-    [exerciseCount, setCurrentIndex],
+    [],
   );
 
   const handleAddExercise = (name: string) => {
@@ -183,10 +192,19 @@ export default function WorkoutScreen() {
     }
   };
 
-  const handleMinimize = () => router.dismiss();
+  const safeDismiss = useCallback(() => {
+    isDismissing.current = true;
+    if (router.canDismiss()) {
+      router.dismiss();
+    } else {
+      router.back();
+    }
+  }, [router]);
+
+  const handleMinimize = () => safeDismiss();
 
   const handleCancel = () => {
-    router.dismiss();
+    safeDismiss();
     setTimeout(() => cancelWorkout(), 0);
   };
 
@@ -208,8 +226,8 @@ export default function WorkoutScreen() {
       },
       {
         onSuccess: () => {
-          cancelWorkout();
-          router.dismiss();
+          safeDismiss();
+          setTimeout(() => cancelWorkout(), 0);
         },
         onError: (err) => {
           setError(err instanceof Error ? err.message : 'Failed to save workout');
@@ -267,13 +285,15 @@ export default function WorkoutScreen() {
   ]);
 
   if (!hydrated || !activeWorkout) {
+    // If we're mid-dismiss, render nothing — the modal is already closing.
+    if (isDismissing.current) return null;
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.emptyContainer}>
           {hydrated ? (
             <>
               <Text style={styles.emptyTitle}>No Active Workout</Text>
-              <TouchableOpacity onPress={() => router.dismiss()}>
+              <TouchableOpacity onPress={() => safeDismiss()}>
                 <Text style={styles.goBackText}>Go Back</Text>
               </TouchableOpacity>
             </>
@@ -322,10 +342,6 @@ export default function WorkoutScreen() {
             keyExtractor={(item) => String(item)}
             horizontal
             pagingEnabled
-            snapToInterval={pagerWidth}
-            snapToAlignment="start"
-            decelerationRate="fast"
-            disableIntervalMomentum
             bounces={false}
             directionalLockEnabled
             showsHorizontalScrollIndicator={false}

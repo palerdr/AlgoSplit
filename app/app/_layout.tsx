@@ -2,7 +2,7 @@ import '../src/dev/registerDevTools';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { StyleSheet, Animated, Easing, Dimensions } from 'react-native';
+import { StyleSheet, Animated, Easing, Dimensions, AppState, Platform } from 'react-native';
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '../src/hooks/useAuth';
@@ -72,6 +72,35 @@ export default function RootLayout() {
   useEffect(() => {
     registerTransitionHandler(handleTransition);
   }, [handleTransition]);
+
+  // Reconcile expo-router nav state when the app resumes from background or
+  // a browser tab regains focus.  If a workout modal is stranded (activeWorkout
+  // is null but the modal route is still on the stack), dismiss it so the user
+  // lands back on the tabs screen cleanly.
+  useEffect(() => {
+    const reconcile = () => {
+      const { activeWorkout } = require('../src/stores/workoutStore').useWorkoutStore.getState();
+      // If no active workout but the modal might be stranded, let the
+      // workout screen's own empty-state + canDismiss guard handle it.
+      // We only need to force-dismiss if the router thinks it can.
+      if (!activeWorkout && router.canDismiss()) {
+        router.dismiss();
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      const handler = () => {
+        if (document.visibilityState === 'visible') reconcile();
+      };
+      document.addEventListener('visibilitychange', handler);
+      return () => document.removeEventListener('visibilitychange', handler);
+    }
+
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') reconcile();
+    });
+    return () => sub.remove();
+  }, [router]);
 
   return (
     <QueryClientProvider client={queryClient}>
