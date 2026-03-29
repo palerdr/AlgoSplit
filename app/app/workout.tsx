@@ -204,8 +204,8 @@ export default function WorkoutScreen() {
   const handleMinimize = () => safeDismiss();
 
   const handleCancel = () => {
+    cancelWorkout();
     safeDismiss();
-    setTimeout(() => cancelWorkout(), 0);
   };
 
   const handleFinish = () => {
