@@ -126,7 +126,7 @@ export default function WorkoutScreen() {
   // issue with pagingEnabled when the finger lifts exactly on a snap point).
   const handleScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (isRestoringIndex.current) return;
+      if (isRestoringIndex.current || isDismissing.current) return;
       const offsetX = e.nativeEvent.contentOffset.x;
       if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
       scrollSettleTimer.current = setTimeout(() => {
@@ -143,7 +143,7 @@ export default function WorkoutScreen() {
   const handleMomentumScrollEnd = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
-      if (isRestoringIndex.current) return;
+      if (isRestoringIndex.current || isDismissing.current) return;
       const nextIndex = Math.round(e.nativeEvent.contentOffset.x / pagerWidth);
       const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
       setCurrentIndex(clampedIndex);
@@ -360,6 +360,7 @@ export default function WorkoutScreen() {
             windowSize={3}
             style={styles.pager}
             onLayout={(e) => {
+              if (isDismissing.current) return;
               setPagerWidth(e.nativeEvent.layout.width);
               setPagerHeight(e.nativeEvent.layout.height);
             }}
