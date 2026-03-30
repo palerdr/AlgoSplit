@@ -98,15 +98,38 @@ export default function WorkoutScreen() {
     if (currentIndex > max) setCurrentIndex(max);
   }, [exerciseCount, currentIndex, setCurrentIndex]);
 
-  // pagingEnabled guarantees onMomentumScrollEnd fires at a page boundary.
-  const handleMomentumScrollEnd = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (isDismissing.current) return;
-      const index = Math.round(e.nativeEvent.contentOffset.x / pagerWidth);
+  // Debounced onScroll keeps the dot index in sync on every swipe.
+  // onMomentumScrollEnd doesn't fire when the finger lifts exactly on a
+  // page boundary (no momentum phase), so we need this as the primary
+  // tracker. Once scroll events stop for 80ms the page has settled.
+  const scrollSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const commitIndex = useCallback(
+    (offsetX: number) => {
+      const index = Math.round(offsetX / pagerWidth);
       const clamped = Math.max(0, Math.min(exerciseCount, index));
       setCurrentIndex(clamped);
     },
     [exerciseCount, pagerWidth, setCurrentIndex],
+  );
+
+  const handleScroll = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (isDismissing.current) return;
+      const offsetX = e.nativeEvent.contentOffset.x;
+      if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
+      scrollSettleTimer.current = setTimeout(() => commitIndex(offsetX), 80);
+    },
+    [commitIndex],
+  );
+
+  const handleMomentumScrollEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
+      if (isDismissing.current) return;
+      commitIndex(e.nativeEvent.contentOffset.x);
+    },
+    [commitIndex],
   );
 
   const scrollToPage = useCallback(
@@ -238,6 +261,8 @@ export default function WorkoutScreen() {
             bounces={false}
             directionalLockEnabled
             showsHorizontalScrollIndicator={false}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
             onMomentumScrollEnd={handleMomentumScrollEnd}
             style={styles.pager}
             onLayout={(e) => {
