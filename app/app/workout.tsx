@@ -1,8 +1,8 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
-  FlatList,
+  ScrollView,
   StyleSheet,
   Dimensions,
   type NativeSyntheticEvent,
@@ -28,13 +28,9 @@ const CARD_MAX_HEIGHT = Math.round(SCREEN_HEIGHT * 0.75);
 export default function WorkoutScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const flatListRef = useRef<FlatList>(null);
+  const scrollRef = useRef<ScrollView>(null);
 
   // Wait for Zustand to hydrate from AsyncStorage before reading any state.
-  // On Safari, switching tabs evicts the page — the full app reloads and
-  // the store starts with defaults (index 0, activeWorkout null) until
-  // AsyncStorage hydration completes. Without this gate, refs and the
-  // FlatList capture stale default values.
   const [hydrated, setHydrated] = useState(useWorkoutStore.persist.hasHydrated());
   useEffect(() => {
     if (hydrated) return;
@@ -81,37 +77,19 @@ export default function WorkoutScreen() {
   const sessionName = activeWorkout?.sessionName ?? 'Workout';
   const startedAt = activeWorkout?.startedAt ?? new Date().toISOString();
 
-  // Block scroll handlers until we've imperatively restored the scroll position.
-  // Without this, scroll events during mount/layout overwrite the persisted index.
-  const isRestoringIndex = useRef(true);
-  const hasRestoredScroll = useRef(false);
-  const scrollSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // After hydration + layout, imperatively scroll to the persisted index.
-  // We read the index HERE (not in a ref at mount time) because on a full
-  // page reload the store hasn't hydrated yet when the ref initializes.
+  // After hydration + layout, scroll to the persisted exercise index once.
+  // All children are already mounted (no virtualization), so scrollTo is
+  // a direct native call that pagingEnabled doesn't interfere with.
+  const hasScrolledRef = useRef(false);
   useEffect(() => {
-    if (!hydrated) return;
-    if (!activeWorkout) {
-      isRestoringIndex.current = false;
-      return;
-    }
-    if (exerciseCount === 0 || pagerHeight === 0) return; // Wait for layout
-    if (hasRestoredScroll.current) return; // Only restore once per mount
-
-    // Read the index NOW — after hydration, this is the real persisted value
-    const storedIdx = useWorkoutStore.getState().currentExerciseIndex;
-    const target = Math.max(0, Math.min(exerciseCount, storedIdx));
-    hasRestoredScroll.current = true;
-
+    if (!hydrated || exerciseCount === 0 || pagerHeight === 0) return;
+    if (hasScrolledRef.current) return;
+    hasScrolledRef.current = true;
+    const target = Math.max(0, Math.min(exerciseCount, useWorkoutStore.getState().currentExerciseIndex));
     requestAnimationFrame(() => {
-      flatListRef.current?.scrollToIndex({ index: target, animated: false });
-      setCurrentIndex(target);
-      setTimeout(() => {
-        isRestoringIndex.current = false;
-      }, 200);
+      scrollRef.current?.scrollTo({ x: target * pagerWidth, animated: false });
     });
-  }, [hydrated, activeWorkout, exerciseCount, pagerHeight, setCurrentIndex]);
+  }, [hydrated, exerciseCount, pagerHeight, pagerWidth]);
 
   // Clamp currentIndex if exercises removed
   useEffect(() => {
@@ -120,55 +98,24 @@ export default function WorkoutScreen() {
     if (currentIndex > max) setCurrentIndex(max);
   }, [exerciseCount, currentIndex, setCurrentIndex]);
 
-  // Debounced scroll handler: fires on every scroll frame, but only commits
-  // the index once scrolling settles (no new events for 80ms). This is the
-  // fallback for cases where onMomentumScrollEnd doesn't fire (known RN
-  // issue with pagingEnabled when the finger lifts exactly on a snap point).
-  const handleScroll = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (isRestoringIndex.current || isDismissing.current) return;
-      const offsetX = e.nativeEvent.contentOffset.x;
-      if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
-      scrollSettleTimer.current = setTimeout(() => {
-        const nextIndex = Math.round(offsetX / pagerWidth);
-        const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
-        setCurrentIndex(clampedIndex);
-      }, 80);
-    },
-    [exerciseCount, pagerWidth, setCurrentIndex],
-  );
-
-  // Fast path: fires immediately after the page snap animation finishes,
-  // cancels the debounce timer so we don't double-update.
+  // pagingEnabled guarantees onMomentumScrollEnd fires at a page boundary.
   const handleMomentumScrollEnd = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
-      if (isRestoringIndex.current || isDismissing.current) return;
-      const nextIndex = Math.round(e.nativeEvent.contentOffset.x / pagerWidth);
-      const clampedIndex = Math.max(0, Math.min(exerciseCount, nextIndex));
-      setCurrentIndex(clampedIndex);
+      if (isDismissing.current) return;
+      const index = Math.round(e.nativeEvent.contentOffset.x / pagerWidth);
+      const clamped = Math.max(0, Math.min(exerciseCount, index));
+      setCurrentIndex(clamped);
     },
     [exerciseCount, pagerWidth, setCurrentIndex],
   );
 
-  // Fallback if initialScrollIndex can't reach the target (e.g. items not yet rendered)
-  const handleScrollToIndexFailed = useCallback(
-    (info: { index: number }) => {
-      const targetIndex = Math.max(0, Math.min(exerciseCount, info.index));
-      requestAnimationFrame(() => {
-        flatListRef.current?.scrollToOffset({ offset: targetIndex * pagerWidth, animated: false });
-        setCurrentIndex(targetIndex);
-      });
-    },
-    [exerciseCount, pagerWidth, setCurrentIndex],
-  );
-
-  const scrollToIndex = useCallback(
+  const scrollToPage = useCallback(
     (index: number) => {
-      flatListRef.current?.scrollToIndex({ index, animated: true });
-      setCurrentIndex(index);
+      const target = Math.max(0, Math.min(exerciseCount, index));
+      scrollRef.current?.scrollTo({ x: target * pagerWidth, animated: true });
+      setCurrentIndex(target);
     },
-    [],
+    [exerciseCount, pagerWidth, setCurrentIndex],
   );
 
   const handleAddExercise = (name: string) => {
@@ -177,17 +124,13 @@ export default function WorkoutScreen() {
       insertExercise(name, afterIdx);
       insertAfterIndex.current = null;
       setShowPicker(false);
-      // Scroll to the newly inserted exercise (afterIdx + 1)
-      setTimeout(() => {
-        scrollToIndex(afterIdx + 1);
-      }, 100);
+      setTimeout(() => scrollToPage(afterIdx + 1), 100);
     } else {
       addExercise(name);
       setShowPicker(false);
-      // Scroll to the newly added exercise at end
       setTimeout(() => {
         const count = useWorkoutStore.getState().activeWorkout?.exercises.length ?? 0;
-        scrollToIndex(count - 1);
+        scrollToPage(count - 1);
       }, 100);
     }
   };
@@ -236,56 +179,9 @@ export default function WorkoutScreen() {
     );
   };
 
-  // Build pages: one per exercise + summary
-  const pageCount = exerciseCount + 1;
-  const pageIndexes = useMemo(
-    () => Array.from({ length: pageCount }, (_, i) => i),
-    [pageCount],
-  );
-
-  const renderPage = useCallback(({ index }: { item: number; index: number }) => {
-    const pageStyle = { width: pagerWidth, height: pagerHeight || undefined, paddingBottom: pagerHeight ? pagerHeight * 0.2 : 0 };
-
-    if (index === exerciseCount) {
-      return (
-        <View style={[styles.pageWrapper, styles.summaryPageWrapper, pageStyle, { paddingBottom: 0 }]}>
-          <View style={[styles.card, styles.summaryCard]}>
-            <WorkoutSummaryMobile
-              sessionName={sessionName}
-              startedAt={startedAt}
-              exercises={exercises}
-            />
-          </View>
-        </View>
-      );
-    }
-
-    const exercise = exercises[index];
-    if (!exercise) return <View style={{ width: pagerWidth }} />;
-
-    return (
-      <View style={[styles.pageWrapper, pageStyle]}>
-        <View style={styles.card}>
-          <ExerciseViewMobile
-            exercise={exercise}
-            previousExerciseData={previousData?.[exercise.name]}
-            onAddAfter={() => { insertAfterIndex.current = index; setShowPicker(true); }}
-          />
-        </View>
-      </View>
-    );
-  }, [
-    exerciseCount,
-    exercises,
-    pagerHeight,
-    pagerWidth,
-    previousData,
-    sessionName,
-    startedAt,
-  ]);
+  const pageStyle = { width: pagerWidth, height: pagerHeight || undefined, paddingBottom: pagerHeight ? pagerHeight * 0.2 : 0 };
 
   if (!hydrated || !activeWorkout) {
-    // If we're mid-dismiss, render nothing — the modal is already closing.
     if (isDismissing.current) return null;
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -335,46 +231,51 @@ export default function WorkoutScreen() {
         </View>
       ) : (
         <>
-          <FlatList
-            ref={flatListRef}
-            data={pageIndexes}
-            renderItem={renderPage}
-            keyExtractor={(item) => String(item)}
+          <ScrollView
+            ref={scrollRef}
             horizontal
             pagingEnabled
             bounces={false}
             directionalLockEnabled
             showsHorizontalScrollIndicator={false}
-            onScroll={handleScroll}
-            scrollEventThrottle={16}
             onMomentumScrollEnd={handleMomentumScrollEnd}
-            onScrollToIndexFailed={handleScrollToIndexFailed}
-            initialScrollIndex={Math.max(0, Math.min(exerciseCount, storedIndex))}
-            getItemLayout={(_, index) => ({
-              length: pagerWidth,
-              offset: pagerWidth * index,
-              index,
-            })}
-            initialNumToRender={1}
-            maxToRenderPerBatch={1}
-            windowSize={3}
             style={styles.pager}
             onLayout={(e) => {
               if (isDismissing.current) return;
               setPagerWidth(e.nativeEvent.layout.width);
               setPagerHeight(e.nativeEvent.layout.height);
             }}
-            keyboardShouldPersistTaps="handled"
-          />
+          >
+            {exercises.map((exercise, index) => (
+              <View key={exercise.id} style={[styles.pageWrapper, pageStyle]}>
+                <View style={styles.card}>
+                  <ExerciseViewMobile
+                    exercise={exercise}
+                    previousExerciseData={previousData?.[exercise.name]}
+                    onAddAfter={() => { insertAfterIndex.current = index; setShowPicker(true); }}
+                  />
+                </View>
+              </View>
+            ))}
+            <View key="summary" style={[styles.pageWrapper, styles.summaryPageWrapper, pageStyle, { paddingBottom: 0 }]}>
+              <View style={[styles.card, styles.summaryCard]}>
+                <WorkoutSummaryMobile
+                  sessionName={sessionName}
+                  startedAt={startedAt}
+                  exercises={exercises}
+                />
+              </View>
+            </View>
+          </ScrollView>
 
           <ExerciseNavMobile
             currentIndex={currentIndex}
             totalExercises={exerciseCount}
             isSaving={logWorkoutMutation.isPending}
-            onPrev={() => scrollToIndex(Math.max(0, currentIndex - 1))}
-            onNext={() => scrollToIndex(Math.min(exerciseCount, currentIndex + 1))}
+            onPrev={() => scrollToPage(Math.max(0, currentIndex - 1))}
+            onNext={() => scrollToPage(Math.min(exerciseCount, currentIndex + 1))}
             onFinish={handleFinish}
-            onJump={scrollToIndex}
+            onJump={scrollToPage}
           />
         </>
       )}
