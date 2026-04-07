@@ -163,15 +163,19 @@ export default function WorkoutScreen() {
     if (router.canDismiss()) {
       router.dismiss();
     } else {
-      router.back();
+      // After a full page reload there's no modal stack and no browser
+      // history, so router.back() would navigate nowhere.
+      router.replace('/(tabs)');
     }
   }, [router]);
 
   const handleMinimize = () => safeDismiss();
 
   const handleCancel = () => {
-    cancelWorkout();
+    // Navigate first, THEN clear state — cancelWorkout() sets activeWorkout
+    // to null which would flash "No Active Workout" before navigation.
     safeDismiss();
+    setTimeout(() => cancelWorkout(), 0);
   };
 
   const handleFinish = () => {
