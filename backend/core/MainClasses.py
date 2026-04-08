@@ -772,8 +772,8 @@ class Session:
 
         session_stats['axial_fatigue'] = fatigue_state.axial_fatigue
         session_stats['bilateral_compound_sets'] = fatigue_state.bilateral_compound_sets
+        session_stats['total_sets'] = global_sets
         if collect_breakdowns:
-            session_stats['total_sets'] = global_sets
             session_stats['muscles_trained'] = list(session_stats['muscles_trained'])
             session_stats['stimulus_by_muscle'] = dict(session_stats['stimulus_by_muscle'])
             session_stats['bilateral_compounds'] = fatigue_state.bilateral_compounds
@@ -1052,10 +1052,16 @@ class Split:
                         stats['consecutive_days'] = consecutive_tracker.consecutive_days
                         self.session_stats.append(stats)
 
-                    # Update consecutive day tracker with THIS session's fatigue
-                    consecutive_tracker.cumulative_axial_fatigue += stats.get('axial_fatigue', 0.0)
-                    consecutive_tracker.cumulative_bilateral_sets += stats.get('bilateral_compound_sets', 0)
-                    consecutive_tracker.last_training_day = absolute_day_number
+                    # Only register sessions with meaningful volume (>= 3 total
+                    # sets) as training days for consecutive day tracking.
+                    # Near-empty sessions (e.g. 1-2 sets of a single exercise)
+                    # shouldn't prevent the consecutive day counter from resetting
+                    # and shouldn't cascade fatigue penalties onto the next real
+                    # training day.
+                    if stats.get('total_sets', 0) >= 3:
+                        consecutive_tracker.cumulative_axial_fatigue += stats.get('axial_fatigue', 0.0)
+                        consecutive_tracker.cumulative_bilateral_sets += stats.get('bilateral_compound_sets', 0)
+                        consecutive_tracker.last_training_day = absolute_day_number
 
                 session.time = original_time
 
