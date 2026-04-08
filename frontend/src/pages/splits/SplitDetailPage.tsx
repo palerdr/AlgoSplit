@@ -1,8 +1,8 @@
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Trash2, BarChart3, Pencil } from 'lucide-react';
+import { ArrowLeft, Trash2, BarChart3, Pencil, Copy } from 'lucide-react';
 import { Card, CardContent, Button, Spinner } from '@/components/ui';
-import { getSplit, deleteSplit, splitKeys, analyzeSplit } from '@/api/splits.api';
+import { getSplit, deleteSplit, duplicateSplit, splitKeys, analyzeSplit } from '@/api/splits.api';
 import {
   MuscleChart,
   AnalysisSummary,
@@ -33,6 +33,14 @@ export function SplitDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: splitKeys.lists() });
       navigate('/splits');
+    },
+  });
+
+  const duplicateMutation = useMutation({
+    mutationFn: () => duplicateSplit(id!),
+    onSuccess: (newSplit) => {
+      queryClient.invalidateQueries({ queryKey: splitKeys.lists() });
+      navigate(`/splits/${newSplit.id}`);
     },
   });
 
@@ -82,6 +90,14 @@ export function SplitDetailPage() {
               Edit
             </Button>
           </Link>
+          <Button
+            variant="secondary"
+            onClick={() => duplicateMutation.mutate()}
+            disabled={duplicateMutation.isPending}
+          >
+            <Copy className="w-4 h-4 mr-1" />
+            {duplicateMutation.isPending ? 'Copying...' : 'Duplicate'}
+          </Button>
           <Button
             variant="ghost"
             onClick={() => deleteMutation.mutate()}
