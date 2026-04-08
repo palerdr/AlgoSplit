@@ -16,7 +16,7 @@ import { Button, InfoButton, Input } from '../../../src/components/ui';
 import { HELP_CONTENT } from '../../../src/data/helpContent';
 import SessionEditorMobile from '../../../src/components/splits/SessionEditorMobile';
 import { useCreateSplit } from '../../../src/hooks/useSplits';
-import { useSettingsStore } from '../../../src/stores/settingsStore';
+import { useSplitCreateStore } from '../../../src/stores/splitCreateStore';
 import { getErrorMessage } from '../../../src/api/client';
 import {
   generateExerciseId,
@@ -24,17 +24,8 @@ import {
   normalizeSessionsForSave,
   parseCycleLengthInput,
 } from '../../../src/utils/splitEditHelpers';
-import { colors, typography, spacing, borders } from '../../../src/theme';
+import { colors, typography, borders } from '../../../src/theme';
 import type { SessionInput } from '../../../src/types/api.types';
-
-function makeDefaultSession(): SessionInput {
-  return {
-    id: generateSessionId(),
-    name: '',
-    day: 1,
-    exercises: [{ id: generateExerciseId(), name: '', sets: 3 }],
-  };
-}
 
 function nextAvailableDay(sessions: SessionInput[]): number | null {
   const usedDays = new Set(sessions.map((session) => session.day));
@@ -73,16 +64,18 @@ export default function CreateSplitScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const createMutation = useCreateSplit();
-  const defaultDataset = useSettingsStore((s) => s.dataset);
-  const defaultStimulusDuration = useSettingsStore((s) => s.stimulusDuration);
-  const defaultMaintenanceVolume = useSettingsStore((s) => s.maintenanceVolume);
 
-  const [splitName, setSplitName] = useState('');
-  const [sessions, setSessions] = useState<SessionInput[]>([makeDefaultSession()]);
-  const [dataset, setDataset] = useState<'schoenfeld' | 'pelland' | 'average'>(defaultDataset);
-  const [cycleLength, setCycleLength] = useState('');
-  const [stimulusDuration, setStimulusDuration] = useState(String(defaultStimulusDuration));
-  const [maintenanceVolume, setMaintenanceVolume] = useState(String(defaultMaintenanceVolume));
+  // Persisted store — survives tab/app switches on mobile browsers
+  const {
+    splitName, setSplitName,
+    sessions, setSessions,
+    dataset, setDataset,
+    cycleLength, setCycleLength,
+    stimulusDuration, setStimulusDuration,
+    maintenanceVolume, setMaintenanceVolume,
+    reset: resetForm,
+  } = useSplitCreateStore();
+
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [error, setError] = useState('');
   const [isDraggingExercises, setIsDraggingExercises] = useState(false);
@@ -312,6 +305,7 @@ export default function CreateSplitScreen() {
         stimulus_duration: parseInt(stimulusDuration, 10) || 48,
         maintenance_volume: parseInt(maintenanceVolume, 10) || 3,
       });
+      resetForm();
       router.replace(`/(tabs)/splits/${result.id}`);
     } catch (err) {
       showSaveError(getErrorMessage(err));
