@@ -21,6 +21,7 @@ import {
   useSplitAnalysis,
   prefetchSplitAnalysisWithBreakdowns,
   useDeleteSplit,
+  useDuplicateSplit,
   useReplaceSplit,
   useUpdateSplit,
   useUpdateSplitExercises,
@@ -169,6 +170,7 @@ export default function SplitDetailScreen() {
     split,
   );
   const deleteMutation = useDeleteSplit();
+  const duplicateMutation = useDuplicateSplit();
   const replaceMutation = useReplaceSplit({ invalidateLists: false });
   const updateMutation = useUpdateSplit({ invalidateLists: false });
   const updateExercisesMutation = useUpdateSplitExercises();
@@ -595,6 +597,16 @@ export default function SplitDetailScreen() {
     }
   }, [isEditing, split, advMaintenanceVolume, saveAdvancedSettings]);
 
+  const handleDuplicate = async () => {
+    if (!id) return;
+    try {
+      const newSplit = await duplicateMutation.mutateAsync(id);
+      router.replace(`/(tabs)/splits/${newSplit.id}`);
+    } catch (err) {
+      Alert.alert('Duplicate failed', getErrorMessage(err));
+    }
+  };
+
   const handleDelete = () => {
     setShowDeleteConfirm(true);
   };
@@ -723,6 +735,13 @@ export default function SplitDetailScreen() {
           <View style={styles.headerActions}>
             <TouchableOpacity onPress={enterEditMode} hitSlop={12}>
               <Ionicons name="pencil" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={handleDuplicate} disabled={duplicateMutation.isPending} hitSlop={12}>
+              {duplicateMutation.isPending ? (
+                <Spinner />
+              ) : (
+                <Ionicons name="copy-outline" size={20} color={colors.textSecondary} />
+              )}
             </TouchableOpacity>
             <TouchableOpacity onPress={handleDelete} hitSlop={12}>
               <Ionicons name="trash-outline" size={20} color={colors.red} />

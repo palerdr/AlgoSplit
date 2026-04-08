@@ -3,7 +3,7 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert } from 'react
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useSplitsListWithOptions, useDeleteSplit } from '../../../src/hooks/useSplits';
+import { useSplitsListWithOptions, useDeleteSplit, useDuplicateSplit } from '../../../src/hooks/useSplits';
 import { Spinner, Card, Button, InfoButton } from '../../../src/components/ui';
 import { HELP_CONTENT } from '../../../src/data/helpContent';
 import { getErrorMessage } from '../../../src/api/client';
@@ -15,9 +15,19 @@ export default function SplitsScreen() {
   const router = useRouter();
   const { data, isLoading, error } = useSplitsListWithOptions({ includeExercises: false });
   const deleteMutation = useDeleteSplit();
+  const duplicateMutation = useDuplicateSplit();
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const splits = data?.splits ?? [];
+
+  const handleDuplicate = async (split: SplitResponse) => {
+    try {
+      const newSplit = await duplicateMutation.mutateAsync(split.id);
+      router.push(`/(tabs)/splits/${newSplit.id}`);
+    } catch (err) {
+      Alert.alert('Duplicate failed', getErrorMessage(err));
+    }
+  };
 
   const handleDelete = (split: SplitResponse) => {
     setPendingDeleteId(split.id);
@@ -49,6 +59,15 @@ export default function SplitsScreen() {
               hitSlop={10}
             >
               <Ionicons name="pencil-outline" size={18} color={colors.textMuted} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={(e) => {
+                e.stopPropagation();
+                handleDuplicate(item);
+              }}
+              hitSlop={10}
+            >
+              <Ionicons name="copy-outline" size={18} color={colors.textMuted} />
             </TouchableOpacity>
             <TouchableOpacity
               onPress={(e) => {
