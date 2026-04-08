@@ -4,6 +4,7 @@ import {
   getSplit,
   createSplit,
   deleteSplit,
+  duplicateSplit,
   analyzeSplit,
   analyzeSplitFromDefinition,
   replaceSplit,
@@ -193,6 +194,16 @@ export function useCreateSplit() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: SplitRequest) => createSplit(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: splitKeys.lists() });
+    },
+  });
+}
+
+export function useDuplicateSplit() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => duplicateSplit(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: splitKeys.lists() });
     },

@@ -221,3 +221,25 @@ export async function analyzeSplitFromDefinition(
   );
   return response.data;
 }
+
+export async function duplicateSplit(id: string): Promise<SplitResponse> {
+  const split = await getSplit(id);
+
+  return createSplit({
+    name: `${split.name} (Copy)`,
+    sessions: split.sessions.map((session) => ({
+      name: session.name,
+      day: session.day_number,
+      exercises: session.exercises.map((ex) => ({
+        name: ex.exercise_name,
+        sets: ex.sets,
+        unilateral: ex.unilateral,
+        resistance_profile: ex.resistance_profile,
+      })),
+    })),
+    cycle_length: split.cycle_length ?? undefined,
+    stimulus_duration: split.stimulus_duration,
+    maintenance_volume: split.maintenance_volume,
+    dataset: split.dataset as 'schoenfeld' | 'pelland' | 'average',
+  });
+}
