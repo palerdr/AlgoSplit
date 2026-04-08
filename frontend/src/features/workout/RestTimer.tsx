@@ -14,12 +14,22 @@ export function RestTimer() {
   const defaultRestDuration = useSettingsStore((s) => s.defaultRestDuration);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // Tick the timer every second
+  // Tick the timer every second, and reconcile immediately when the tab
+  // regains focus so elapsed time during backgrounding is accounted for.
   useEffect(() => {
     if (!restTimer.isRunning) return;
 
     const interval = setInterval(tickRestTimer, 1000);
-    return () => clearInterval(interval);
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') tickRestTimer();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [restTimer.isRunning, tickRestTimer]);
 
   // Play sound when timer ends

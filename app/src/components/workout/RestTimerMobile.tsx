@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, AppState, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useWorkoutStore } from '../../stores/workoutStore';
@@ -14,10 +14,27 @@ export default function RestTimerMobile() {
   const restDuration = useSettingsStore((s) => s.restDuration);
   const wasRunning = useRef(false);
 
+  // Tick every second, and reconcile immediately when the app resumes so
+  // elapsed time during phone sleep / backgrounding is accounted for.
   useEffect(() => {
     if (!restTimer.isRunning) return;
     const id = setInterval(tickRestTimer, 1000);
-    return () => clearInterval(id);
+
+    const onResume = Platform.OS === 'web'
+      ? (() => {
+          const handler = () => { if (document.visibilityState === 'visible') tickRestTimer(); };
+          document.addEventListener('visibilitychange', handler);
+          return () => document.removeEventListener('visibilitychange', handler);
+        })()
+      : (() => {
+          const sub = AppState.addEventListener('change', (state) => { if (state === 'active') tickRestTimer(); });
+          return () => sub.remove();
+        })();
+
+    return () => {
+      clearInterval(id);
+      if (typeof onResume === 'function') onResume();
+    };
   }, [restTimer.isRunning, tickRestTimer]);
 
   // Haptic when timer expires (isRunning goes false while remaining hits 0)
