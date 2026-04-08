@@ -57,7 +57,9 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 5 * 60 * 1000, // 5 minutes
+      gcTime: 30 * 60 * 1000, // 30 minutes — survive mobile tab switches
       retry: 1,
+      refetchOnWindowFocus: false, // prevent refetch storms on mobile tab resume
     },
   },
 });
@@ -132,7 +134,9 @@ function AppRoutes() {
     if (!sessionStorage.getItem('algosplit-session')) {
       sessionStorage.setItem('algosplit-session', '1');
       const path = window.location.pathname;
-      if (path !== '/' && path !== '/dashboard' && path !== '/login' && path !== '/signup' && path !== '/forgot-password' && path !== '/reset-password') {
+      // Don't redirect away from pages with persisted in-progress work
+      const preservedPaths = ['/', '/dashboard', '/login', '/signup', '/forgot-password', '/reset-password', '/workout', '/splits/new'];
+      if (!preservedPaths.some(p => path === p || path.startsWith(p + '/'))) {
         navigate('/dashboard', { replace: true });
       }
     }

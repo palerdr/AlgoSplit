@@ -68,20 +68,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Re-validate session when tab regains focus (prevents stale auth after
-  // long background periods where the cookie may have expired)
+  // long background periods where the cookie may have expired).
+  // On mobile, the network may not be ready immediately after resume, so
+  // we delay the check and only log out on definitive 401s — not network errors.
   useEffect(() => {
     let lastCheck = Date.now();
-    const handleVisibility = async () => {
+    const handleVisibility = () => {
       if (document.visibilityState !== 'visible') return;
-      // Only re-check if hidden for > 10 minutes
       if (Date.now() - lastCheck < 10 * 60 * 1000) return;
       lastCheck = Date.now();
-      try {
-        const user = await authApi.getCurrentUser();
-        setState({ user, isAuthenticated: true, isLoading: false });
-      } catch {
-        setState({ user: null, isAuthenticated: false, isLoading: false });
-      }
+
+      // Small delay lets mobile radios reconnect before we hit the network
+      setTimeout(async () => {
+        try {
+          const user = await authApi.getCurrentUser();
+          setState({ user, isAuthenticated: true, isLoading: false });
+        } catch (err: any) {
+          // Only treat an explicit 401 as "logged out".
+          // Network errors (offline, DNS, timeout) should not kick the user out.
+          if (err?.response?.status === 401) {
+            setState({ user: null, isAuthenticated: false, isLoading: false });
+          }
+        }
+      }, 1500);
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
