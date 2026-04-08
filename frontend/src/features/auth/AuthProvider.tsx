@@ -36,10 +36,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const clearUserData = () => {
+  const clearUserData = ({ preserveDrafts = false } = {}) => {
     useAnalysisStore.getState().reset();
     useCompareStore.getState().reset();
-    useSplitCreateStore.getState().reset();
+    if (!preserveDrafts) {
+      useSplitCreateStore.getState().reset();
+    }
     queryClient.clear();
   };
 
@@ -97,7 +99,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    clearUserData();
+    // Preserve split creation drafts — the user is likely re-authenticating
+    // after a session timeout and shouldn't lose in-progress work.
+    clearUserData({ preserveDrafts: true });
     const response = await authApi.login({ email, password });
     setState({ user: response.user, isAuthenticated: true, isLoading: false });
     navigate('/dashboard');
