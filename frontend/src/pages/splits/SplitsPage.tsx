@@ -1,16 +1,18 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { Plus, Trash2, BarChart3, Edit2, Upload } from 'lucide-react';
+import { Plus, Trash2, BarChart3, Edit2, Upload, Copy } from 'lucide-react';
 import { Card, CardContent, Button, Spinner } from '@/components/ui';
 import { CsvImportModal } from '@/components/splits';
-import { getSplits, deleteSplit, splitKeys, analyzeSplit } from '@/api/splits.api';
+import { getSplits, deleteSplit, duplicateSplit, splitKeys, analyzeSplit } from '@/api/splits.api';
 import { formatDate } from '@/lib/utils';
 import { SplitStatsRow, SuggestionsSummary } from '@/components/analysis';
 import type { SplitResponse } from '@/types/api.types';
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 function SplitCard({ split }: { split: SplitResponse }) {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [showDelete, setShowDelete] = useState(false);
 
   const { data: analysis, isLoading: analysisLoading, error: analysisError } = useQuery({
@@ -24,6 +26,14 @@ function SplitCard({ split }: { split: SplitResponse }) {
   if (analysisError) {
     console.error(`Analysis failed for split ${split.id}:`, analysisError);
   }
+
+  const duplicateMutation = useMutation({
+    mutationFn: () => duplicateSplit(split.id),
+    onSuccess: (newSplit) => {
+      queryClient.invalidateQueries({ queryKey: splitKeys.lists() });
+      navigate(`/splits/${newSplit.id}`);
+    },
+  });
 
   const deleteMutation = useMutation({
     mutationFn: () => deleteSplit(split.id),
@@ -78,6 +88,15 @@ function SplitCard({ split }: { split: SplitResponse }) {
                 <Edit2 className="w-4 h-4" />
               </Button>
             </Link>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => duplicateMutation.mutate()}
+              disabled={duplicateMutation.isPending}
+              title="Duplicate split"
+            >
+              <Copy className="w-4 h-4" />
+            </Button>
             <Button
               variant="ghost"
               size="sm"

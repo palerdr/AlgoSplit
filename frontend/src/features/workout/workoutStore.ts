@@ -33,6 +33,7 @@ interface RestTimerState {
   isRunning: boolean;
   duration: number;
   remaining: number;
+  startedAt: string | null; // ISO timestamp — lets us compute elapsed time across backgrounding
   exerciseId: string | null;
 }
 
@@ -95,6 +96,7 @@ export const useWorkoutStore = create<WorkoutState>()(
         isRunning: false,
         duration: 90,
         remaining: 0,
+        startedAt: null,
         exerciseId: null,
       },
 
@@ -159,6 +161,7 @@ export const useWorkoutStore = create<WorkoutState>()(
             isRunning: false,
             duration: 90,
             remaining: 0,
+            startedAt: null,
             exerciseId: null,
           },
         });
@@ -386,6 +389,7 @@ export const useWorkoutStore = create<WorkoutState>()(
             isRunning: true,
             duration: timerDuration,
             remaining: timerDuration,
+            startedAt: new Date().toISOString(),
             exerciseId: exerciseId ?? null,
           },
         });
@@ -397,6 +401,7 @@ export const useWorkoutStore = create<WorkoutState>()(
             isRunning: false,
             duration: 90,
             remaining: 0,
+            startedAt: null,
             exerciseId: null,
           },
         });
@@ -404,9 +409,13 @@ export const useWorkoutStore = create<WorkoutState>()(
 
       tickRestTimer: () => {
         const { restTimer } = get();
-        if (!restTimer.isRunning) return;
+        if (!restTimer.isRunning || !restTimer.startedAt) return;
 
-        const remaining = restTimer.remaining - 1;
+        // Compute remaining from wall-clock time so the timer stays accurate
+        // across phone sleep, tab backgrounding, and app switches.
+        const elapsed = Math.floor((Date.now() - new Date(restTimer.startedAt).getTime()) / 1000);
+        const remaining = Math.max(restTimer.duration - elapsed, 0);
+
         if (remaining <= 0) {
           set({
             restTimer: {
@@ -493,6 +502,7 @@ export const useWorkoutStore = create<WorkoutState>()(
       name: 'workout-storage',
       partialize: (state) => ({
         activeWorkout: state.activeWorkout,
+        restTimer: state.restTimer,
       }),
     }
   )

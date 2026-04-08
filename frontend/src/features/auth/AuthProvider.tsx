@@ -36,10 +36,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const clearUserData = () => {
+  const clearUserData = ({ preserveDrafts = false } = {}) => {
     useAnalysisStore.getState().reset();
     useCompareStore.getState().reset();
-    useSplitCreateStore.getState().reset();
+    if (!preserveDrafts) {
+      useSplitCreateStore.getState().reset();
+    }
     queryClient.clear();
   };
 
@@ -68,27 +70,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Re-validate session when tab regains focus (prevents stale auth after
-  // long background periods where the cookie may have expired)
+  // long background periods where the cookie may have expired).
+  // On mobile, the network may not be ready immediately after resume, so
+  // we delay the check and only log out on definitive 401s — not network errors.
   useEffect(() => {
     let lastCheck = Date.now();
-    const handleVisibility = async () => {
+    const handleVisibility = () => {
       if (document.visibilityState !== 'visible') return;
-      // Only re-check if hidden for > 10 minutes
       if (Date.now() - lastCheck < 10 * 60 * 1000) return;
       lastCheck = Date.now();
-      try {
-        const user = await authApi.getCurrentUser();
-        setState({ user, isAuthenticated: true, isLoading: false });
-      } catch {
-        setState({ user: null, isAuthenticated: false, isLoading: false });
-      }
+
+      // Small delay lets mobile radios reconnect before we hit the network
+      setTimeout(async () => {
+        try {
+          const user = await authApi.getCurrentUser();
+          setState({ user, isAuthenticated: true, isLoading: false });
+        } catch (err: any) {
+          // Only treat an explicit 401 as "logged out".
+          // Network errors (offline, DNS, timeout) should not kick the user out.
+          if (err?.response?.status === 401) {
+            setState({ user: null, isAuthenticated: false, isLoading: false });
+          }
+        }
+      }, 1500);
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, []);
 
   const login = async (email: string, password: string) => {
-    clearUserData();
+    // Preserve split creation drafts — the user is likely re-authenticating
+    // after a session timeout and shouldn't lose in-progress work.
+    clearUserData({ preserveDrafts: true });
     const response = await authApi.login({ email, password });
     setState({ user: response.user, isAuthenticated: true, isLoading: false });
     navigate('/dashboard');

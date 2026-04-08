@@ -33,6 +33,7 @@ interface RestTimerState {
   isRunning: boolean;
   duration: number;
   remaining: number;
+  startedAt: string | null;
   exerciseId: string | null;
 }
 
@@ -126,7 +127,7 @@ export const useWorkoutStore = create<WorkoutState>()(
       selectedWorkoutDate: null,
       currentExerciseIndex: 0,
       exerciseNotesByKey: {},
-      restTimer: { isRunning: false, duration: getRestDuration(), remaining: 0, exerciseId: null },
+      restTimer: { isRunning: false, duration: getRestDuration(), remaining: 0, startedAt: null, exerciseId: null },
 
       setCurrentExerciseIndex: (index) => {
         set({ currentExerciseIndex: index });
@@ -191,7 +192,7 @@ export const useWorkoutStore = create<WorkoutState>()(
         set({
           activeWorkout: null,
           currentExerciseIndex: 0,
-          restTimer: { isRunning: false, duration: getRestDuration(), remaining: 0, exerciseId: null },
+          restTimer: { isRunning: false, duration: getRestDuration(), remaining: 0, startedAt: null, exerciseId: null },
         });
       },
 
@@ -364,17 +365,20 @@ export const useWorkoutStore = create<WorkoutState>()(
 
       startRestTimer: (duration, exerciseId) => {
         const d = duration ?? getRestDuration();
-        set({ restTimer: { isRunning: true, duration: d, remaining: d, exerciseId: exerciseId ?? null } });
+        set({ restTimer: { isRunning: true, duration: d, remaining: d, startedAt: new Date().toISOString(), exerciseId: exerciseId ?? null } });
       },
 
       stopRestTimer: () => {
-        set({ restTimer: { isRunning: false, duration: getRestDuration(), remaining: 0, exerciseId: null } });
+        set({ restTimer: { isRunning: false, duration: getRestDuration(), remaining: 0, startedAt: null, exerciseId: null } });
       },
 
       tickRestTimer: () => {
         const { restTimer } = get();
-        if (!restTimer.isRunning) return;
-        const remaining = restTimer.remaining - 1;
+        if (!restTimer.isRunning || !restTimer.startedAt) return;
+        // Compute remaining from wall-clock time so the timer stays accurate
+        // across phone sleep, tab backgrounding, and app switches.
+        const elapsed = Math.floor((Date.now() - new Date(restTimer.startedAt).getTime()) / 1000);
+        const remaining = Math.max(restTimer.duration - elapsed, 0);
         if (remaining <= 0) {
           set({ restTimer: { ...restTimer, isRunning: false, remaining: 0 } });
         } else {
@@ -451,6 +455,7 @@ export const useWorkoutStore = create<WorkoutState>()(
         selectedWorkoutDate: state.selectedWorkoutDate,
         currentExerciseIndex: state.currentExerciseIndex,
         exerciseNotesByKey: state.exerciseNotesByKey,
+        restTimer: state.restTimer,
       }),
     },
   ),
