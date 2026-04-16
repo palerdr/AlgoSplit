@@ -54,17 +54,19 @@ function buildSideNote(side: 'L' | 'R', notes: string): string {
 
 function toWorkoutCompletionIso(workoutDate?: string): string | undefined {
   if (!workoutDate) return undefined;
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(workoutDate);
-  if (!match) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(workoutDate)) return undefined;
 
-  const year = Number(match[1]);
-  const month = Number(match[2]) - 1;
-  const day = Number(match[3]);
-  const date = new Date(year, month, day);
-
+  // The backend and calendar both derive a workout's date from the first 10
+  // chars of completed_at, so we serialize so that slice always equals the
+  // user's chosen local date. Building a local Date and calling toISOString()
+  // would shift the date across the UTC boundary (e.g. April 15 20:00 in
+  // UTC-5 → "2026-04-16T01:00:00Z" → wrong day on timeline + stimulus).
   const now = new Date();
-  date.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
-  return date.toISOString();
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  const ss = String(now.getSeconds()).padStart(2, '0');
+  const ms = String(now.getMilliseconds()).padStart(3, '0');
+  return `${workoutDate}T${hh}:${mm}:${ss}.${ms}Z`;
 }
 
 function buildExerciseNotesKey(
