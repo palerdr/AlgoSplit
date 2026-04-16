@@ -7,6 +7,39 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 
 import { useWorkoutStore } from '../src/stores/workoutStore';
 
+describe('workoutStore completedAt date parity', () => {
+  afterEach(() => {
+    useWorkoutStore.getState().cancelWorkout();
+  });
+
+  it('preserves the selected local date in completedAt regardless of timezone', () => {
+    const store = useWorkoutStore.getState();
+    store.setSelectedWorkoutDate('2026-04-15');
+    store.startWorkoutFromSession('Push', [
+      { name: 'Bench Press', sets: 1, unilateral: false },
+    ]);
+    const exerciseId = useWorkoutStore.getState().activeWorkout?.exercises[0]?.id;
+    useWorkoutStore.getState().updateSet(exerciseId!, 0, { reps: 5, weight: 100 });
+
+    const { completedAt } = useWorkoutStore.getState().getWorkoutData()!;
+
+    // Backend slices the first 10 chars to populate /api/workouts/dates,
+    // which drives the calendar dot. Must equal the user's chosen date.
+    expect(completedAt?.slice(0, 10)).toBe('2026-04-15');
+    // Full string must still be a parseable ISO-8601 timestamp.
+    expect(completedAt).toMatch(/^2026-04-15T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+
+  it('returns undefined completedAt when no workout date was selected', () => {
+    const store = useWorkoutStore.getState();
+    store.setSelectedWorkoutDate(null);
+    store.startWorkoutFromSession('Push', [
+      { name: 'Bench Press', sets: 1, unilateral: false },
+    ]);
+    expect(useWorkoutStore.getState().getWorkoutData()?.completedAt).toBeUndefined();
+  });
+});
+
 describe('workoutStore unilateral serialization', () => {
   afterEach(() => {
     useWorkoutStore.getState().cancelWorkout();
