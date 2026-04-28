@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Linking } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -6,6 +6,10 @@ import { Button, Input } from '../../src/components/ui';
 import { colors, typography } from '../../src/theme';
 import { useAuth } from '../../src/hooks/useAuth';
 import { getErrorMessage } from '../../src/api/client';
+
+// TODO: Replace with live URLs before App Store submission.
+const PRIVACY_URL = 'https://algosplit.com/privacy';
+const TERMS_URL = 'https://algosplit.com/terms';
 
 export default function SignupScreen() {
   const router = useRouter();
@@ -21,8 +25,8 @@ export default function SignupScreen() {
       setError('Email and password are required');
       return;
     }
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters');
       return;
     }
     setError('');
@@ -58,13 +62,24 @@ export default function SignupScreen() {
         />
         <Input
           label="Password"
-          placeholder="Password (min 6 characters)"
+          placeholder="Password (min 8 characters)"
           value={password}
           onChangeText={setPassword}
           secureTextEntry
           containerStyle={styles.inputGap}
         />
         <Button title="Sign Up" onPress={handleSignup} loading={loading} style={styles.button} />
+        <Text style={styles.legal}>
+          By signing up, you agree to our{' '}
+          <Text style={styles.legalLink} onPress={() => Linking.openURL(PRIVACY_URL)}>
+            Privacy Policy
+          </Text>
+          {' '}and{' '}
+          <Text style={styles.legalLink} onPress={() => Linking.openURL(TERMS_URL)}>
+            Terms of Service
+          </Text>
+          .
+        </Text>
         <Button
           title="Already have an account? Log in"
           variant="ghost"
@@ -108,5 +123,17 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     marginBottom: 12,
+  },
+  legal: {
+    color: colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 8,
+  },
+  legalLink: {
+    color: colors.green,
+    textDecorationLine: 'underline',
   },
 });

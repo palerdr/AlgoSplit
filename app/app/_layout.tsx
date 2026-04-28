@@ -5,8 +5,23 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet, Animated, Easing, Dimensions, AppState, Platform } from 'react-native';
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import * as Linking from 'expo-linking';
 import { AuthProvider } from '../src/hooks/useAuth';
 import { registerTransitionHandler } from '../src/utils/workoutTransition';
+
+function extractToken(url: string): string | undefined {
+  const hashIdx = url.indexOf('#');
+  const search = hashIdx >= 0 ? url.slice(hashIdx + 1) : '';
+  const params = new URLSearchParams(search);
+  const fromHash = params.get('access_token');
+  if (fromHash) return fromHash;
+  const qIdx = url.indexOf('?');
+  if (qIdx >= 0) {
+    const qp = new URLSearchParams(url.slice(qIdx + 1));
+    return qp.get('token') ?? qp.get('access_token') ?? undefined;
+  }
+  return undefined;
+}
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const queryClient = new QueryClient({
@@ -72,6 +87,25 @@ export default function RootLayout() {
   useEffect(() => {
     registerTransitionHandler(handleTransition);
   }, [handleTransition]);
+
+  // Deep-link handler for password-reset URLs (e.g. algosplit://reset-password
+  // #access_token=XYZ&type=recovery from Supabase recovery emails, or a query
+  // string variant ?token=XYZ).
+  useEffect(() => {
+    const handleUrl = (url: string | null) => {
+      if (!url || !url.includes('reset-password')) return;
+      const token = extractToken(url);
+      router.push({
+        pathname: '/(auth)/reset-password',
+        params: token ? { token } : {},
+      });
+    };
+
+    Linking.getInitialURL().then((url) => handleUrl(url)).catch(() => {});
+
+    const subscription = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    return () => subscription.remove();
+  }, [router]);
 
   // Reconcile expo-router nav state when the app resumes from background or
   // a browser tab regains focus.  If a workout modal is stranded (activeWorkout
