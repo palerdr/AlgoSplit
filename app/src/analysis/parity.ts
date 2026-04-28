@@ -283,21 +283,23 @@ export function checkParity(response: AnalysisResponse): ParityResult {
  * @param response - The full AnalysisResponse from the server
  */
 export function validateParity(response: AnalysisResponse): void {
-  const result = checkParity(response);
+  if (__DEV__) {
+    const result = checkParity(response);
 
-  if (result.passed) {
-    console.log(
-      `[Parity] PASS - All ${result.transformsChecked.length} transforms match server output`,
-    );
-    return;
-  }
+    if (result.passed) {
+      console.log(
+        `[Parity] PASS - All ${result.transformsChecked.length} transforms match server output`,
+      );
+      return;
+    }
 
-  console.warn(
-    `[Parity] FAIL - ${result.mismatches.length} mismatch(es) in transforms: ${result.transformsChecked.join(', ')}`,
-  );
-  for (const m of result.mismatches) {
     console.warn(
-      `  [${m.transform}] ${m.field}: server=${JSON.stringify(m.serverValue)} client=${JSON.stringify(m.clientValue)}${m.detail ? ` (${m.detail})` : ''}`,
+      `[Parity] FAIL - ${result.mismatches.length} mismatch(es) in transforms: ${result.transformsChecked.join(', ')}`,
     );
+    for (const m of result.mismatches) {
+      console.warn(
+        `  [${m.transform}] ${m.field}: server=${JSON.stringify(m.serverValue)} client=${JSON.stringify(m.clientValue)}${m.detail ? ` (${m.detail})` : ''}`,
+      );
+    }
   }
 }

@@ -378,7 +378,9 @@ function InteractiveBody({
           segmented: true,
         });
       } catch (err) {
-        console.warn('InteractiveBody GL error, falling back:', err);
+        if (__DEV__) {
+          console.warn('InteractiveBody GL error, falling back:', err);
+        }
         setIsInitializing(false);
         setGlError(true);
         finishInitSpan({ failed: true });
