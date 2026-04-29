@@ -12,7 +12,7 @@ import urllib.error
 
 
 def main() -> int:
-    url = os.getenv("KEEPALIVE_URL", "http://localhost:8000/keepalive")
+    url = os.getenv("KEEPALIVE_URL", "https://algosplit.onrender.com/keepalive")
     try:
         with urllib.request.urlopen(url, timeout=10) as resp:
             print(f"keepalive: {resp.status} {url}")

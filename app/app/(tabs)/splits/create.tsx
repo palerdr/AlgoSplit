@@ -122,8 +122,8 @@ export default function CreateSplitScreen() {
   const handleWebSessionMove = useCallback((targetId: string) => {
     if (!draggingSessionId || draggingSessionId === targetId) return;
 
-    setSessions((previous) => reorderSessionsWithStableDays(previous, draggingSessionId, targetId));
-  }, [draggingSessionId]);
+    setSessions(reorderSessionsWithStableDays(sessions, draggingSessionId, targetId));
+  }, [draggingSessionId, sessions, setSessions]);
 
   // Refs keep closures up-to-date without re-running the drag effect mid-drag
   const sessionMoveRef = useRef(handleWebSessionMove);

@@ -15,7 +15,8 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.algosplit.app"
+      "bundleIdentifier": "com.algosplit.app",
+      "buildNumber": "1"
     },
     "android": {
       "adaptiveIcon": {
@@ -30,9 +31,9 @@
       "bundler": "metro"
     },
     "extra": {
-      "apiUrl": "http://localhost:8000",
+      "apiUrl": "https://algosplit.onrender.com",
       "eas": {
-        "projectId": "algosplit"
+        "projectId": "YOUR_EAS_PROJECT_ID_RUN_eas_init"
       }
     },
     "plugins": [

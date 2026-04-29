@@ -1,4 +1,4 @@
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +16,10 @@ export default function SettingsScreen() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  // Case-insensitive: autoCapitalize="characters" is honored on iOS but not
+  // reliably on Android, so accept "delete" / "Delete" / etc.
+  const canDelete = deleteConfirmText.trim().toUpperCase() === 'DELETE';
   const weightUnit = useSettingsStore((s) => s.weightUnit);
   const stimulusDuration = useSettingsStore((s) => s.stimulusDuration);
   const maintenanceVolume = useSettingsStore((s) => s.maintenanceVolume);
@@ -47,8 +51,10 @@ export default function SettingsScreen() {
   };
 
   const confirmDeleteAccount = async () => {
+    if (!canDelete) return;
     try {
       setShowDeleteConfirm(false);
+      setDeleteConfirmText('');
       setIsDeleting(true);
       await authApi.deleteAccount();
       await tokenStore.clearToken();
@@ -58,6 +64,16 @@ export default function SettingsScreen() {
     } finally {
       setIsDeleting(false);
     }
+  };
+
+  const openDeleteConfirm = () => {
+    setDeleteConfirmText('');
+    setShowDeleteConfirm(true);
+  };
+
+  const closeDeleteConfirm = () => {
+    setDeleteConfirmText('');
+    setShowDeleteConfirm(false);
   };
 
   return (
@@ -246,7 +262,7 @@ export default function SettingsScreen() {
 
         <TouchableOpacity
           style={[styles.deleteButton, isDeleting && styles.logoutButtonDisabled]}
-          onPress={() => setShowDeleteConfirm(true)}
+          onPress={openDeleteConfirm}
           disabled={isDeleting}
         >
           {isDeleting ? (
@@ -286,22 +302,35 @@ export default function SettingsScreen() {
 
       <Modal
         visible={showDeleteConfirm}
-        onClose={() => setShowDeleteConfirm(false)}
+        onClose={closeDeleteConfirm}
         title="Delete Account"
       >
         <Text style={styles.confirmBody}>
           This will permanently delete your account and all your data (splits, workouts, exercises). This cannot be undone.
         </Text>
+        <Text style={styles.confirmInstruction}>
+          Type DELETE to confirm. This cannot be undone.
+        </Text>
+        <TextInput
+          style={styles.confirmInput}
+          value={deleteConfirmText}
+          onChangeText={setDeleteConfirmText}
+          placeholder="DELETE"
+          placeholderTextColor={colors.textMuted}
+          autoCapitalize="characters"
+          autoCorrect={false}
+        />
         <View style={styles.confirmActions}>
           <TouchableOpacity
             style={styles.confirmSecondary}
-            onPress={() => setShowDeleteConfirm(false)}
+            onPress={closeDeleteConfirm}
           >
             <Text style={styles.confirmSecondaryText}>Cancel</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.confirmPrimary}
-            onPress={confirmDeleteAccount}
+            style={[styles.confirmPrimary, !canDelete && styles.confirmPrimaryDisabled]}
+            onPress={canDelete ? confirmDeleteAccount : undefined}
+            disabled={!canDelete}
           >
             <Text style={styles.confirmPrimaryText}>Delete Account</Text>
           </TouchableOpacity>
@@ -541,9 +570,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  confirmPrimaryDisabled: {
+    opacity: 0.4,
+  },
   confirmPrimaryText: {
     color: colors.text,
     fontSize: 14,
     fontWeight: '700',
+  },
+  confirmInstruction: {
+    color: colors.textMuted,
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  confirmInput: {
+    minHeight: 44,
+    borderRadius: borders.radius.lg,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceElevated,
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+    paddingHorizontal: 12,
+    marginBottom: spacing.lg,
   },
 });

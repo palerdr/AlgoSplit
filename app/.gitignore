@@ -39,3 +39,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Stale build/dev artifacts
+*.blend
+*.blend1
+*-dev.log
