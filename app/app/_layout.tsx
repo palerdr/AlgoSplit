@@ -92,13 +92,22 @@ export default function RootLayout() {
   // #access_token=XYZ&type=recovery from Supabase recovery emails, or a query
   // string variant ?token=XYZ).
   useEffect(() => {
+    // On cold-start, iOS/Android can fire both getInitialURL and the 'url'
+    // event for the same launching URL. Dedup within a 1s window.
+    let lastHandled: { url: string; ts: number } | null = null;
     const handleUrl = (url: string | null) => {
       if (!url || !url.includes('reset-password')) return;
+      const now = Date.now();
+      if (lastHandled && lastHandled.url === url && now - lastHandled.ts < 1000) return;
+      lastHandled = { url, ts: now };
       const token = extractToken(url);
-      router.push({
-        pathname: '/(auth)/reset-password',
-        params: token ? { token } : {},
-      });
+      // Defer one tick so the Stack navigator is mounted before pushing on cold-start.
+      setTimeout(() => {
+        router.push({
+          pathname: '/(auth)/reset-password',
+          params: token ? { token } : {},
+        });
+      }, 0);
     };
 
     Linking.getInitialURL().then((url) => handleUrl(url)).catch(() => {});

@@ -17,7 +17,9 @@ export default function SettingsScreen() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
-  const canDelete = deleteConfirmText === 'DELETE';
+  // Case-insensitive: autoCapitalize="characters" is honored on iOS but not
+  // reliably on Android, so accept "delete" / "Delete" / etc.
+  const canDelete = deleteConfirmText.trim().toUpperCase() === 'DELETE';
   const weightUnit = useSettingsStore((s) => s.weightUnit);
   const stimulusDuration = useSettingsStore((s) => s.stimulusDuration);
   const maintenanceVolume = useSettingsStore((s) => s.maintenanceVolume);

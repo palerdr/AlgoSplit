@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Linking } from 'react-native';
+import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, Linking, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,6 +19,12 @@ export default function SignupScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const openLink = (url: string) => {
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Could not open link', `Please visit ${url} in your browser.`);
+    });
+  };
 
   const handleSignup = async () => {
     if (!email || !password) {
@@ -71,11 +77,11 @@ export default function SignupScreen() {
         <Button title="Sign Up" onPress={handleSignup} loading={loading} style={styles.button} />
         <Text style={styles.legal}>
           By signing up, you agree to our{' '}
-          <Text style={styles.legalLink} onPress={() => Linking.openURL(PRIVACY_URL)}>
+          <Text style={styles.legalLink} onPress={() => openLink(PRIVACY_URL)}>
             Privacy Policy
           </Text>
           {' '}and{' '}
-          <Text style={styles.legalLink} onPress={() => Linking.openURL(TERMS_URL)}>
+          <Text style={styles.legalLink} onPress={() => openLink(TERMS_URL)}>
             Terms of Service
           </Text>
           .
