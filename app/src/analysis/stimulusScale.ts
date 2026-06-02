@@ -4,41 +4,49 @@
  *
  * WHY THIS FILE EXISTS
  * --------------------
- * The body map, the 2D muscle map, the performance dials, and the region
- * bar chart all need to translate `net_stimulus` into something a human can
- * read. Historically each did its own thing with its own magic numbers, and
- * those numbers were calibrated for an imagined `net_stimulus` range of ~0–4.
- *
- * The engine does NOT produce that range. Measured across the four baseline
- * split fixtures (backend/tests/fixtures/analysis_engine_main_baseline.json,
- * 93 trained-muscle observations):
+ * The body map, the 2D muscle map, the performance dials, and the region bar
+ * chart all translate `net_stimulus` into something a human can read.
+ * Previously each component did its own thing with its own constants, all
+ * calibrated for an imagined `net_stimulus` range of 0–4. The engine does
+ * NOT produce that range. Measured across the four baseline split fixtures
+ * (backend/tests/fixtures/analysis_engine_main_baseline.json, 93 trained-
+ * muscle observations):
  *
  *     median trained muscle   net ≈ 0.26
+ *     p75                      net ≈ 0.89
  *     p90                      net ≈ 1.74
  *     p95                      net ≈ 2.13
  *     max ever (best muscle)   net ≈ 2.74
  *
- * The old thresholds only turned "green" at net ≥ 2.5 and "optimal" at
- * net ≥ 4.0 — values the engine essentially never outputs — so the body map
- * was perpetually cold no matter how good the split was. These thresholds are
- * re-anchored to the engine's real, physiologically meaningful scale:
+ * The constants below are anchored to documented physiological reference
+ * points, not fixture percentiles (percentile anchors would rot if the
+ * engine's curves change). Cite this file when you change them; do not
+ * tweak values in consumer modules.
  *
- *     net = 0   →  maintenance line (stimulus == atrophy; no growth, no loss)
- *                  See MainClasses.py:509 `net_weekly_stimulus = stimulus - atrophy`
- *                  and apply_atrophy (calibrated to maintenance_volume).
- *     net 0–1   →  modest growth
- *     net 1–2   →  solid, productive growth (this is where a prioritized
- *                  muscle in a good split actually lands)
- *     net 2.3+  →  near the practical weekly ceiling (top ~5% of muscles)
- *
- * Keep this file as the only place these constants live.
+ *     net = 0   →  maintenance line. Defined by the engine as
+ *                  `net_weekly_stimulus = stimulus − atrophy` (MainClasses.py:509),
+ *                  with atrophy calibrated to `maintenance_volume`. net = 0 is
+ *                  the volume that exactly offsets the week's atrophy.
+ *     net 1.3   →  start of the "Growing" band (level 5). Represents a muscle
+ *                  whose net signal is meaningfully above noise and into
+ *                  productive growth territory.
+ *     net 1.8   →  OPTIMAL_NET. Anchor for the Stimulus dial. A muscle hitting
+ *                  this is solidly in the green band; "100" on the dial means
+ *                  every trained muscle is at least here. Reachable for
+ *                  prioritised muscles in a well-designed split (PPL fixture
+ *                  has 5 muscles at or above this).
+ *     net 2.5   →  HEADROOM_CEILING. Just above the empirically observed max
+ *                  (~2.74) — a single muscle saturating it consumes its full
+ *                  weekly recovery budget.
+ *     net 2.3+  →  "Optimal" band (level 7). Top ~3% of muscles in reference
+ *                  splits; achievable but rare.
  */
 
 import { colors } from '../theme/colors';
 
 // ── Band thresholds (upper bound of each level, on net_stimulus) ────────────
-// Level is the index of the first band whose upper bound `net` does not exceed.
-// Level 0 = at or below maintenance (net <= 0).
+// Bands are inclusive on the upper bound (`net <= T[i]` → level i). Level 0
+// covers net <= 0 (at or below maintenance).
 export const STIMULUS_THRESHOLDS = [
   0.0, // <= 0    level 0  maintaining or below
   0.3, // <= 0.3  level 1  minimal
@@ -52,26 +60,38 @@ export const STIMULUS_THRESHOLDS = [
 
 export const MAX_STIMULUS_LEVEL = 7;
 
-/** Net stimulus at/above which a muscle is at 100% of an optimal weekly dose. */
-export const OPTIMAL_NET = 2.3; // == level-7 threshold; keeps dial coupled to map
+/**
+ * Net stimulus at which a muscle's Stimulus-dial contribution saturates at 100%.
+ *
+ * Anchored to the start of the "Growing" band (level 5 upper bound). The dial
+ * reads 100 when every trained muscle is in productive-growth territory or
+ * above. Tuning consequences: in fixture splits a strong split lands in the
+ * 40–70 range, which is honest — those splits are not "perfect."
+ */
+export const OPTIMAL_NET = 1.8;
 
-/** Net stimulus treated as "fully using" a muscle's weekly recovery budget. */
-export const HEADROOM_CEILING = 2.5; // practical ceiling (observed max ≈ 2.74)
-
-/** Extra weight given to a muscle's prime-mover share when scoring the dial. */
-export const FOCUS_PRIME_BONUS = 0.35;
+/**
+ * Net stimulus at which a single muscle is treated as having consumed its
+ * full weekly recovery budget. Set just above the empirically observed max
+ * (~2.74) so a peak muscle reads near-zero headroom for that region.
+ */
+export const HEADROOM_CEILING = 2.5;
 
 /**
  * Map a net weekly stimulus value to a 0–7 heat level.
  *
  * Anchored to the engine's real output (see file header). net <= 0 is the
- * maintenance line; the green range (levels 5–7) corresponds to net ~1.3–2.3+,
- * which is what a well-trained muscle actually reaches.
+ * maintenance line; the green range (levels 5–7) corresponds to net ≥ 1.3,
+ * which is what a well-trained muscle in a strong split actually reaches.
+ *
+ * Defensive against non-finite inputs (NaN/null/undefined → level 0) so a
+ * malformed backend payload renders neutrally instead of crashing the body.
  */
 export function getStimulusLevel(netStimulus: number): number {
-  // Level 0 is reserved for at/below maintenance.
-  if (netStimulus <= STIMULUS_THRESHOLDS[0]) return 0;
-  for (let level = 1; level < STIMULUS_THRESHOLDS.length; level++) {
+  if (!Number.isFinite(netStimulus)) return 0;
+  // STIMULUS_THRESHOLDS[0] = 0 anchors level 0 to "at or below maintenance",
+  // so the loop covers every band — no separate short-circuit needed.
+  for (let level = 0; level < STIMULUS_THRESHOLDS.length; level++) {
     if (netStimulus <= STIMULUS_THRESHOLDS[level]) return level;
   }
   return MAX_STIMULUS_LEVEL;
@@ -82,27 +102,30 @@ export const computeStimulusLevel = getStimulusLevel;
 
 /**
  * How close a muscle is to an optimal weekly dose, as a 0–1 fraction.
- * Drives the Stimulus dial. Continuous (no band-crossing jumps).
+ * Drives the Stimulus dial. Continuous, monotonic, saturates at OPTIMAL_NET.
  */
 export function stimulusAdequacy(netStimulus: number): number {
-  if (netStimulus <= 0) return 0;
+  if (!Number.isFinite(netStimulus) || netStimulus <= 0) return 0;
   return Math.min(1, netStimulus / OPTIMAL_NET);
 }
 
 /**
  * How much of a muscle's weekly recovery budget has been consumed, 0–1.
- * Drives the Headroom dial (headroom = 1 - mean fatigue over trained muscles).
+ * Drives the Headroom dial (headroom = 1 − mean fatigue over all 29 regions).
+ * Untrained muscles return 0 (no fatigue, full headroom for that region).
  */
 export function muscleFatigue(netStimulus: number): number {
-  if (netStimulus <= 0) return 0;
+  if (!Number.isFinite(netStimulus) || netStimulus <= 0) return 0;
   return Math.min(1, netStimulus / HEADROOM_CEILING);
 }
 
 // ── Legend metadata ─────────────────────────────────────────────────────────
-// Collapsed into the bands worth labelling for a compact on-screen legend.
+// Bands worth labelling for the on-screen legend. `level` is the heat level
+// the label refers to and is also used by StimulusLegend to position the label
+// directly under its band in the ramp.
 export interface StimulusBand {
   label: string;
-  /** Representative level used to pull the swatch color. */
+  /** Heat level (0–7) this label refers to. */
   level: number;
   /** Lower bound of net_stimulus for this band (inclusive). */
   minNet: number;
@@ -117,7 +140,10 @@ export const STIMULUS_LEGEND: StimulusBand[] = [
 
 /** Color for a 0–7 heat level, from the canonical theme ramp. */
 export function getStimulusColor(level: number): string {
-  return colors.stimulus[Math.min(Math.max(0, Math.round(level)), MAX_STIMULUS_LEVEL)];
+  const clamped = Number.isFinite(level)
+    ? Math.min(Math.max(0, Math.round(level)), MAX_STIMULUS_LEVEL)
+    : 0;
+  return colors.stimulus[clamped];
 }
 
 /** Color for a raw net_stimulus value (convenience for bar charts). */

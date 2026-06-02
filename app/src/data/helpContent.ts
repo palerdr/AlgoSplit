@@ -5,7 +5,7 @@ export const HELP_CONTENT: Record<string, { title: string; body: string }> = {
   },
   'dashboard.dials': {
     title: 'Performance Dials',
-    body: 'Three gauges, each read directly off the muscles you trained so they line up with the body map:\n\nStimulus — the average of your trained muscles\' growth, as a share of an optimal weekly dose. More green muscles on the map ⇒ higher Stimulus.\n\nProgress — whether you\'re progressing load or effort over time, comparing your two most recent matching workouts.\n\nHeadroom — remaining productive capacity across the muscles you trained. High means there\'s room to add volume; low means those muscles are near their weekly ceiling and want recovery. (Untrained muscles are excluded, so a light week no longer reads as fully rested.)',
+    body: 'Three gauges that summarize different aspects of the same week:\n\nStimulus — the mean dose adequacy across every muscle you trained. 100 means every trained muscle is at or above the "Growing" threshold; a strong split typically reads 40–70 because most splits leave some muscles undercooked. Bright muscles on the body map lift this number, dim trained muscles drag it down.\n\nProgress — whether you\'re progressing load or effort over time, comparing your two most recent matching workouts.\n\nHeadroom — remaining whole-body recovery capacity, averaged across all 29 regions. Untrained regions contribute full headroom (they\'re rested); trained regions consume capacity in proportion to their fatigue. A one-muscle workout reads high because most of your body is still rested. A heavy week with many fried regions reads low.',
   },
   'splits.overview': {
     title: 'Splits',

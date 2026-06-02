@@ -1,10 +1,5 @@
 import type { MuscleStats, AnalysisResponse, WorkoutLogResponse } from '../types/api.types';
-import {
-  getStimulusLevel,
-  stimulusAdequacy,
-  muscleFatigue,
-  FOCUS_PRIME_BONUS,
-} from '../analysis/stimulusScale';
+import { getStimulusLevel, stimulusAdequacy, muscleFatigue } from '../analysis/stimulusScale';
 
 /**
  * Convert muscle stats array to stimulus levels keyed by region_id.
@@ -23,19 +18,18 @@ export function musclesToStimulusLevels(
 /**
  * Compute 0-100 dial values from analysis data.
  *
- * Both dials are anchored to the engine's real net_stimulus scale (see
- * src/analysis/stimulusScale.ts) and read directly off the muscles you
- * trained, so they line up with the body map instead of floating against an
- * unreachable imagined ceiling.
+ * - `stimulus`: mean dose adequacy across every muscle you trained (any
+ *   stimulus > 0, regardless of tier). Saturates at OPTIMAL_NET per muscle, so
+ *   "100" means every trained muscle is at or above productive-growth
+ *   territory. This is the direct numeric summary of the body map: a bright
+ *   muscle on the map always contributes to the dial.
  *
- * - `stimulus`: the focus-weighted average "dose adequacy" of the muscles you
- *   trained as a prime mover — i.e. how close, on average, your targeted
- *   muscles are to an optimal weekly dose (net ≈ OPTIMAL_NET). This is the
- *   numeric summary of the body map: more green muscles ⇒ higher stimulus.
- * - `headroom`: remaining productive capacity across the muscles you trained.
- *   Low headroom means those muscles are near their weekly ceiling (prioritise
- *   recovery); high means there is room to add volume. Untrained muscles are
- *   excluded so a sparse split no longer reads as "fully recovered".
+ * - `headroom`: remaining whole-body weekly recovery capacity, averaged over
+ *   all `total_muscles` regions in the model. Untrained muscles contribute
+ *   zero fatigue (correctly — they have full local headroom), so a one-muscle
+ *   workout reads ~97% headroom (28 of 29 regions are fully rested) rather
+ *   than 0%. Low overall headroom means many regions are near their weekly
+ *   ceiling; high means there is room to add volume.
  */
 export function computeDashboardDials(analysis: AnalysisResponse): {
   stimulus: number;
@@ -43,35 +37,34 @@ export function computeDashboardDials(analysis: AnalysisResponse): {
 } {
   const trainedMuscles = analysis.muscles.filter((muscle) => muscle.stimulus > 0);
 
-  // Targeted = muscles you trained as a prime mover. Falls back to all trained
-  // muscles so the dial is never empty when prime-mover data is sparse.
-  const primeMovers = trainedMuscles.filter((muscle) => muscle.prime_sets > 0);
-  const targetedMuscles = primeMovers.length ? primeMovers : trainedMuscles;
-
-  const focusWeight = (muscle: MuscleStats): number => {
-    const contributionSets =
-      muscle.prime_sets + muscle.secondary_sets + muscle.tertiary_sets;
-    const primeShare = contributionSets > 0 ? muscle.prime_sets / contributionSets : 0;
-    return 1 + primeShare * FOCUS_PRIME_BONUS;
-  };
-
-  // Stimulus: focus-weighted mean adequacy (0–1) over targeted muscles.
-  let weightedAdequacy = 0;
-  let weightSum = 0;
-  for (const muscle of targetedMuscles) {
-    const w = focusWeight(muscle);
-    weightedAdequacy += stimulusAdequacy(muscle.net_stimulus) * w;
-    weightSum += w;
-  }
-  const stimulus = weightSum > 0 ? Math.round((weightedAdequacy / weightSum) * 100) : 0;
-
-  // Headroom: 1 - mean fatigue over the muscles actually trained. No trained
-  // muscles ⇒ fully rested (100).
-  const meanFatigue = trainedMuscles.length
-    ? trainedMuscles.reduce((sum, muscle) => sum + muscleFatigue(muscle.net_stimulus), 0) /
-      trainedMuscles.length
+  // Stimulus: arithmetic mean adequacy over trained muscles. No tier filter,
+  // no focus weighting — net_stimulus already encodes tier contribution, so
+  // weighting on top would be double-counting and would silently exclude
+  // muscles that show as bright on the body map.
+  const adequacySum = trainedMuscles.reduce(
+    (sum, muscle) => sum + stimulusAdequacy(muscle.net_stimulus),
+    0,
+  );
+  const stimulus = trainedMuscles.length
+    ? Math.round((adequacySum / trainedMuscles.length) * 100)
     : 0;
-  const headroom = Math.round(Math.min(100, Math.max(0, 1 - meanFatigue) * 100));
+
+  // Headroom: 1 − mean fatigue across the whole modelled body. Denominator is
+  // `total_muscles` (the model's region count, normally 29), not the trained
+  // count — untrained regions legitimately contribute zero fatigue, so they
+  // belong in the denominator. Falling back to muscles.length keeps the dial
+  // sane if `summary.total_muscles` is missing.
+  const denominator =
+    analysis.summary?.total_muscles && analysis.summary.total_muscles > 0
+      ? analysis.summary.total_muscles
+      : analysis.muscles.length;
+  const fatigueSum = analysis.muscles.reduce(
+    (sum, muscle) => sum + muscleFatigue(muscle.net_stimulus),
+    0,
+  );
+  const headroom = denominator > 0
+    ? Math.round(Math.min(100, Math.max(0, 1 - fatigueSum / denominator) * 100))
+    : 100;
 
   return { stimulus, headroom };
 }

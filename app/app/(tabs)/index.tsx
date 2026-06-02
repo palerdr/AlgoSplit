@@ -298,7 +298,7 @@ export default function DashboardScreen() {
           <View style={styles.emptyStateCard}>
             <Text style={styles.emptyStateTitle}>No stimulus snapshot for this window</Text>
             <Text style={styles.emptyStateBody}>
-              Pick a day with a workout dot, or log a session to populate the 7-day recovery snapshot.
+              Pick a day with a workout dot, or log a session to populate the 7-day stimulus snapshot.
             </Text>
           </View>
         )}

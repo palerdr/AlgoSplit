@@ -29,11 +29,17 @@ export default function StimulusLegend({ width }: Props) {
         ))}
       </View>
       <View style={styles.labels}>
-        {STIMULUS_LEGEND.map((band) => (
-          <Text key={band.label} style={styles.label}>
-            {band.label}
-          </Text>
-        ))}
+        {colors.stimulus.map((_, level) => {
+          // One label cell per heat level so each label sits directly under
+          // the band it describes. Cells without a labelled band render empty
+          // spacers, keeping the ramp and label row column-aligned.
+          const band = STIMULUS_LEGEND.find((b) => b.level === level);
+          return (
+            <View key={level} style={styles.labelCell}>
+              {band ? <Text style={styles.label}>{band.label}</Text> : null}
+            </View>
+          );
+        })}
       </View>
     </View>
   );
@@ -65,7 +71,10 @@ const styles = StyleSheet.create({
   },
   labels: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+  },
+  labelCell: {
+    flex: 1,
+    alignItems: 'center',
   },
   label: {
     color: colors.textMuted,
