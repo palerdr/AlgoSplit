@@ -1,5 +1,10 @@
 import type { MuscleStats, AnalysisResponse, WorkoutLogResponse } from '../types/api.types';
-import { getStimulusLevel } from '../lib/utils';
+import {
+  getStimulusLevel,
+  stimulusAdequacy,
+  muscleFatigue,
+  FOCUS_PRIME_BONUS,
+} from '../analysis/stimulusScale';
 
 /**
  * Convert muscle stats array to stimulus levels keyed by region_id.
@@ -17,49 +22,58 @@ export function musclesToStimulusLevels(
 
 /**
  * Compute 0-100 dial values from analysis data.
+ *
+ * Both dials are anchored to the engine's real net_stimulus scale (see
+ * src/analysis/stimulusScale.ts) and read directly off the muscles you
+ * trained, so they line up with the body map instead of floating against an
+ * unreachable imagined ceiling.
+ *
+ * - `stimulus`: the focus-weighted average "dose adequacy" of the muscles you
+ *   trained as a prime mover — i.e. how close, on average, your targeted
+ *   muscles are to an optimal weekly dose (net ≈ OPTIMAL_NET). This is the
+ *   numeric summary of the body map: more green muscles ⇒ higher stimulus.
+ * - `headroom`: remaining productive capacity across the muscles you trained.
+ *   Low headroom means those muscles are near their weekly ceiling (prioritise
+ *   recovery); high means there is room to add volume. Untrained muscles are
+ *   excluded so a sparse split no longer reads as "fully recovered".
  */
 export function computeDashboardDials(analysis: AnalysisResponse): {
   stimulus: number;
-  recovery: number;
+  headroom: number;
 } {
-  const { muscles_trained, total_muscles } = analysis.summary;
-  const meaningfullyTrainedMuscles = analysis.muscles.filter((muscle) => muscle.net_stimulus >= 1);
-  const weightedStimulusScore = meaningfullyTrainedMuscles.length
-    ? meaningfullyTrainedMuscles.reduce((sum, muscle) => {
-        const totalContributionSets = muscle.prime_sets + muscle.secondary_sets + muscle.tertiary_sets;
-        const primeShare = totalContributionSets > 0 ? muscle.prime_sets / totalContributionSets : 0;
-        const focusWeight = 1 + primeShare * 0.35;
-        return sum + muscle.net_stimulus * focusWeight;
-      }, 0) /
-      meaningfullyTrainedMuscles.reduce((sum, muscle) => {
-        const totalContributionSets = muscle.prime_sets + muscle.secondary_sets + muscle.tertiary_sets;
-        const primeShare = totalContributionSets > 0 ? muscle.prime_sets / totalContributionSets : 0;
-        return sum + (1 + primeShare * 0.35);
-      }, 0)
+  const trainedMuscles = analysis.muscles.filter((muscle) => muscle.stimulus > 0);
+
+  // Targeted = muscles you trained as a prime mover. Falls back to all trained
+  // muscles so the dial is never empty when prime-mover data is sparse.
+  const primeMovers = trainedMuscles.filter((muscle) => muscle.prime_sets > 0);
+  const targetedMuscles = primeMovers.length ? primeMovers : trainedMuscles;
+
+  const focusWeight = (muscle: MuscleStats): number => {
+    const contributionSets =
+      muscle.prime_sets + muscle.secondary_sets + muscle.tertiary_sets;
+    const primeShare = contributionSets > 0 ? muscle.prime_sets / contributionSets : 0;
+    return 1 + primeShare * FOCUS_PRIME_BONUS;
+  };
+
+  // Stimulus: focus-weighted mean adequacy (0–1) over targeted muscles.
+  let weightedAdequacy = 0;
+  let weightSum = 0;
+  for (const muscle of targetedMuscles) {
+    const w = focusWeight(muscle);
+    weightedAdequacy += stimulusAdequacy(muscle.net_stimulus) * w;
+    weightSum += w;
+  }
+  const stimulus = weightSum > 0 ? Math.round((weightedAdequacy / weightSum) * 100) : 0;
+
+  // Headroom: 1 - mean fatigue over the muscles actually trained. No trained
+  // muscles ⇒ fully rested (100).
+  const meanFatigue = trainedMuscles.length
+    ? trainedMuscles.reduce((sum, muscle) => sum + muscleFatigue(muscle.net_stimulus), 0) /
+      trainedMuscles.length
     : 0;
-  const coverage = total_muscles > 0 ? muscles_trained / total_muscles : 0;
-  const recoveryReserve = analysis.muscles.length
-    ? analysis.muscles.reduce((sum, muscle) => {
-        const unresolved = Math.min(1, Math.max(0, muscle.net_stimulus) / 4);
-        return sum + (1 - unresolved);
-      }, 0) / analysis.muscles.length
-    : 1;
-  const meaningfulCoverage = meaningfullyTrainedMuscles.length;
-  const coverageScore = Math.min(1, meaningfulCoverage / 20);
-  const stimulusQuality = Math.min(1, weightedStimulusScore / 3.2);
+  const headroom = Math.round(Math.min(100, Math.max(0, 1 - meanFatigue) * 100));
 
-  // Stimulus: average quality of meaningfully trained regions, blended with
-  // coverage so well-rounded splits score higher but specialization is not
-  // punished severely. The /3.2 target means a strong split with ~3.0 avg
-  // weighted net stimulus scores near 100.
-  const stimulus = Math.round(
-    Math.min(100, (stimulusQuality * 0.75 + coverageScore * 0.25) * 100),
-  );
-
-  // Recovery: remaining headroom from current net stimulus across the whole body.
-  const recovery = Math.round(Math.min(100, recoveryReserve * 100));
-
-  return { stimulus, recovery };
+  return { stimulus, headroom };
 }
 
 /**

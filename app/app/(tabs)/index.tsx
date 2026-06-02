@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { View, ScrollView, StyleSheet, useWindowDimensions, Text, InteractionManager } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useIsFocused } from '@react-navigation/native';
-import { DateSelector, DialGauge, InsightCard } from '../../src/components/shared';
+import { DateSelector, DialGauge, InsightCard, StimulusLegend } from '../../src/components/shared';
 import InteractiveBody from '../../src/components/3d/InteractiveBody';
 import { Modal, Spinner, InfoButton } from '../../src/components/ui';
 import { HELP_CONTENT } from '../../src/data/helpContent';
@@ -121,7 +121,7 @@ export default function DashboardScreen() {
   const { data: recentPairData, isLoading: isProgressLoading } = useRecentWorkoutPair();
 
   const dials = useMemo(
-    () => (analysis ? computeDashboardDials(analysis) : { stimulus: 0, recovery: 0 }),
+    () => (analysis ? computeDashboardDials(analysis) : { stimulus: 0, headroom: 100 }),
     [analysis],
   );
 
@@ -181,22 +181,25 @@ export default function DashboardScreen() {
         ) : hasAnalysisData ? (
           isDesktop ? (
             <View style={[styles.mainRow, styles.mainRowDesktop]}>
-              <View style={[styles.bodyContainer, { width: bodyWidth, height: bodyHeight }]}>
-                <View style={styles.helpOverlay}>
-                  <InfoButton title={HELP_CONTENT['dashboard.bodyMap'].title} body={HELP_CONTENT['dashboard.bodyMap'].body} />
+              <View style={styles.bodyColumn}>
+                <View style={[styles.bodyContainer, { width: bodyWidth, height: bodyHeight }]}>
+                  <View style={styles.helpOverlay}>
+                    <InfoButton title={HELP_CONTENT['dashboard.bodyMap'].title} body={HELP_CONTENT['dashboard.bodyMap'].body} />
+                  </View>
+                  {body3dReady ? (
+                    <InteractiveBody
+                      width={bodyWidth}
+                      height={bodyHeight}
+                      stimulusLevels={stimulusLevels}
+                      onRegionPress={setSelectedRegionId}
+                      onDragStart={handleDragStart}
+                      onDragEnd={handleDragEnd}
+                    />
+                  ) : (
+                    bodyPlaceholder
+                  )}
                 </View>
-                {body3dReady ? (
-                  <InteractiveBody
-                    width={bodyWidth}
-                    height={bodyHeight}
-                    stimulusLevels={stimulusLevels}
-                    onRegionPress={setSelectedRegionId}
-                    onDragStart={handleDragStart}
-                    onDragEnd={handleDragEnd}
-                  />
-                ) : (
-                  bodyPlaceholder
-                )}
+                <StimulusLegend width={bodyWidth} />
               </View>
               <View style={styles.dialsDesktop}>
                 <InfoButton title={HELP_CONTENT['dashboard.dials'].title} body={HELP_CONTENT['dashboard.dials'].body} />
@@ -223,8 +226,8 @@ export default function DashboardScreen() {
                     />
                     <View style={styles.dialGap} />
                     <DialGauge
-                      value={dials.recovery}
-                      label="Recovery"
+                      value={dials.headroom}
+                      label="Headroom"
                       size={dialSize}
                       color="#60A5FA"
                       colorEnd="#60A5FA"
@@ -276,8 +279,8 @@ export default function DashboardScreen() {
                       labelInside
                     />
                     <DialGauge
-                      value={dials.recovery}
-                      label="Recovery"
+                      value={dials.headroom}
+                      label="Headroom"
                       size={dialSize}
                       color="#60A5FA"
                       colorEnd="#60A5FA"
@@ -288,6 +291,7 @@ export default function DashboardScreen() {
                 )}
                 <InfoButton title={HELP_CONTENT['dashboard.dials'].title} body={HELP_CONTENT['dashboard.dials'].body} />
               </View>
+              <StimulusLegend width={bodyWidth} />
             </View>
           )
         ) : (
@@ -381,6 +385,10 @@ const styles = StyleSheet.create({
   mainRowDesktop: {
     paddingHorizontal: 24,
     gap: 48,
+  },
+  bodyColumn: {
+    alignItems: 'center',
+    gap: 10,
   },
   bodyContainer: {
     alignItems: 'center',

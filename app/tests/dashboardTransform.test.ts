@@ -63,14 +63,14 @@ describe('musclesToStimulusLevels', () => {
 
   it('maps region_id to heatmap stimulus levels', () => {
     const muscles = [
-      makeMuscle({ region_id: 'sternocostal', net_stimulus: 3.2 }),
-      makeMuscle({ region_id: 'clavicular', net_stimulus: 2.1 }),
-      makeMuscle({ region_id: 'vasti', net_stimulus: 0 }),
+      makeMuscle({ region_id: 'sternocostal', net_stimulus: 3.2 }), // > 2.3 -> optimal
+      makeMuscle({ region_id: 'clavicular', net_stimulus: 2.1 }),   // 1.8–2.3 -> high
+      makeMuscle({ region_id: 'vasti', net_stimulus: 0 }),          // <= 0 -> maintenance
     ];
     const levels = musclesToStimulusLevels(muscles);
     expect(levels).toEqual({
-      sternocostal: 5,
-      clavicular: 4,
+      sternocostal: 7,
+      clavicular: 6,
       vasti: 0,
     });
   });
@@ -79,33 +79,39 @@ describe('musclesToStimulusLevels', () => {
 // --------------- computeDashboardDials ---------------
 
 describe('computeDashboardDials', () => {
-  it('returns zeroed dials for empty analysis', () => {
+  it('returns zeroed stimulus and full headroom for empty analysis', () => {
     const dials = computeDashboardDials(makeAnalysis());
     expect(dials.stimulus).toBe(0);
-    expect(dials.recovery).toBe(100);
+    expect(dials.headroom).toBe(100);
   });
 
-  it('computes stimulus dial from meaningfully trained muscles', () => {
+  it('computes the stimulus dial as focus-weighted dose adequacy of prime movers', () => {
     const analysis = makeAnalysis({
       muscles: [
-        makeMuscle({ region_id: 'sternocostal', net_stimulus: 3.5, prime_sets: 6, secondary_sets: 0, tertiary_sets: 0 }),
-        makeMuscle({ region_id: 'clavicular', net_stimulus: 3.0, prime_sets: 5, secondary_sets: 1, tertiary_sets: 0 }),
+        // adequacy = clamp(2.3 / 2.3) = 1.0, focus = 1 + 1.00 * 0.35 = 1.35
+        makeMuscle({ region_id: 'sternocostal', net_stimulus: 2.3, prime_sets: 6, secondary_sets: 0, tertiary_sets: 0 }),
+        // adequacy = clamp(1.15 / 2.3) = 0.5, focus = 1 + (5/6) * 0.35 ≈ 1.2917
+        makeMuscle({ region_id: 'clavicular', net_stimulus: 1.15, prime_sets: 5, secondary_sets: 1, tertiary_sets: 0 }),
+        // prime_sets = 0 -> excluded from the targeted (prime-mover) set
         makeMuscle({ region_id: 'vasti', net_stimulus: 0.4, prime_sets: 0, secondary_sets: 3, tertiary_sets: 2 }),
       ],
       summary: {
         total_sets: 20,
         muscles_trained: 3,
         total_muscles: 29,
-        avg_net_stimulus: 2.3,
+        avg_net_stimulus: 1.28,
         avg_sets_per_muscle: 2,
       },
     });
     const dials = computeDashboardDials(analysis);
-    // Two muscles above threshold with ~3.25 weighted avg, /3.2 target -> high quality
-    expect(dials.stimulus).toBe(78);
+    // (1.0*1.35 + 0.5*1.2917) / (1.35 + 1.2917) = 0.7555 -> 76
+    expect(dials.stimulus).toBe(76);
+    // Headroom over all 3 trained muscles: 1 - mean(clamp(net/2.5))
+    // = 1 - (0.92 + 0.46 + 0.16)/3 = 0.4867 -> 49
+    expect(dials.headroom).toBe(49);
   });
 
-  it('caps stimulus at 100', () => {
+  it('caps stimulus at 100 when every prime mover hits an optimal dose', () => {
     const analysis = makeAnalysis({
       muscles: Array.from({ length: 22 }, (_, index) =>
         makeMuscle({
@@ -126,6 +132,21 @@ describe('computeDashboardDials', () => {
     });
     const dials = computeDashboardDials(analysis);
     expect(dials.stimulus).toBe(100);
+    // Every muscle far above the ceiling -> no headroom left
+    expect(dials.headroom).toBe(0);
+  });
+
+  it('excludes untrained muscles from headroom so a sparse split is not "fully rested"', () => {
+    const analysis = makeAnalysis({
+      muscles: [
+        makeMuscle({ region_id: 'sternocostal', stimulus: 3, net_stimulus: 2.5, prime_sets: 6 }),
+        // Untrained: stimulus 0 -> must not count as recovered headroom
+        makeMuscle({ region_id: 'vasti', stimulus: 0, atrophy: 0, net_stimulus: 0, prime_sets: 0, secondary_sets: 0, tertiary_sets: 0 }),
+      ],
+    });
+    const dials = computeDashboardDials(analysis);
+    // Only the trained muscle counts: 1 - clamp(2.5/2.5) = 0
+    expect(dials.headroom).toBe(0);
   });
 
 });

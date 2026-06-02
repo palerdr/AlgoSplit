@@ -3,22 +3,13 @@ import { View, Text, StyleSheet, Pressable, TouchableOpacity } from 'react-nativ
 import { colors, borders, spacing } from '../../theme';
 import { InfoButton } from '../ui';
 import { HELP_CONTENT } from '../../data/helpContent';
+import { getStimulusColorForNet } from '../../analysis/stimulusScale';
 import type { MuscleStats } from '../../types/api.types';
 
 type MetricMode = 'raw' | 'net';
 
 interface Props {
   muscles: MuscleStats[];
-}
-
-function getStimulusColor(value: number, maxValue: number): string {
-  if (maxValue <= 0) return '#4B5563';
-  const pct = Math.max(0, Math.min(1, value / maxValue));
-  if (pct >= 0.8) return '#22C55E';
-  if (pct >= 0.6) return '#4ADE80';
-  if (pct >= 0.4) return '#86EFAC';
-  if (pct >= 0.2) return '#F59E0B';
-  return '#EF4444';
 }
 
 export default function GroupSummaryCards({ muscles }: Props) {
@@ -70,7 +61,11 @@ export default function GroupSummaryCards({ muscles }: Props) {
 
       {sorted.map((muscle) => {
         const value = metricMode === 'raw' ? muscle.stimulus : muscle.net_stimulus;
-        const barColor = getStimulusColor(value, maxStimulus);
+        // Color by absolute stimulus band (same scale as the body map) so a bar
+        // is only "green" when the muscle is genuinely growing — not merely the
+        // tallest bar in an otherwise under-trained split. Width stays relative
+        // to the largest bar purely for visual comparison.
+        const barColor = getStimulusColorForNet(value);
         const widthPct = Math.max((value / maxStimulus) * 100, 3);
         const isActive = activeRegion === muscle.region_id;
 

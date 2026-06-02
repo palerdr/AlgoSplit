@@ -27,23 +27,11 @@ export {
 /**
  * Map net_stimulus to a 0-7 heat level for the 3D body model.
  *
- * Mirrors Python: there is no direct Python equivalent exported
- * to the client — this logic only exists in TS. The thresholds
- * were chosen to align with the empirical stimulus curves.
- *
- * @param netStimulus - The net weekly stimulus value (stimulus - atrophy)
- * @returns Integer 0-7 where 0 = no stimulus, 7 = very high stimulus
+ * The thresholds are defined once in src/analysis/stimulusScale.ts, anchored to
+ * the engine's real net_stimulus output range. Re-exported here so existing
+ * import sites keep working.
  */
-export function computeStimulusLevel(netStimulus: number): number {
-  if (netStimulus <= 0) return 0;
-  if (netStimulus < 0.5) return 1;
-  if (netStimulus < 1.0) return 2;
-  if (netStimulus < 1.75) return 3;
-  if (netStimulus < 2.5) return 4;
-  if (netStimulus < 3.25) return 5;
-  if (netStimulus < 4.0) return 6;
-  return 7;
-}
+export { computeStimulusLevel } from './stimulusScale';
 
 // ── Group summary derivation ────────────────────────────────────
 

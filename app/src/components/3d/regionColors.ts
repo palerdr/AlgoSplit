@@ -1,40 +1,10 @@
-const HEAT_VARIANTS = [
-  ['#232323', '#8B1E1E', '#C62828', '#E65100', '#F59E0B', '#FDE047', '#84CC16', '#16A34A'],
-  ['#232323', '#7F1D1D', '#B91C1C', '#EA580C', '#F59E0B', '#FACC15', '#65A30D', '#15803D'],
-  ['#232323', '#991B1B', '#DC2626', '#F97316', '#EAB308', '#FDE047', '#A3E635', '#22C55E'],
-  ['#232323', '#7A2020', '#C53030', '#DD6B20', '#D69E2E', '#ECC94B', '#7FBF2A', '#2F855A'],
-] as const;
+import { colors } from '../../theme/colors';
 
-const REGION_VARIANTS: Record<string, number> = {
-  clavicular: 0,
-  sternocostal: 1,
-  anterior_deltoid: 2,
-  lateral_deltoid: 3,
-  posterior_deltoid: 0,
-  trapezius: 1,
-  rhomboids: 2,
-  thoracic_lats: 3,
-  iliac_lats: 0,
-  spinal_erectors: 1,
-  biceps_brachii: 2,
-  brachialis: 3,
-  triceps_long_head: 0,
-  triceps_lateral_medial: 1,
-  brachioradialis: 2,
-  wrist_flexors: 3,
-  wrist_extensors: 0,
-  anterior_core: 1,
-  lateral_core: 2,
-  glute_max: 3,
-  glute_med_min: 0,
-  rectus_femoris: 1,
-  vasti: 2,
-  hip_extensors: 3,
-  knee_flexors: 0,
-  hip_adductors: 1,
-  gastrocnemius: 2,
-  soleus: 3,
-};
+// The 3D body shares the canonical 0–7 stimulus ramp (see theme/colors.ts and
+// src/analysis/stimulusScale.ts) so the body map, the 2D muscle map, and the
+// dials all agree at every level. Per-region distinctness is preserved via the
+// small hue/brightness offset applied in getRegionHex, not by separate palettes.
+const HEAT_RAMP = colors.stimulus;
 
 function clampChannel(value: number): number {
   return Math.max(0, Math.min(255, Math.round(value)));
@@ -63,17 +33,19 @@ function getRegionShadeOffset(regionId: string): number {
 
 /**
  * Get hex color for a muscle region based on its stimulus level.
- * Returns a body-specific heat scale (0-7) with a slight per-region tint shift
- * so adjacent muscles remain visually distinct at the same stimulus level.
+ * Uses the canonical 0-7 heat ramp with a slight per-region tint shift so
+ * adjacent muscles remain visually distinct at the same stimulus level.
+ * Level 0 (at/below maintenance or untrained) stays neutral so it blends with
+ * the light body model rather than reading as a false positive.
  */
 export function getRegionHex(
   regionId: string,
   stimulusLevels: Record<string, number>
 ): string {
-  const level = Math.min(7, Math.max(0, Math.round(stimulusLevels[regionId])));
+  const raw = stimulusLevels[regionId];
+  const level = Number.isFinite(raw) ? Math.min(7, Math.max(0, Math.round(raw))) : 0;
   if (level === 0) return '#f1ece4';
-  const variant = REGION_VARIANTS[regionId] ?? 0;
-  return adjustHex(HEAT_VARIANTS[variant][level], getRegionShadeOffset(regionId));
+  return adjustHex(HEAT_RAMP[level], getRegionShadeOffset(regionId));
 }
 
 /** Neutral color for decorative (non-region) body parts */
