@@ -9,7 +9,7 @@ import StimulusLegend from '../src/components/shared/StimulusLegend';
 import {
   getStimulusLevel,
   stimulusAdequacy,
-  muscleFatigue,
+  muscleReadiness,
   STIMULUS_THRESHOLDS,
   MAX_STIMULUS_LEVEL,
 } from '../src/analysis/stimulusScale';
@@ -44,7 +44,16 @@ describe('stimulus scale defensive guards', () => {
     expect(getStimulusLevel(-Infinity)).toBe(0);
 
     expect(stimulusAdequacy(NaN)).toBe(0);
-    expect(muscleFatigue(NaN)).toBe(0);
+    // muscleReadiness: missing/non-finite readiness reads as fully ready (1.0),
+    // matching the engine semantics for muscles never trained as prime movers.
+    expect(muscleReadiness({})).toBe(1);
+    expect(muscleReadiness({ recovery_readiness: null })).toBe(1);
+    expect(muscleReadiness({ recovery_readiness: undefined })).toBe(1);
+    expect(muscleReadiness({ recovery_readiness: NaN })).toBe(1);
+    expect(muscleReadiness({ recovery_readiness: 0.42 })).toBeCloseTo(0.42);
+    // Out-of-range values are clamped, never thrown.
+    expect(muscleReadiness({ recovery_readiness: -1 })).toBe(0);
+    expect(muscleReadiness({ recovery_readiness: 1.5 })).toBe(1);
   });
 
   it('maps every threshold boundary to the expected level (inclusive on upper bound)', () => {

@@ -79,10 +79,10 @@ describe('musclesToStimulusLevels', () => {
 // --------------- computeDashboardDials ---------------
 
 describe('computeDashboardDials', () => {
-  it('returns zeroed stimulus and full headroom for empty analysis', () => {
+  it('returns zeroed stimulus and full recovery for empty analysis', () => {
     const dials = computeDashboardDials(makeAnalysis());
     expect(dials.stimulus).toBe(0);
-    expect(dials.headroom).toBe(100);
+    expect(dials.recovery).toBe(100);
   });
 
   it('averages dose adequacy across every trained muscle (any tier)', () => {
@@ -106,8 +106,6 @@ describe('computeDashboardDials', () => {
     const dials = computeDashboardDials(analysis);
     // (1.0 + 0.639 + 0.222) / 3 = 0.620 -> 62
     expect(dials.stimulus).toBe(62);
-    // Headroom over all 29 regions: 1 - (0.92 + 0.46 + 0.16)/29 ≈ 0.947 -> 95
-    expect(dials.headroom).toBe(95);
   });
 
   it('caps stimulus at 100 when every trained muscle hits its dose', () => {
@@ -129,29 +127,6 @@ describe('computeDashboardDials', () => {
     });
     const dials = computeDashboardDials(analysis);
     expect(dials.stimulus).toBe(100);
-    // 22 of 29 regions saturated, 7 still rested -> ~24
-    expect(dials.headroom).toBe(24);
-  });
-
-  it('keeps Headroom high when only a single muscle is fried (whole-body semantics)', () => {
-    const analysis = makeAnalysis({
-      muscles: [
-        // Saturated trained muscle
-        makeMuscle({ region_id: 'sternocostal', stimulus: 3, net_stimulus: 2.5, prime_sets: 6 }),
-        // Untrained — must contribute 0 fatigue, not be excluded
-        makeMuscle({
-          region_id: 'vasti', stimulus: 0, atrophy: 0, net_stimulus: 0,
-          prime_sets: 0, secondary_sets: 0, tertiary_sets: 0,
-        }),
-      ],
-      summary: {
-        total_sets: 6, muscles_trained: 1, total_muscles: 29,
-        avg_net_stimulus: 2.5, avg_sets_per_muscle: 6,
-      },
-    });
-    const dials = computeDashboardDials(analysis);
-    // One of 29 regions fully fried: 1 - 1/29 ≈ 0.966 -> 97. NOT 0.
-    expect(dials.headroom).toBe(97);
   });
 
   it('reflects a bright-on-the-map muscle in the dial regardless of tier', () => {
@@ -173,20 +148,143 @@ describe('computeDashboardDials', () => {
     const dials = computeDashboardDials(analysis);
     expect(dials.stimulus).toBe(100);
   });
+});
+
+describe('computeDashboardDials — Recovery (time-based)', () => {
+  it('reads 100 when no muscle reports a readiness value (e.g. older backend)', () => {
+    // Defensive: muscles without recovery_readiness are treated as fully
+    // ready, so a payload from before the field shipped doesn't suddenly read
+    // as recovered-zero.
+    const analysis = makeAnalysis({
+      muscles: [
+        makeMuscle({ region_id: 'sternocostal', stimulus: 3, net_stimulus: 2.5 }),
+        makeMuscle({ region_id: 'vasti', stimulus: 2, net_stimulus: 1.0 }),
+      ],
+      summary: {
+        total_sets: 12, muscles_trained: 2, total_muscles: 29,
+        avg_net_stimulus: 1.75, avg_sets_per_muscle: 6,
+      },
+    });
+    expect(computeDashboardDials(analysis).recovery).toBe(100);
+  });
+
+  it('drops Recovery when a muscle reports low readiness (recently trained)', () => {
+    // sternocostal trained just hours ago -> readiness 0.1, the rest fully
+    // ready -> mean = (0.1 + 28*1)/29 ≈ 0.969 -> 97.
+    const analysis = makeAnalysis({
+      muscles: [
+        makeMuscle({
+          region_id: 'sternocostal', stimulus: 3, net_stimulus: 2.5,
+          prime_sets: 6, recovery_readiness: 0.1,
+        }),
+      ],
+      summary: {
+        total_sets: 6, muscles_trained: 1, total_muscles: 29,
+        avg_net_stimulus: 2.5, avg_sets_per_muscle: 6,
+      },
+    });
+    expect(computeDashboardDials(analysis).recovery).toBe(97);
+  });
+
+  it('reads 0 when every region in the body just got hammered', () => {
+    // 29 prime-mover regions each at readiness 0 (trained right now).
+    const muscles = Array.from({ length: 29 }, (_, i) =>
+      makeMuscle({
+        region_id: `region-${i}`, stimulus: 3, net_stimulus: 2.0,
+        prime_sets: 6, recovery_readiness: 0,
+      }),
+    );
+    const analysis = makeAnalysis({
+      muscles,
+      summary: {
+        total_sets: 174, muscles_trained: 29, total_muscles: 29,
+        avg_net_stimulus: 2.0, avg_sets_per_muscle: 6,
+      },
+    });
+    expect(computeDashboardDials(analysis).recovery).toBe(0);
+  });
+
+  it('counts regions absent from the muscles array as fully ready', () => {
+    // total_muscles = 29 but only 1 muscle in the array — the other 28 regions
+    // are treated as fully ready (defensive against schema drift). One fried
+    // region of 29 -> (0 + 28)/29 ≈ 0.966 -> 97.
+    const analysis = makeAnalysis({
+      muscles: [
+        makeMuscle({
+          region_id: 'sternocostal', stimulus: 3, net_stimulus: 2.5,
+          prime_sets: 6, recovery_readiness: 0,
+        }),
+      ],
+      summary: {
+        total_sets: 6, muscles_trained: 1, total_muscles: 29,
+        avg_net_stimulus: 2.5, avg_sets_per_muscle: 6,
+      },
+    });
+    expect(computeDashboardDials(analysis).recovery).toBe(97);
+  });
+
+  it('untrained muscles (null readiness) contribute fully to Recovery', () => {
+    // Mix: 1 fried prime-mover (readiness 0), 28 untrained (null). Mean = 28/29
+    // ≈ 0.966 -> 97. Untrained muscles must NOT drag the dial down — they
+    // genuinely have full local readiness.
+    const muscles = [
+      makeMuscle({
+        region_id: 'sternocostal', stimulus: 3, net_stimulus: 2.5,
+        prime_sets: 6, recovery_readiness: 0,
+      }),
+      ...Array.from({ length: 28 }, (_, i) =>
+        makeMuscle({
+          region_id: `untrained-${i}`, stimulus: 0, atrophy: 0, net_stimulus: 0,
+          prime_sets: 0, secondary_sets: 0, tertiary_sets: 0,
+          recovery_readiness: null,
+        }),
+      ),
+    ];
+    const analysis = makeAnalysis({
+      muscles,
+      summary: {
+        total_sets: 6, muscles_trained: 1, total_muscles: 29,
+        avg_net_stimulus: 0.09, avg_sets_per_muscle: 6,
+      },
+    });
+    expect(computeDashboardDials(analysis).recovery).toBe(97);
+  });
+
+  it('clamps an out-of-range readiness value defensively', () => {
+    // Should never happen from the backend (it clamps), but TS optional + a
+    // future cache stale read shouldn't blow up the dial.
+    const analysis = makeAnalysis({
+      muscles: [
+        makeMuscle({
+          region_id: 'sternocostal', stimulus: 3, net_stimulus: 2.5,
+          prime_sets: 6, recovery_readiness: -0.5,
+        }),
+      ],
+      summary: {
+        total_sets: 6, muscles_trained: 1, total_muscles: 29,
+        avg_net_stimulus: 2.5, avg_sets_per_muscle: 6,
+      },
+    });
+    // -0.5 -> clamped to 0; one fried region of 29 -> 97.
+    expect(computeDashboardDials(analysis).recovery).toBe(97);
+  });
 
   it('falls back to muscles.length when summary.total_muscles is zero', () => {
     const analysis = makeAnalysis({
-      muscles: [makeMuscle({ region_id: 'sternocostal', net_stimulus: 2.5, prime_sets: 6 })],
+      muscles: [
+        makeMuscle({
+          region_id: 'sternocostal', stimulus: 3, net_stimulus: 2.5,
+          prime_sets: 6, recovery_readiness: 0,
+        }),
+      ],
       summary: {
         total_sets: 6, muscles_trained: 1, total_muscles: 0,
         avg_net_stimulus: 2.5, avg_sets_per_muscle: 6,
       },
     });
     const dials = computeDashboardDials(analysis);
-    // Defensive: with total_muscles = 0 the denominator falls back to
-    // muscles.length (1) -> single fried muscle -> headroom 0.
-    expect(dials.headroom).toBe(0);
-    expect(dials.stimulus).toBe(100);
+    // Denominator -> muscles.length (1); the sole muscle has readiness 0.
+    expect(dials.recovery).toBe(0);
   });
 });
 
@@ -237,15 +335,17 @@ describe('dial values stay in range on a realistic baseline split', () => {
     const dials = computeDashboardDials(analysis);
     expect(dials.stimulus).toBeGreaterThanOrEqual(0);
     expect(dials.stimulus).toBeLessThanOrEqual(100);
-    expect(dials.headroom).toBeGreaterThanOrEqual(0);
-    expect(dials.headroom).toBeLessThanOrEqual(100);
+    expect(dials.recovery).toBeGreaterThanOrEqual(0);
+    expect(dials.recovery).toBeLessThanOrEqual(100);
     // PPL is a baseline reference split, not a perfect one. Expect a clearly
     // middling stimulus reading — neither cold (< 15, our prior bug) nor
     // saturated (> 80, would mean the anchor is too lenient).
     expect(dials.stimulus).toBeGreaterThan(20);
     expect(dials.stimulus).toBeLessThan(70);
-    // Most muscles below the headroom ceiling, so headroom should be high.
-    expect(dials.headroom).toBeGreaterThan(50);
+    // Recovery: fixture has no recovery_readiness values (predates the field),
+    // so every muscle reads fully ready and the dial saturates. That's the
+    // documented defensive fallback — older payloads shouldn't read low.
+    expect(dials.recovery).toBe(100);
   });
 
   it('maps every muscle in the PPL fixture to a valid 0–7 heat level', () => {

@@ -1,5 +1,5 @@
 import type { MuscleStats, AnalysisResponse, WorkoutLogResponse } from '../types/api.types';
-import { getStimulusLevel, stimulusAdequacy, muscleFatigue } from '../analysis/stimulusScale';
+import { getStimulusLevel, stimulusAdequacy, muscleReadiness } from '../analysis/stimulusScale';
 
 /**
  * Convert muscle stats array to stimulus levels keyed by region_id.
@@ -21,19 +21,19 @@ export function musclesToStimulusLevels(
  * - `stimulus`: mean dose adequacy across every muscle you trained (any
  *   stimulus > 0, regardless of tier). Saturates at OPTIMAL_NET per muscle, so
  *   "100" means every trained muscle is at or above productive-growth
- *   territory. This is the direct numeric summary of the body map: a bright
- *   muscle on the map always contributes to the dial.
+ *   territory. Direct numeric summary of the body map.
  *
- * - `headroom`: remaining whole-body weekly recovery capacity, averaged over
- *   all `total_muscles` regions in the model. Untrained muscles contribute
- *   zero fatigue (correctly — they have full local headroom), so a one-muscle
- *   workout reads ~97% headroom (28 of 29 regions are fully rested) rather
- *   than 0%. Low overall headroom means many regions are near their weekly
- *   ceiling; high means there is room to add volume.
+ * - `recovery`: time-based whole-body readiness for the next stimulus
+ *   application, RIGHT NOW. Each muscle's readiness is the backend-supplied
+ *   `recovery_readiness` (the engine's own time-since-training ÷ recovery-
+ *   window ratio); untrained muscles read 1.0 (fully ready). The dial is the
+ *   mean across all `total_muscles` regions, so a one-muscle workout reads
+ *   high (most of the body is rested) and a heavy mixed week reads low.
+ *   Replaces the prior volume-based "Headroom" dial.
  */
 export function computeDashboardDials(analysis: AnalysisResponse): {
   stimulus: number;
-  headroom: number;
+  recovery: number;
 } {
   const trainedMuscles = analysis.muscles.filter((muscle) => muscle.stimulus > 0);
 
@@ -49,24 +49,29 @@ export function computeDashboardDials(analysis: AnalysisResponse): {
     ? Math.round((adequacySum / trainedMuscles.length) * 100)
     : 0;
 
-  // Headroom: 1 − mean fatigue across the whole modelled body. Denominator is
-  // `total_muscles` (the model's region count, normally 29), not the trained
-  // count — untrained regions legitimately contribute zero fatigue, so they
-  // belong in the denominator. Falling back to muscles.length keeps the dial
-  // sane if `summary.total_muscles` is missing.
+  // Recovery: mean of per-muscle readiness over the whole modelled body.
+  // `recovery_readiness` is the backend's authoritative time-since/window
+  // ratio; missing/null values (untrained, or older payloads without the
+  // field) read 1.0 — fully ready — matching the engine's own semantics.
+  // Regions absent from `analysis.muscles` (e.g. summary.total_muscles > the
+  // returned array, defensive against schema drift) are also counted as fully
+  // ready, so the dial is always over the full 29-region body.
   const denominator =
     analysis.summary?.total_muscles && analysis.summary.total_muscles > 0
       ? analysis.summary.total_muscles
       : analysis.muscles.length;
-  const fatigueSum = analysis.muscles.reduce(
-    (sum, muscle) => sum + muscleFatigue(muscle.net_stimulus),
+  const observedReadinessSum = analysis.muscles.reduce(
+    (sum, muscle) => sum + muscleReadiness(muscle),
     0,
   );
-  const headroom = denominator > 0
-    ? Math.round(Math.min(100, Math.max(0, 1 - fatigueSum / denominator) * 100))
+  const missingRegions = Math.max(0, denominator - analysis.muscles.length);
+  const recovery = denominator > 0
+    ? Math.round(
+        Math.min(100, Math.max(0, (observedReadinessSum + missingRegions) / denominator) * 100),
+      )
     : 100;
 
-  return { stimulus, headroom };
+  return { stimulus, recovery };
 }
 
 /**

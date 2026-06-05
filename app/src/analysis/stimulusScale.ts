@@ -70,12 +70,10 @@ export const MAX_STIMULUS_LEVEL = 7;
  */
 export const OPTIMAL_NET = 1.8;
 
-/**
- * Net stimulus at which a single muscle is treated as having consumed its
- * full weekly recovery budget. Set just above the empirically observed max
- * (~2.74) so a peak muscle reads near-zero headroom for that region.
- */
-export const HEADROOM_CEILING = 2.5;
+// HEADROOM_CEILING was used by the prior volume-based "Headroom" dial. The
+// Recovery dial is now time-based and reads `recovery_readiness` straight off
+// the backend, so this constant has no consumers. Intentionally removed; do
+// not reintroduce a volume-based recovery proxy without explicit design.
 
 /**
  * Map a net weekly stimulus value to a 0–7 heat level.
@@ -110,13 +108,16 @@ export function stimulusAdequacy(netStimulus: number): number {
 }
 
 /**
- * How much of a muscle's weekly recovery budget has been consumed, 0–1.
- * Drives the Headroom dial (headroom = 1 − mean fatigue over all 29 regions).
- * Untrained muscles return 0 (no fatigue, full headroom for that region).
+ * Per-muscle readiness for the next stimulus application, 0..1. Drives the
+ * Recovery dial. Reads the backend's `recovery_readiness` (the engine's own
+ * time-since-training / recovery-window ratio); a missing value means the
+ * muscle wasn't trained as a prime mover in the window — treat as 1.0 (fully
+ * ready), matching the engine's semantics.
  */
-export function muscleFatigue(netStimulus: number): number {
-  if (!Number.isFinite(netStimulus) || netStimulus <= 0) return 0;
-  return Math.min(1, netStimulus / HEADROOM_CEILING);
+export function muscleReadiness(stats: { recovery_readiness?: number | null }): number {
+  const r = stats.recovery_readiness;
+  if (r === undefined || r === null || !Number.isFinite(r)) return 1;
+  return Math.max(0, Math.min(1, r));
 }
 
 // ── Legend metadata ─────────────────────────────────────────────────────────

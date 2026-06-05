@@ -367,11 +367,29 @@ def _build_response(split: Split, request: SplitRequest) -> AnalysisResponse:
     muscles_list = []
     muscle_data = []
 
+    # Recovery readiness uses the engine's existing time-since-training ratio:
+    # the same `recovery_ratio` apply_stimulus uses to scale incoming stimulus
+    # when retraining inside the recovery window (MainClasses.py:397-402).
+    # `muscle.last_trained_time` is set per-session as a within-week offset, and
+    # the engine references 168h as end-of-week (MainClasses.py:1065). So
+    # `hours_since_at_window_end = 168 - last_trained_time` matches the engine's
+    # own end-of-week accounting. Untrained muscles → None (frontend reads None
+    # as fully ready). stimulus_duration is read off the request because the
+    # split object stores the same value but request is the user-facing source.
+    week_end_hour = 168.0
+    stim_duration = max(1, int(request.stimulus_duration))
+
     for muscle_name, muscle in split.muscles.items():
         if not isinstance(muscle, MuscleRegion):
             continue
 
         net_stim = muscle.net_weekly_stimulus()
+        if muscle.last_trained_time is None:
+            readiness = None
+        else:
+            hours_since = max(0.0, week_end_hour - muscle.last_trained_time)
+            readiness = max(0.0, min(1.0, hours_since / float(stim_duration)))
+
         data = {
             'region_id': muscle.region_id,
             'display_name': muscle.display_name,
@@ -385,7 +403,8 @@ def _build_response(split: Split, request: SplitRequest) -> AnalysisResponse:
             'tertiary_sets': muscle.tertiary_sets,
             'freq': muscle.weekly_frequency,
             'leverage': muscle.leverage,
-            'damage_tier': muscle.damage_tier
+            'damage_tier': muscle.damage_tier,
+            'recovery_readiness': readiness,
         }
         muscle_data.append(data)
 
@@ -402,7 +421,8 @@ def _build_response(split: Split, request: SplitRequest) -> AnalysisResponse:
             tertiary_sets=muscle.tertiary_sets,
             frequency=muscle.weekly_frequency,
             leverage=muscle.leverage,
-            damage_tier=muscle.damage_tier
+            damage_tier=muscle.damage_tier,
+            recovery_readiness=readiness,
         ))
 
     # Sort by net stimulus

@@ -121,7 +121,7 @@ export default function DashboardScreen() {
   const { data: recentPairData, isLoading: isProgressLoading } = useRecentWorkoutPair();
 
   const dials = useMemo(
-    () => (analysis ? computeDashboardDials(analysis) : { stimulus: 0, headroom: 100 }),
+    () => (analysis ? computeDashboardDials(analysis) : { stimulus: 0, recovery: 100 }),
     [analysis],
   );
 
@@ -226,8 +226,8 @@ export default function DashboardScreen() {
                     />
                     <View style={styles.dialGap} />
                     <DialGauge
-                      value={dials.headroom}
-                      label="Headroom"
+                      value={dials.recovery}
+                      label="Recovery"
                       size={dialSize}
                       color="#60A5FA"
                       colorEnd="#60A5FA"
@@ -279,8 +279,8 @@ export default function DashboardScreen() {
                       labelInside
                     />
                     <DialGauge
-                      value={dials.headroom}
-                      label="Headroom"
+                      value={dials.recovery}
+                      label="Recovery"
                       size={dialSize}
                       color="#60A5FA"
                       colorEnd="#60A5FA"

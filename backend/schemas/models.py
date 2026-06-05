@@ -136,6 +136,16 @@ class MuscleStats(BaseModel):
     frequency: float = Field(..., description="Training frequency (sessions per week)")
     leverage: str = Field(..., description="Leverage type (S=Short, M=Medium, L=Long)")
     damage_tier: str = Field(..., description="Volume tolerance suggestion (+, 0, -)")
+    recovery_readiness: Optional[float] = Field(
+        default=None,
+        description=(
+            "Time-based readiness for the next stimulus application, 0..1. "
+            "Computed as min(1, hours_since_last_trained / stimulus_duration) "
+            "at window end (the same ratio the engine uses internally to scale "
+            "incoming stimulus when retraining within the recovery window). "
+            "None when the muscle wasn't trained in the window (treat as 1.0)."
+        ),
+    )
 
     class Config:
         json_schema_extra = {
