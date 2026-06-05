@@ -1,4 +1,4 @@
-import { memo, useRef, useState } from 'react';
+import { memo, useLayoutEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import SetRowMobile from './SetRowMobile';
@@ -20,15 +20,19 @@ function ExerciseViewMobile({ exercise, previousExerciseData, onAddAfter }: Exer
   // Notes uses defaultValue (uncontrolled) so an in-flight keystroke can't be
   // clobbered when an action like Add Set causes a re-render before the latest
   // onChangeText has committed to the store. The native input owns its text;
-  // onChangeText still mirrors it to the store. The ref lets us force-sync
-  // when the underlying exercise changes (e.g. swap) since defaultValue alone
-  // would be ignored after mount.
+  // onChangeText still mirrors it to the store. The ref + layout effect below
+  // force a sync when the underlying exercise.notes changes from a source
+  // OTHER than this input (e.g. a future feature that rewrites notes from a
+  // template). Using useLayoutEffect rather than a render-time setNativeProps
+  // call avoids the React anti-pattern of mutating during render.
   const notesRef = useRef<TextInput>(null);
   const lastSyncedNotes = useRef<string>(exercise.notes);
-  if (lastSyncedNotes.current !== exercise.notes) {
-    lastSyncedNotes.current = exercise.notes;
-    notesRef.current?.setNativeProps({ text: exercise.notes });
-  }
+  useLayoutEffect(() => {
+    if (lastSyncedNotes.current !== exercise.notes) {
+      lastSyncedNotes.current = exercise.notes;
+      notesRef.current?.setNativeProps({ text: exercise.notes });
+    }
+  }, [exercise.notes]);
   const addSet = useWorkoutStore((s) => s.addSet);
   const removeSet = useWorkoutStore((s) => s.removeSet);
   const updateSet = useWorkoutStore((s) => s.updateSet);

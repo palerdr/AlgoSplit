@@ -321,6 +321,13 @@ class MuscleRegion:
         self.stimulus = 0.0
         self.atrophy = 0.0
         self.last_trained_time: Optional[float] = None
+        # Time of the most recent session that delivered ANY tier of stimulus
+        # to this muscle (prime, secondary, tertiary, quaternary). Unlike
+        # last_trained_time — which is updated only when the muscle is a prime
+        # mover and gates the engine's internal re-stim recovery_ratio — this
+        # captures real workload from secondary/tertiary contributions too, so
+        # the externally-reported recovery readiness reflects all fatigue.
+        self.last_stimulus_time: Optional[float] = None
         self.last_session_time: Optional[float] = None
         self.session_times: Set[float] = set()
         self.weekly_frequency: float = 0.0  # Average sessions per week
@@ -444,6 +451,13 @@ class MuscleRegion:
         final_stimulus = global_mult * local_mult * consecutive_mult * stimulus_amount
         self.stimulus += final_stimulus
 
+        # Track last-stimulus time for the recovery-readiness dial. Any tier
+        # of stimulus counts — secondary/tertiary loading produces real fatigue
+        # the dial must reflect (last_trained_time misses this because it only
+        # updates for prime movers, gating engine-internal re-stim scaling).
+        if final_stimulus > 0:
+            self.last_stimulus_time = current_session_time
+
         # Store breakdown only when requested (using slots dataclass — no .copy() needed).
         if collect_breakdown:
             self._last_breakdown = BreakdownRecord(
@@ -503,6 +517,7 @@ class MuscleRegion:
         self.stimulus = 0.0
         self.atrophy = 0.0
         self.last_trained_time = None
+        self.last_stimulus_time = None
         self.last_session_time = None
         self.session_times = set()
 

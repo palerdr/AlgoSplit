@@ -192,9 +192,14 @@ export default function SplitDetailScreen() {
   const pagerRef = useRef<ScrollView>(null);
   const { width: screenWidth } = useWindowDimensions();
   const goToPage = useCallback(
-    (page: 0 | 1) => {
+    (page: 0 | 1, opts?: { animated?: boolean }) => {
+      // Default animated true for user-driven taps; callers that race
+      // scrollEnabled state (e.g. enterEditMode flipping scrollEnabled to
+      // false in the same callback) pass animated:false so the snap can't be
+      // cancelled mid-animation by RN disabling scroll on Android.
+      const animated = opts?.animated ?? true;
       setActivePage(page);
-      pagerRef.current?.scrollTo({ x: page * screenWidth, animated: true });
+      pagerRef.current?.scrollTo({ x: page * screenWidth, animated });
     },
     [screenWidth],
   );
@@ -384,8 +389,10 @@ export default function SplitDetailScreen() {
     setEditSessions(editable.sessions);
     setIsEditing(true);
     // Edit mode lives on the Split page; snap there so a pending edit can't be
-    // hidden behind the Analysis tab.
-    goToPage(0);
+    // hidden behind the Analysis tab. Use animated:false because the same
+    // callback flips scrollEnabled to false (via isEditing), and on Android
+    // disabling scroll mid-animation can park the pager between pages.
+    goToPage(0, { animated: false });
   }, [split, goToPage]);
 
   const cancelEdit = useCallback(() => {

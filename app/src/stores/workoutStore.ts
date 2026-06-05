@@ -173,16 +173,23 @@ export const useWorkoutStore = create<WorkoutState>()(
         // Lazy migration: copy hits from the legacy IDs-based key to the new
         // name-based key on each session start so notes saved before the key
         // schema change resurface and stay aligned with future writes.
-        const migratedNotes: Record<string, string> = { ...exerciseNotesByKey };
+        //
+        // Caveat: Supabase regenerates session/exercise row UUIDs on every
+        // split edit. This means legacy keys (splitId:sessionId:templateExerciseId)
+        // only match for users who never edited their split before 457b10e
+        // shipped. For everyone else the legacy keys are unrecoverable — the
+        // current row IDs don't match what was used to save. Partial recovery
+        // is still better than none, and the cost is one dictionary lookup.
+        const migrations: Record<string, string> = {};
         const workoutExercises: WorkoutExercise[] = exercises.map((ex) => {
           const newKey = buildExerciseNotesKey(splitId, sessionName, ex.name);
-          let persistedNotes = newKey ? (migratedNotes[newKey] ?? '') : '';
+          let persistedNotes = newKey ? (exerciseNotesByKey[newKey] ?? '') : '';
           if (!persistedNotes) {
             const legacyKey = buildLegacyExerciseNotesKey(splitId, sessionId, ex.templateExerciseId);
-            const legacyNotes = legacyKey ? migratedNotes[legacyKey] : undefined;
+            const legacyNotes = legacyKey ? exerciseNotesByKey[legacyKey] : undefined;
             if (legacyNotes) {
               persistedNotes = legacyNotes;
-              if (newKey) migratedNotes[newKey] = legacyNotes;
+              if (newKey) migrations[newKey] = legacyNotes;
             }
           }
           let sets: SetData[];
@@ -204,7 +211,10 @@ export const useWorkoutStore = create<WorkoutState>()(
             templateExerciseId: ex.templateExerciseId,
           };
         });
-        set({
+        // Functional setter: read-modify-write on exerciseNotesByKey could
+        // race a concurrent updateExerciseNotes call during the brief window
+        // between snapshot and commit. Merge on top of the latest state.
+        set((prev) => ({
           activeWorkout: {
             sessionName,
             startedAt: new Date().toISOString(),
@@ -214,8 +224,8 @@ export const useWorkoutStore = create<WorkoutState>()(
             splitId,
             previousData,
           },
-          exerciseNotesByKey: migratedNotes,
-        });
+          exerciseNotesByKey: { ...prev.exerciseNotesByKey, ...migrations },
+        }));
       },
 
       cancelWorkout: () => {

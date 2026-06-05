@@ -1,5 +1,5 @@
 import type { MuscleStats, AnalysisResponse, WorkoutLogResponse } from '../types/api.types';
-import { getStimulusLevel, stimulusAdequacy, muscleReadiness } from '../analysis/stimulusScale';
+import { getStimulusLevel, stimulusAdequacy } from '../analysis/stimulusScale';
 
 /**
  * Convert muscle stats array to stimulus levels keyed by region_id.
@@ -23,17 +23,27 @@ export function musclesToStimulusLevels(
  *   "100" means every trained muscle is at or above productive-growth
  *   territory. Direct numeric summary of the body map.
  *
- * - `recovery`: time-based whole-body readiness for the next stimulus
- *   application, RIGHT NOW. Each muscle's readiness is the backend-supplied
- *   `recovery_readiness` (the engine's own time-since-training ÷ recovery-
- *   window ratio); untrained muscles read 1.0 (fully ready). The dial is the
- *   mean across all `total_muscles` regions, so a one-muscle workout reads
- *   high (most of the body is rested) and a heavy mixed week reads low.
- *   Replaces the prior volume-based "Headroom" dial.
+ * - `recovery`: time-based readiness for the next stimulus application, RIGHT
+ *   NOW. Stimulus-WEIGHTED mean of per-muscle readiness across the muscles
+ *   you've actually trained in this window. A muscle counts in proportion to
+ *   how hard it was hit (its weekly raw `stimulus`), so:
+ *
+ *     - A fried muscle from a hard session pulls Recovery down meaningfully
+ *       (it has high weight and low readiness), and the dial agrees with the
+ *       bright body-map region rather than averaging it away across 28 idle
+ *       untrained muscles.
+ *     - Untrained regions get zero weight and don't artificially inflate the
+ *       dial — "I haven't trained legs all year" doesn't make you look
+ *       recovered.
+ *     - A balanced moderate week reads in the middle.
+ *
+ *   Returns `null` when no trained muscle reports a readiness value (older
+ *   cached payloads, schema drift). The dashboard renders that as "—" rather
+ *   than silently inventing the optimistic answer.
  */
 export function computeDashboardDials(analysis: AnalysisResponse): {
   stimulus: number;
-  recovery: number;
+  recovery: number | null;
 } {
   const trainedMuscles = analysis.muscles.filter((muscle) => muscle.stimulus > 0);
 
@@ -49,27 +59,29 @@ export function computeDashboardDials(analysis: AnalysisResponse): {
     ? Math.round((adequacySum / trainedMuscles.length) * 100)
     : 0;
 
-  // Recovery: mean of per-muscle readiness over the whole modelled body.
-  // `recovery_readiness` is the backend's authoritative time-since/window
-  // ratio; missing/null values (untrained, or older payloads without the
-  // field) read 1.0 — fully ready — matching the engine's own semantics.
-  // Regions absent from `analysis.muscles` (e.g. summary.total_muscles > the
-  // returned array, defensive against schema drift) are also counted as fully
-  // ready, so the dial is always over the full 29-region body.
-  const denominator =
-    analysis.summary?.total_muscles && analysis.summary.total_muscles > 0
-      ? analysis.summary.total_muscles
-      : analysis.muscles.length;
-  const observedReadinessSum = analysis.muscles.reduce(
-    (sum, muscle) => sum + muscleReadiness(muscle),
-    0,
+  // Recovery: stimulus-weighted mean of readiness over trained muscles.
+  if (trainedMuscles.length === 0) {
+    // Nothing trained in the window → fully ready by definition.
+    return { stimulus, recovery: 100 };
+  }
+  let weightedReadiness = 0;
+  let weightSum = 0;
+  for (const muscle of trainedMuscles) {
+    const r = muscle.recovery_readiness;
+    if (r === null || r === undefined || !Number.isFinite(r)) continue;
+    const weight = muscle.stimulus;
+    if (weight <= 0) continue;
+    weightedReadiness += Math.max(0, Math.min(1, r)) * weight;
+    weightSum += weight;
+  }
+  if (weightSum === 0) {
+    // Trained muscles exist but none reports readiness (older payload, schema
+    // drift). Honest: data unavailable.
+    return { stimulus, recovery: null };
+  }
+  const recovery = Math.round(
+    Math.min(100, Math.max(0, weightedReadiness / weightSum) * 100),
   );
-  const missingRegions = Math.max(0, denominator - analysis.muscles.length);
-  const recovery = denominator > 0
-    ? Math.round(
-        Math.min(100, Math.max(0, (observedReadinessSum + missingRegions) / denominator) * 100),
-      )
-    : 100;
 
   return { stimulus, recovery };
 }

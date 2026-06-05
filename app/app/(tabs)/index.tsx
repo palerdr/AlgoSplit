@@ -23,6 +23,22 @@ const DESKTOP_BREAKPOINT = 600;
 
 const EMPTY_STIMULUS: Record<string, number> = {};
 
+/**
+ * Placeholder rendered in place of the Recovery dial when the backend response
+ * doesn't include readiness data — older cached payloads, schema drift, or an
+ * older server. Showing "—" is more honest than silently inventing a 100.
+ */
+function RecoveryUnavailable({ size }: { size: number }) {
+  return (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <Text style={{ color: '#666', fontSize: size * 0.26, fontWeight: '700' }}>—</Text>
+      <Text style={{ color: '#999', fontSize: 10, fontWeight: '600', marginTop: 1, letterSpacing: 0.5, textTransform: 'uppercase' }}>
+        Recovery
+      </Text>
+    </View>
+  );
+}
+
 function formatDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
@@ -121,7 +137,7 @@ export default function DashboardScreen() {
   const { data: recentPairData, isLoading: isProgressLoading } = useRecentWorkoutPair();
 
   const dials = useMemo(
-    () => (analysis ? computeDashboardDials(analysis) : { stimulus: 0, recovery: 100 }),
+    () => (analysis ? computeDashboardDials(analysis) : { stimulus: 0, recovery: 100 as number | null }),
     [analysis],
   );
 
@@ -225,15 +241,19 @@ export default function DashboardScreen() {
                       labelInside
                     />
                     <View style={styles.dialGap} />
-                    <DialGauge
-                      value={dials.recovery}
-                      label="Recovery"
-                      size={dialSize}
-                      color="#60A5FA"
-                      colorEnd="#60A5FA"
-                      delay={600}
-                      labelInside
-                    />
+                    {dials.recovery === null ? (
+                      <RecoveryUnavailable size={dialSize} />
+                    ) : (
+                      <DialGauge
+                        value={dials.recovery}
+                        label="Recovery"
+                        size={dialSize}
+                        color="#60A5FA"
+                        colorEnd="#60A5FA"
+                        delay={600}
+                        labelInside
+                      />
+                    )}
                   </>
                 )}
               </View>
@@ -278,15 +298,19 @@ export default function DashboardScreen() {
                       delay={400}
                       labelInside
                     />
-                    <DialGauge
-                      value={dials.recovery}
-                      label="Recovery"
-                      size={dialSize}
-                      color="#60A5FA"
-                      colorEnd="#60A5FA"
-                      delay={600}
-                      labelInside
-                    />
+                    {dials.recovery === null ? (
+                      <RecoveryUnavailable size={dialSize} />
+                    ) : (
+                      <DialGauge
+                        value={dials.recovery}
+                        label="Recovery"
+                        size={dialSize}
+                        color="#60A5FA"
+                        colorEnd="#60A5FA"
+                        delay={600}
+                        labelInside
+                      />
+                    )}
                   </>
                 )}
                 <InfoButton title={HELP_CONTENT['dashboard.dials'].title} body={HELP_CONTENT['dashboard.dials'].body} />
