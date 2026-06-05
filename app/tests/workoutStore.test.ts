@@ -40,6 +40,103 @@ describe('workoutStore completedAt date parity', () => {
   });
 });
 
+describe('exerciseNotesByKey legacy fallback + forward migration', () => {
+  afterEach(() => {
+    useWorkoutStore.getState().cancelWorkout();
+    useWorkoutStore.setState({ exerciseNotesByKey: {} });
+  });
+
+  it('rehydrates notes saved under the legacy splitId:sessionId:templateExerciseId key', () => {
+    // A note saved before the key schema change (commit 457b10e). New key
+    // schema is splitId:sessionName:exerciseName — lookup misses there, and
+    // without a fallback the user's notes were orphaned permanently.
+    const splitId = 'split-abc';
+    const sessionId = 'sess-xyz';
+    const templateExerciseId = 'tpl-1';
+    const legacyKey = `${splitId}:${sessionId}:${templateExerciseId}`;
+    useWorkoutStore.setState({ exerciseNotesByKey: { [legacyKey]: 'cue: tuck elbows' } });
+
+    useWorkoutStore.getState().startWorkoutFromSession(
+      'Push',
+      [{ name: 'Bench Press', sets: 1, unilateral: false, templateExerciseId }],
+      undefined,
+      sessionId,
+      splitId,
+    );
+
+    const exercise = useWorkoutStore.getState().activeWorkout?.exercises[0];
+    expect(exercise?.notes).toBe('cue: tuck elbows');
+  });
+
+  it('forward-migrates a legacy hit to the new key so subsequent reads hit O(1)', () => {
+    const splitId = 'split-abc';
+    const sessionId = 'sess-xyz';
+    const sessionName = 'Push';
+    const exerciseName = 'Bench Press';
+    const templateExerciseId = 'tpl-1';
+    const legacyKey = `${splitId}:${sessionId}:${templateExerciseId}`;
+    const newKey = `${splitId}:${sessionName}:${exerciseName}`;
+    useWorkoutStore.setState({ exerciseNotesByKey: { [legacyKey]: 'cue: tuck elbows' } });
+
+    useWorkoutStore.getState().startWorkoutFromSession(
+      sessionName,
+      [{ name: exerciseName, sets: 1, unilateral: false, templateExerciseId }],
+      undefined,
+      sessionId,
+      splitId,
+    );
+
+    expect(useWorkoutStore.getState().exerciseNotesByKey[newKey]).toBe('cue: tuck elbows');
+  });
+
+  it('prefers a note saved under the new key over the legacy one', () => {
+    // The new key is the source of truth once present; legacy is only a
+    // fallback. This protects users who edited notes after the schema change.
+    const splitId = 'split-abc';
+    const sessionId = 'sess-xyz';
+    const sessionName = 'Push';
+    const exerciseName = 'Bench Press';
+    const templateExerciseId = 'tpl-1';
+    const legacyKey = `${splitId}:${sessionId}:${templateExerciseId}`;
+    const newKey = `${splitId}:${sessionName}:${exerciseName}`;
+    useWorkoutStore.setState({
+      exerciseNotesByKey: {
+        [legacyKey]: 'old stale note',
+        [newKey]: 'current cue',
+      },
+    });
+
+    useWorkoutStore.getState().startWorkoutFromSession(
+      sessionName,
+      [{ name: exerciseName, sets: 1, unilateral: false, templateExerciseId }],
+      undefined,
+      sessionId,
+      splitId,
+    );
+
+    expect(useWorkoutStore.getState().activeWorkout?.exercises[0]?.notes).toBe('current cue');
+  });
+});
+
+describe('addSet preserves exercise.notes', () => {
+  afterEach(() => {
+    useWorkoutStore.getState().cancelWorkout();
+  });
+
+  it('keeps notes intact when a set is appended (bug regression: notes were perceived to disappear on Add Set)', () => {
+    const store = useWorkoutStore.getState();
+    store.startWorkoutFromSession('Push', [
+      { name: 'Bench Press', sets: 2, unilateral: false },
+    ]);
+    const exerciseId = useWorkoutStore.getState().activeWorkout?.exercises[0]?.id!;
+    useWorkoutStore.getState().updateExerciseNotes(exerciseId, 'pause at chest');
+    useWorkoutStore.getState().addSet(exerciseId);
+    const ex = useWorkoutStore.getState().activeWorkout?.exercises[0];
+    expect(ex?.notes).toBe('pause at chest');
+    expect(ex?.sets.length).toBe(3);
+  });
+});
+
 describe('workoutStore unilateral serialization', () => {
   afterEach(() => {
     useWorkoutStore.getState().cancelWorkout();

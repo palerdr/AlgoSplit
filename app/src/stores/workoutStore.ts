@@ -78,6 +78,21 @@ function buildExerciseNotesKey(
   return `${splitId}:${sessionName}:${exerciseName}`;
 }
 
+/**
+ * Legacy key schema used before commit 457b10e renamed the format to
+ * splitId:sessionName:exerciseName. Notes saved under the old IDs-based key
+ * were orphaned by that change. We still read this format as a fallback on
+ * session start and migrate hits forward to the new key on the same write.
+ */
+function buildLegacyExerciseNotesKey(
+  splitId?: string,
+  sessionId?: string,
+  templateExerciseId?: string,
+): string | null {
+  if (!splitId || !sessionId || !templateExerciseId) return null;
+  return `${splitId}:${sessionId}:${templateExerciseId}`;
+}
+
 interface WorkoutState {
   activeWorkout: ActiveWorkout | null;
   selectedWorkoutDate: string | null;
@@ -155,9 +170,21 @@ export const useWorkoutStore = create<WorkoutState>()(
       startWorkoutFromSession: (sessionName, exercises, previousData, sessionId, splitId) => {
         const { selectedWorkoutDate, exerciseNotesByKey } = get();
         set({ currentExerciseIndex: 0 });
+        // Lazy migration: copy hits from the legacy IDs-based key to the new
+        // name-based key on each session start so notes saved before the key
+        // schema change resurface and stay aligned with future writes.
+        const migratedNotes: Record<string, string> = { ...exerciseNotesByKey };
         const workoutExercises: WorkoutExercise[] = exercises.map((ex) => {
-          const noteKey = buildExerciseNotesKey(splitId, sessionName, ex.name);
-          const persistedNotes = noteKey ? (exerciseNotesByKey[noteKey] ?? '') : '';
+          const newKey = buildExerciseNotesKey(splitId, sessionName, ex.name);
+          let persistedNotes = newKey ? (migratedNotes[newKey] ?? '') : '';
+          if (!persistedNotes) {
+            const legacyKey = buildLegacyExerciseNotesKey(splitId, sessionId, ex.templateExerciseId);
+            const legacyNotes = legacyKey ? migratedNotes[legacyKey] : undefined;
+            if (legacyNotes) {
+              persistedNotes = legacyNotes;
+              if (newKey) migratedNotes[newKey] = legacyNotes;
+            }
+          }
           let sets: SetData[];
           if (ex.unilateral) {
             sets = [];
@@ -187,6 +214,7 @@ export const useWorkoutStore = create<WorkoutState>()(
             splitId,
             previousData,
           },
+          exerciseNotesByKey: migratedNotes,
         });
       },
 

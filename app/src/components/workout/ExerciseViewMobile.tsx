@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import SetRowMobile from './SetRowMobile';
@@ -17,6 +17,18 @@ function ExerciseViewMobile({ exercise, previousExerciseData, onAddAfter }: Exer
   const [showMenu, setShowMenu] = useState(false);
   const [showSwapPicker, setShowSwapPicker] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  // Notes uses defaultValue (uncontrolled) so an in-flight keystroke can't be
+  // clobbered when an action like Add Set causes a re-render before the latest
+  // onChangeText has committed to the store. The native input owns its text;
+  // onChangeText still mirrors it to the store. The ref lets us force-sync
+  // when the underlying exercise changes (e.g. swap) since defaultValue alone
+  // would be ignored after mount.
+  const notesRef = useRef<TextInput>(null);
+  const lastSyncedNotes = useRef<string>(exercise.notes);
+  if (lastSyncedNotes.current !== exercise.notes) {
+    lastSyncedNotes.current = exercise.notes;
+    notesRef.current?.setNativeProps({ text: exercise.notes });
+  }
   const addSet = useWorkoutStore((s) => s.addSet);
   const removeSet = useWorkoutStore((s) => s.removeSet);
   const updateSet = useWorkoutStore((s) => s.updateSet);
@@ -116,9 +128,13 @@ function ExerciseViewMobile({ exercise, previousExerciseData, onAddAfter }: Exer
         </View>
 
         <TextInput
+          ref={notesRef}
           style={styles.notesInput}
-          value={exercise.notes}
-          onChangeText={(t) => updateExerciseNotes(exercise.id, t)}
+          defaultValue={exercise.notes}
+          onChangeText={(t) => {
+            lastSyncedNotes.current = t;
+            updateExerciseNotes(exercise.id, t);
+          }}
           placeholder="Add notes..."
           placeholderTextColor={colors.textMuted}
           multiline
