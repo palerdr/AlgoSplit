@@ -163,9 +163,9 @@ function checkStimulusLevels(
   // Stimulus level is client-only, so we just verify it's deterministic
   // by checking the function is consistent with known thresholds.
   const testCases: [number, number][] = [
-    [-1, 0], [0, 0], [0.25, 1], [0.5, 2], [0.99, 2],
-    [1.0, 3], [1.74, 3], [1.75, 4], [2.49, 4], [2.5, 5],
-    [3.24, 5], [3.25, 6], [3.99, 6], [4.0, 7], [10.0, 7],
+    [-1, 0], [0, 0], [0.3, 1], [0.31, 2], [0.6, 2],
+    [0.9, 3], [1.3, 4], [1.8, 5], [2.3, 6], [2.31, 7],
+    [10.0, 7],
   ];
 
   for (const [input, expected] of testCases) {

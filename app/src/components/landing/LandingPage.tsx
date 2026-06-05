@@ -1,6 +1,7 @@
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, useWindowDimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { colors } from '../../theme';
 
 const ACCENT = '#4ADE80';
 const ACCENT_DARK = '#22C55E';
@@ -12,11 +13,9 @@ const SECONDARY = '#a1a1a6';
 const MUTED = '#636366';
 const FAINT = '#3a3a3d';
 
-// Stimulus heatmap colors for the mockup chart
-const STIMULUS_COLORS = [
-  '#1A1A2E', '#16213E', '#0F3460', '#1A5276',
-  '#2E86AB', '#4ADE80', '#22C55E', '#16A34A',
-];
+// Stimulus heatmap colors for the mockup chart — use the canonical 0–7 ramp
+// so the landing mockup matches what the product actually renders.
+const STIMULUS_COLORS = colors.stimulus;
 
 // ─── Feature Card ────────────────────────────────────────────────
 

@@ -26,16 +26,19 @@ export const colors = {
   yellowMuted: 'rgba(250, 204, 21, 0.15)',
   blue: '#60A5FA',
 
-  // Stimulus heatmap scale (0-7)
+  // Stimulus heatmap scale (0-7), anchored to the engine's real net_stimulus
+  // range (~0–2.75). See src/analysis/stimulusScale.ts for the thresholds.
+  // Cool (no growth) → deepening green (optimal), perceptually spaced so
+  // adjacent levels stay distinguishable on a phone.
   stimulus: [
-    '#1A1A2E', // 0 - none
-    '#16213E', // 1 - minimal
-    '#0F3460', // 2 - low
-    '#1A5276', // 3 - below maintenance
-    '#2E86AB', // 4 - maintenance
-    '#4ADE80', // 5 - moderate
-    '#22C55E', // 6 - good
-    '#16A34A', // 7 - optimal
+    '#3A3D44', // 0 - maintaining or below (cold / no growth)
+    '#2E5E86', // 1 - minimal (cool blue)
+    '#1C8C8F', // 2 - low (teal)
+    '#5FD07A', // 3 - building (light green)
+    '#43C266', // 4 - moderate
+    '#2FAE52', // 5 - good
+    '#1F9444', // 6 - high (rich green)
+    '#137A36', // 7 - optimal (deep forest green)
   ] as const,
 
   // Transparent

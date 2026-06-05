@@ -1,5 +1,4 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors } from '../theme/colors';
 
 // Format date for display
 export function formatDate(date: string | Date): string {
@@ -106,19 +105,7 @@ export function calculateEffectiveReps(reps: number, rir: number | null): number
   return Math.min(reps, Math.max(0, 5 - rir));
 }
 
-// Stimulus level helper - returns 0-7 based on net_stimulus value
-export function getStimulusLevel(netStimulus: number): number {
-  if (netStimulus <= 0) return 0;
-  if (netStimulus < 0.5) return 1;
-  if (netStimulus < 1.0) return 2;
-  if (netStimulus < 1.75) return 3;
-  if (netStimulus < 2.5) return 4;
-  if (netStimulus < 3.25) return 5;
-  if (netStimulus < 4.0) return 6;
-  return 7;
-}
-
-// Get stimulus color from the theme based on level (0-7)
-export function getStimulusColor(level: number): string {
-  return colors.stimulus[Math.min(level, 7)];
-}
+// Stimulus level + color helpers now live in the canonical scale module so the
+// thresholds and palette have exactly one definition. Re-exported here for
+// back-compat with existing import sites.
+export { getStimulusLevel, getStimulusColor } from '../analysis/stimulusScale';

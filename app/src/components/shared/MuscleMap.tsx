@@ -380,7 +380,9 @@ const DEEP_CORE: MuscleRegionPath = {
 
 function getRegionColor(regionId: string, stimulusLevels?: Record<string, number>): string {
   if (!stimulusLevels || !(regionId in stimulusLevels)) return DEFAULT_FILL;
-  const level = Math.min(7, Math.max(0, stimulusLevels[regionId]));
+  // Round before indexing: a fractional level would yield STIMULUS_COLORS[3.5]
+  // -> undefined. Today the only data source emits integers, but guard anyway.
+  const level = Math.min(7, Math.max(0, Math.round(stimulusLevels[regionId])));
   return STIMULUS_COLORS[level];
 }
 
