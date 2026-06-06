@@ -77,12 +77,23 @@ def test_analyze_workouts_exposes_recovery_readiness(client, fake_supabase, auth
         r = m["recovery_readiness"]
         assert r is None or 0.0 <= r <= 1.0
 
-    # At least one prime-mover muscle from this session has a real readiness
-    # value (the engine only updates last_trained_time for prime movers, so
-    # secondary-only muscles legitimately keep None and are treated as ready).
-    prime_movers_with_readiness = [
-        m for m in trained if m["prime_sets"] > 0 and m["recovery_readiness"] is not None
-    ]
-    assert prime_movers_with_readiness, (
-        "expected at least one prime-mover muscle to report a recovery_readiness"
-    )
+    # Every muscle that received ANY stimulus this session reports a real
+    # readiness value — not just prime movers. Readiness is derived from
+    # last_stimulus_time, which apply_stimulus sets for every tier (prime,
+    # secondary, tertiary), so a muscle worked only as a secondary mover (e.g.
+    # triceps on bench press: prime_sets == 0, stimulus > 0) must NOT read None.
+    # This is the behavior that distinguishes last_stimulus_time from
+    # last_trained_time (which the engine updates for prime movers only).
+    for m in trained:
+        assert m["recovery_readiness"] is not None, (
+            f"trained muscle {m['region_id']} (stimulus={m['stimulus']}, "
+            f"prime_sets={m['prime_sets']}) should report readiness"
+        )
+
+    # And specifically assert a secondary-only muscle exists and is covered —
+    # otherwise the loop above could pass vacuously on a fixture where every
+    # trained muscle happens to be a prime mover.
+    secondary_only = [m for m in trained if m["prime_sets"] == 0]
+    assert secondary_only, "fixture should produce at least one secondary-only muscle"
+    for m in secondary_only:
+        assert m["recovery_readiness"] is not None

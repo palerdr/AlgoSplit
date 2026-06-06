@@ -212,10 +212,18 @@ export default function SplitDetailScreen() {
     },
     [activePage, screenWidth],
   );
-  // Re-align scroll position when the screen width changes (orientation /
-  // multitasking) so the active page stays under the segmented control.
+  // Re-align scroll position only when the screen width actually changes
+  // (orientation / multitasking) so the active page stays under the segmented
+  // control. activePage is intentionally NOT a trigger: if this fired on every
+  // page change it would clobber goToPage's animated scrollTo with an
+  // instant animated:false jump, so the segmented-control tap would never
+  // animate. The width ref makes the effect a no-op on page-only changes.
+  const lastPagerWidth = useRef(screenWidth);
   useEffect(() => {
-    pagerRef.current?.scrollTo({ x: activePage * screenWidth, animated: false });
+    if (lastPagerWidth.current !== screenWidth) {
+      lastPagerWidth.current = screenWidth;
+      pagerRef.current?.scrollTo({ x: activePage * screenWidth, animated: false });
+    }
   }, [screenWidth, activePage]);
   const [isDraggingExercises, setIsDraggingExercises] = useState(false);
   const [isDraggingSessions, setIsDraggingSessions] = useState(false);

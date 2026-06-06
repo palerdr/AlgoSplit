@@ -107,18 +107,11 @@ export function stimulusAdequacy(netStimulus: number): number {
   return Math.min(1, netStimulus / OPTIMAL_NET);
 }
 
-/**
- * Per-muscle readiness for the next stimulus application, 0..1. Drives the
- * Recovery dial. Reads the backend's `recovery_readiness` (the engine's own
- * time-since-training / recovery-window ratio); a missing value means the
- * muscle wasn't trained as a prime mover in the window — treat as 1.0 (fully
- * ready), matching the engine's semantics.
- */
-export function muscleReadiness(stats: { recovery_readiness?: number | null }): number {
-  const r = stats.recovery_readiness;
-  if (r === undefined || r === null || !Number.isFinite(r)) return 1;
-  return Math.max(0, Math.min(1, r));
-}
+// (Per-muscle readiness normalization lives in computeDashboardDials, which
+//  *excludes* muscles with a missing reading from the stimulus-weighted mean
+//  rather than treating missing as fully ready. An earlier `muscleReadiness`
+//  helper here encoded the opposite ("missing → 1.0") and had no production
+//  consumer; it was removed to avoid two divergent definitions of the rule.)
 
 // ── Legend metadata ─────────────────────────────────────────────────────────
 // Bands worth labelling for the on-screen legend. `level` is the heat level

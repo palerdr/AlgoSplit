@@ -17,6 +17,7 @@ import {
   generateInsights,
 } from '../../src/utils/analysisTransform';
 import BodyweightWidget from '../../src/components/bodyweight/BodyweightWidget';
+import { colors } from '../../src/theme';
 
 // Breakpoint: above this = desktop layout (body left, dials right)
 const DESKTOP_BREAKPOINT = 600;
@@ -24,18 +25,33 @@ const DESKTOP_BREAKPOINT = 600;
 const EMPTY_STIMULUS: Record<string, number> = {};
 
 /**
- * Placeholder rendered in place of the Recovery dial when the backend response
- * doesn't include readiness data — older cached payloads, schema drift, or an
- * older server. Showing "—" is more honest than silently inventing a 100.
+ * The Recovery dial. Renders the gauge for a 0-100 value, or a "—" placeholder
+ * when readiness data is unavailable (`value === null`) — older cached
+ * payloads, schema drift, or an older server. Showing "—" is more honest than
+ * silently inventing a 100. Encapsulating the null branch here keeps the two
+ * dashboard layouts (desktop/mobile) from each open-coding the ternary.
  */
-function RecoveryUnavailable({ size }: { size: number }) {
+function RecoveryDial({ value, size }: { value: number | null; size: number }) {
+  if (value === null) {
+    return (
+      <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={{ color: colors.textMuted, fontSize: size * 0.26, fontWeight: '700' }}>—</Text>
+        <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600', marginTop: 1, letterSpacing: 0.5, textTransform: 'uppercase' }}>
+          Recovery
+        </Text>
+      </View>
+    );
+  }
   return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      <Text style={{ color: '#666', fontSize: size * 0.26, fontWeight: '700' }}>—</Text>
-      <Text style={{ color: '#999', fontSize: 10, fontWeight: '600', marginTop: 1, letterSpacing: 0.5, textTransform: 'uppercase' }}>
-        Recovery
-      </Text>
-    </View>
+    <DialGauge
+      value={value}
+      label="Recovery"
+      size={size}
+      color="#60A5FA"
+      colorEnd="#60A5FA"
+      delay={600}
+      labelInside
+    />
   );
 }
 
@@ -241,19 +257,7 @@ export default function DashboardScreen() {
                       labelInside
                     />
                     <View style={styles.dialGap} />
-                    {dials.recovery === null ? (
-                      <RecoveryUnavailable size={dialSize} />
-                    ) : (
-                      <DialGauge
-                        value={dials.recovery}
-                        label="Recovery"
-                        size={dialSize}
-                        color="#60A5FA"
-                        colorEnd="#60A5FA"
-                        delay={600}
-                        labelInside
-                      />
-                    )}
+                    <RecoveryDial value={dials.recovery} size={dialSize} />
                   </>
                 )}
               </View>
@@ -298,19 +302,7 @@ export default function DashboardScreen() {
                       delay={400}
                       labelInside
                     />
-                    {dials.recovery === null ? (
-                      <RecoveryUnavailable size={dialSize} />
-                    ) : (
-                      <DialGauge
-                        value={dials.recovery}
-                        label="Recovery"
-                        size={dialSize}
-                        color="#60A5FA"
-                        colorEnd="#60A5FA"
-                        delay={600}
-                        labelInside
-                      />
-                    )}
+                    <RecoveryDial value={dials.recovery} size={dialSize} />
                   </>
                 )}
                 <InfoButton title={HELP_CONTENT['dashboard.dials'].title} body={HELP_CONTENT['dashboard.dials'].body} />

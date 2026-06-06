@@ -58,10 +58,15 @@ export default function SplitAnalysisPageMobile({
   savingAdvSettings,
 }: Props) {
   const { topMuscle, bottomMuscle } = useMemo(() => {
-    if (!analysis?.muscles?.length) {
+    // Only consider muscles that actually received stimulus this split — the
+    // backend returns all ~29 regions including untrained ones (stimulus 0,
+    // net ≤ 0). Without this filter "Lowest Trained" would surface an
+    // untrained region reading 0.0, contradicting its own label.
+    const trained = (analysis?.muscles ?? []).filter((m) => m.stimulus > 0);
+    if (trained.length === 0) {
       return { topMuscle: undefined, bottomMuscle: undefined };
     }
-    const sorted = [...analysis.muscles].sort((a, b) => b.net_stimulus - a.net_stimulus);
+    const sorted = [...trained].sort((a, b) => b.net_stimulus - a.net_stimulus);
     return { topMuscle: sorted[0], bottomMuscle: sorted[sorted.length - 1] };
   }, [analysis]);
 
