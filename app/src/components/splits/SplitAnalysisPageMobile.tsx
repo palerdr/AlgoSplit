@@ -70,59 +70,44 @@ export default function SplitAnalysisPageMobile({
     return { topMuscle: sorted[0], bottomMuscle: sorted[sorted.length - 1] };
   }, [analysis]);
 
-  if (analysisLoading) {
-    return <Spinner style={styles.spinner} />;
-  }
-
-  if (analysisError) {
-    return (
-      <Card style={styles.errorCard}>
-        <Text style={styles.errorTitle}>Analysis unavailable</Text>
-        <Text style={styles.errorBody}>{getErrorMessage(analysisError)}</Text>
-        <Text style={styles.errorHint}>
-          If you recently changed auth cookies, log out and sign back in from Settings.
-        </Text>
-      </Card>
-    );
-  }
-
-  if (!analysis) return null;
-
   return (
     <View style={styles.container}>
-      {/* Summary stats — 2x2 grid */}
-      <View style={styles.statsGrid}>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Avg Stimulus</Text>
-          <Text style={[styles.statValue, { color: colors.green }]}>
-            {analysis.summary.avg_net_stimulus.toFixed(1)}
-          </Text>
-        </View>
-        <View style={styles.statCard}>
-          <Text style={styles.statLabel}>Muscles Trained</Text>
-          <Text style={[styles.statValue, { color: colors.blue }]}>
-            {analysis.summary.muscles_trained}/{analysis.summary.total_muscles}
-          </Text>
-        </View>
-        {topMuscle && (
+      {/* Summary stats — 2x2 grid. Only meaningful with analysis data; while
+          loading/errored we omit it but keep the settings card below mounted. */}
+      {analysis && (
+        <View style={styles.statsGrid}>
           <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Top Muscle</Text>
-            <Text style={[styles.statValue, { color: '#4ADE80' }]} numberOfLines={1}>
-              {topMuscle.display_name}
+            <Text style={styles.statLabel}>Avg Stimulus</Text>
+            <Text style={[styles.statValue, { color: colors.green }]}>
+              {analysis.summary.avg_net_stimulus.toFixed(1)}
             </Text>
-            <Text style={styles.statSubValue}>{topMuscle.net_stimulus.toFixed(1)}</Text>
           </View>
-        )}
-        {bottomMuscle && (
           <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Lowest Trained</Text>
-            <Text style={[styles.statValue, { color: '#EF4444' }]} numberOfLines={1}>
-              {bottomMuscle.display_name}
+            <Text style={styles.statLabel}>Muscles Trained</Text>
+            <Text style={[styles.statValue, { color: colors.blue }]}>
+              {analysis.summary.muscles_trained}/{analysis.summary.total_muscles}
             </Text>
-            <Text style={styles.statSubValue}>{bottomMuscle.net_stimulus.toFixed(1)}</Text>
           </View>
-        )}
-      </View>
+          {topMuscle && (
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Top Muscle</Text>
+              <Text style={[styles.statValue, { color: '#4ADE80' }]} numberOfLines={1}>
+                {topMuscle.display_name}
+              </Text>
+              <Text style={styles.statSubValue}>{topMuscle.net_stimulus.toFixed(1)}</Text>
+            </View>
+          )}
+          {bottomMuscle && (
+            <View style={styles.statCard}>
+              <Text style={styles.statLabel}>Lowest Trained</Text>
+              <Text style={[styles.statValue, { color: '#EF4444' }]} numberOfLines={1}>
+                {bottomMuscle.display_name}
+              </Text>
+              <Text style={styles.statSubValue}>{bottomMuscle.net_stimulus.toFixed(1)}</Text>
+            </View>
+          )}
+        </View>
+      )}
 
       {/* Advanced settings — flattened, no collapse */}
       <Card style={styles.advCard}>
@@ -189,8 +174,23 @@ export default function SplitAnalysisPageMobile({
         )}
       </Card>
 
-      {/* Regions / Breakdown tabs — flattened content lives here */}
-      <AnalysisTabView splitId={split.id} analysis={analysis} splitData={split} />
+      {/* Analysis data region — loading / error / content. Lives BELOW the
+          settings card so a failed analysis (e.g. an out-of-range setting that
+          422s) never hides the controls the user needs to fix it. */}
+      {analysisLoading ? (
+        <Spinner style={styles.spinner} />
+      ) : analysisError ? (
+        <Card style={styles.errorCard}>
+          <Text style={styles.errorTitle}>Analysis unavailable</Text>
+          <Text style={styles.errorBody}>{getErrorMessage(analysisError)}</Text>
+          <Text style={styles.errorHint}>
+            Check the Analysis Settings above — an out-of-range value can stop the
+            analysis from running. Adjust a setting and it will refresh automatically.
+          </Text>
+        </Card>
+      ) : analysis ? (
+        <AnalysisTabView splitId={split.id} analysis={analysis} splitData={split} />
+      ) : null}
     </View>
   );
 }

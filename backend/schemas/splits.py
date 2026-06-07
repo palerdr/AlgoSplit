@@ -174,8 +174,12 @@ class SplitUpdate(BaseModel):
 
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     cycle_length: Optional[int] = Field(None, ge=1, le=7)
-    stimulus_duration: Optional[int] = Field(None, gt=0)
-    maintenance_volume: Optional[int] = Field(None, ge=0)
+    # Bounds match SplitRequest (the analysis endpoint). Previously these only
+    # had lower guards (stimulus gt=0, maintenance ge=0), so a value the analysis
+    # would later reject (e.g. stimulus 999) could be persisted here and then
+    # 422 every analysis call — taking the whole Analysis tab down.
+    stimulus_duration: Optional[int] = Field(None, ge=24, le=96)
+    maintenance_volume: Optional[int] = Field(None, ge=1, le=9)
     dataset: Optional[str] = Field(None, pattern="^(schoenfeld|pelland|average)$")
 
     model_config = {
