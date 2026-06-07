@@ -9,7 +9,6 @@ import StimulusLegend from '../src/components/shared/StimulusLegend';
 import {
   getStimulusLevel,
   stimulusAdequacy,
-  muscleFatigue,
   STIMULUS_THRESHOLDS,
   MAX_STIMULUS_LEVEL,
 } from '../src/analysis/stimulusScale';
@@ -44,7 +43,6 @@ describe('stimulus scale defensive guards', () => {
     expect(getStimulusLevel(-Infinity)).toBe(0);
 
     expect(stimulusAdequacy(NaN)).toBe(0);
-    expect(muscleFatigue(NaN)).toBe(0);
   });
 
   it('maps every threshold boundary to the expected level (inclusive on upper bound)', () => {

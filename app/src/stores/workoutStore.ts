@@ -78,6 +78,21 @@ function buildExerciseNotesKey(
   return `${splitId}:${sessionName}:${exerciseName}`;
 }
 
+/**
+ * Legacy key schema used before commit 457b10e renamed the format to
+ * splitId:sessionName:exerciseName. Notes saved under the old IDs-based key
+ * were orphaned by that change. We still read this format as a fallback on
+ * session start and migrate hits forward to the new key on the same write.
+ */
+function buildLegacyExerciseNotesKey(
+  splitId?: string,
+  sessionId?: string,
+  templateExerciseId?: string,
+): string | null {
+  if (!splitId || !sessionId || !templateExerciseId) return null;
+  return `${splitId}:${sessionId}:${templateExerciseId}`;
+}
+
 interface WorkoutState {
   activeWorkout: ActiveWorkout | null;
   selectedWorkoutDate: string | null;
@@ -155,9 +170,28 @@ export const useWorkoutStore = create<WorkoutState>()(
       startWorkoutFromSession: (sessionName, exercises, previousData, sessionId, splitId) => {
         const { selectedWorkoutDate, exerciseNotesByKey } = get();
         set({ currentExerciseIndex: 0 });
+        // Lazy migration: copy hits from the legacy IDs-based key to the new
+        // name-based key on each session start so notes saved before the key
+        // schema change resurface and stay aligned with future writes.
+        //
+        // Caveat: Supabase regenerates session/exercise row UUIDs on every
+        // split edit. This means legacy keys (splitId:sessionId:templateExerciseId)
+        // only match for users who never edited their split before 457b10e
+        // shipped. For everyone else the legacy keys are unrecoverable — the
+        // current row IDs don't match what was used to save. Partial recovery
+        // is still better than none, and the cost is one dictionary lookup.
+        const migrations: Record<string, string> = {};
         const workoutExercises: WorkoutExercise[] = exercises.map((ex) => {
-          const noteKey = buildExerciseNotesKey(splitId, sessionName, ex.name);
-          const persistedNotes = noteKey ? (exerciseNotesByKey[noteKey] ?? '') : '';
+          const newKey = buildExerciseNotesKey(splitId, sessionName, ex.name);
+          let persistedNotes = newKey ? (exerciseNotesByKey[newKey] ?? '') : '';
+          if (!persistedNotes) {
+            const legacyKey = buildLegacyExerciseNotesKey(splitId, sessionId, ex.templateExerciseId);
+            const legacyNotes = legacyKey ? exerciseNotesByKey[legacyKey] : undefined;
+            if (legacyNotes) {
+              persistedNotes = legacyNotes;
+              if (newKey) migrations[newKey] = legacyNotes;
+            }
+          }
           let sets: SetData[];
           if (ex.unilateral) {
             sets = [];
@@ -177,7 +211,10 @@ export const useWorkoutStore = create<WorkoutState>()(
             templateExerciseId: ex.templateExerciseId,
           };
         });
-        set({
+        // Functional setter: read-modify-write on exerciseNotesByKey could
+        // race a concurrent updateExerciseNotes call during the brief window
+        // between snapshot and commit. Merge on top of the latest state.
+        set((prev) => ({
           activeWorkout: {
             sessionName,
             startedAt: new Date().toISOString(),
@@ -187,7 +224,8 @@ export const useWorkoutStore = create<WorkoutState>()(
             splitId,
             previousData,
           },
-        });
+          exerciseNotesByKey: { ...prev.exerciseNotesByKey, ...migrations },
+        }));
       },
 
       cancelWorkout: () => {

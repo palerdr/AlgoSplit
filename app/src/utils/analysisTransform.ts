@@ -1,5 +1,5 @@
 import type { MuscleStats, AnalysisResponse, WorkoutLogResponse } from '../types/api.types';
-import { getStimulusLevel, stimulusAdequacy, muscleFatigue } from '../analysis/stimulusScale';
+import { getStimulusLevel, stimulusAdequacy } from '../analysis/stimulusScale';
 
 /**
  * Convert muscle stats array to stimulus levels keyed by region_id.
@@ -21,19 +21,29 @@ export function musclesToStimulusLevels(
  * - `stimulus`: mean dose adequacy across every muscle you trained (any
  *   stimulus > 0, regardless of tier). Saturates at OPTIMAL_NET per muscle, so
  *   "100" means every trained muscle is at or above productive-growth
- *   territory. This is the direct numeric summary of the body map: a bright
- *   muscle on the map always contributes to the dial.
+ *   territory. Direct numeric summary of the body map.
  *
- * - `headroom`: remaining whole-body weekly recovery capacity, averaged over
- *   all `total_muscles` regions in the model. Untrained muscles contribute
- *   zero fatigue (correctly — they have full local headroom), so a one-muscle
- *   workout reads ~97% headroom (28 of 29 regions are fully rested) rather
- *   than 0%. Low overall headroom means many regions are near their weekly
- *   ceiling; high means there is room to add volume.
+ * - `recovery`: time-based readiness for the next stimulus application, RIGHT
+ *   NOW. Stimulus-WEIGHTED mean of per-muscle readiness across the muscles
+ *   you've actually trained in this window. A muscle counts in proportion to
+ *   how hard it was hit (its weekly raw `stimulus`), so:
+ *
+ *     - A fried muscle from a hard session pulls Recovery down meaningfully
+ *       (it has high weight and low readiness), and the dial agrees with the
+ *       bright body-map region rather than averaging it away across 28 idle
+ *       untrained muscles.
+ *     - Untrained regions get zero weight and don't artificially inflate the
+ *       dial — "I haven't trained legs all year" doesn't make you look
+ *       recovered.
+ *     - A balanced moderate week reads in the middle.
+ *
+ *   Returns `null` when no trained muscle reports a readiness value (older
+ *   cached payloads, schema drift). The dashboard renders that as "—" rather
+ *   than silently inventing the optimistic answer.
  */
 export function computeDashboardDials(analysis: AnalysisResponse): {
   stimulus: number;
-  headroom: number;
+  recovery: number | null;
 } {
   const trainedMuscles = analysis.muscles.filter((muscle) => muscle.stimulus > 0);
 
@@ -49,24 +59,31 @@ export function computeDashboardDials(analysis: AnalysisResponse): {
     ? Math.round((adequacySum / trainedMuscles.length) * 100)
     : 0;
 
-  // Headroom: 1 − mean fatigue across the whole modelled body. Denominator is
-  // `total_muscles` (the model's region count, normally 29), not the trained
-  // count — untrained regions legitimately contribute zero fatigue, so they
-  // belong in the denominator. Falling back to muscles.length keeps the dial
-  // sane if `summary.total_muscles` is missing.
-  const denominator =
-    analysis.summary?.total_muscles && analysis.summary.total_muscles > 0
-      ? analysis.summary.total_muscles
-      : analysis.muscles.length;
-  const fatigueSum = analysis.muscles.reduce(
-    (sum, muscle) => sum + muscleFatigue(muscle.net_stimulus),
-    0,
+  // Recovery: stimulus-weighted mean of readiness over trained muscles.
+  if (trainedMuscles.length === 0) {
+    // Nothing trained in the window → fully ready by definition.
+    return { stimulus, recovery: 100 };
+  }
+  let weightedReadiness = 0;
+  let weightSum = 0;
+  for (const muscle of trainedMuscles) {
+    const r = muscle.recovery_readiness;
+    if (r === null || r === undefined || !Number.isFinite(r)) continue;
+    const weight = muscle.stimulus;
+    if (weight <= 0) continue;
+    weightedReadiness += Math.max(0, Math.min(1, r)) * weight;
+    weightSum += weight;
+  }
+  if (weightSum === 0) {
+    // Trained muscles exist but none reports readiness (older payload, schema
+    // drift). Honest: data unavailable.
+    return { stimulus, recovery: null };
+  }
+  const recovery = Math.round(
+    Math.min(100, Math.max(0, weightedReadiness / weightSum) * 100),
   );
-  const headroom = denominator > 0
-    ? Math.round(Math.min(100, Math.max(0, 1 - fatigueSum / denominator) * 100))
-    : 100;
 
-  return { stimulus, headroom };
+  return { stimulus, recovery };
 }
 
 /**

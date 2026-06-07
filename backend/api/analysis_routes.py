@@ -367,11 +367,39 @@ def _build_response(split: Split, request: SplitRequest) -> AnalysisResponse:
     muscles_list = []
     muscle_data = []
 
+    # Recovery readiness uses the engine's own time-since-stimulus ratio:
+    # the same `recovery_ratio` apply_stimulus uses to scale incoming stimulus
+    # when retraining inside the recovery window (MainClasses.py:397-402),
+    # generalised to all tiers via `last_stimulus_time` (set whenever ANY
+    # stimulus is applied — prime, secondary, tertiary, quaternary — not just
+    # prime as last_trained_time is). Without this, heavy secondary stimulus
+    # (e.g. triceps on heavy rows) would read "fully ready" while the body map
+    # shows real load.
+    #
+    # `last_stimulus_time` is a within-week offset (apply_stimulus runs with
+    # the session's `week_relative_time`), and the engine references 168h as
+    # end-of-week (MainClasses.py:1065). For cycle_length == 7 — the dashboard's
+    # only caller via analyze-workouts/days=7 — this is exact: the final
+    # simulated week's end aligns with the user's window_end ("now"). For
+    # cycle_length != 7 the simulation tiles cycles across `lcm(cycle, 7) / 7`
+    # weeks and the final-week-end maps to a steady-state cycle phase rather
+    # than wall-clock now; readiness is approximate but monotonic in the
+    # right direction. Untrained muscles → None (frontend treats as ready).
+    week_end_hour = 168.0
+    stim_duration = max(1, int(request.stimulus_duration))
+
     for muscle_name, muscle in split.muscles.items():
         if not isinstance(muscle, MuscleRegion):
             continue
 
         net_stim = muscle.net_weekly_stimulus()
+        last_stim = getattr(muscle, 'last_stimulus_time', None)
+        if last_stim is None:
+            readiness = None
+        else:
+            hours_since = max(0.0, week_end_hour - last_stim)
+            readiness = max(0.0, min(1.0, hours_since / float(stim_duration)))
+
         data = {
             'region_id': muscle.region_id,
             'display_name': muscle.display_name,
@@ -385,7 +413,8 @@ def _build_response(split: Split, request: SplitRequest) -> AnalysisResponse:
             'tertiary_sets': muscle.tertiary_sets,
             'freq': muscle.weekly_frequency,
             'leverage': muscle.leverage,
-            'damage_tier': muscle.damage_tier
+            'damage_tier': muscle.damage_tier,
+            'recovery_readiness': readiness,
         }
         muscle_data.append(data)
 
@@ -402,7 +431,8 @@ def _build_response(split: Split, request: SplitRequest) -> AnalysisResponse:
             tertiary_sets=muscle.tertiary_sets,
             frequency=muscle.weekly_frequency,
             leverage=muscle.leverage,
-            damage_tier=muscle.damage_tier
+            damage_tier=muscle.damage_tier,
+            recovery_readiness=readiness,
         ))
 
     # Sort by net stimulus

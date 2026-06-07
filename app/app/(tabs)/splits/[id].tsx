@@ -7,6 +7,9 @@ import {
   StyleSheet,
   Alert,
   Platform,
+  useWindowDimensions,
+  type NativeSyntheticEvent,
+  type NativeScrollEvent,
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import DraggableFlatList, { NestableDraggableFlatList, NestableScrollContainer } from 'react-native-draggable-flatlist';
@@ -29,8 +32,8 @@ import {
 import { getErrorMessage } from '../../../src/api/client';
 import { Spinner, Card, InfoButton } from '../../../src/components/ui';
 import { HELP_CONTENT } from '../../../src/data/helpContent';
-import AnalysisTabView from '../../../src/components/analysis/AnalysisTabView';
 import SessionEditorMobile from '../../../src/components/splits/SessionEditorMobile';
+import SplitAnalysisPageMobile from '../../../src/components/splits/SplitAnalysisPageMobile';
 import {
   splitResponseToEditable,
   editableToSplitRequest,
@@ -181,8 +184,47 @@ export default function SplitDetailScreen() {
   const [editSessions, setEditSessions] = useState<SessionInput[]>([]);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  // Collapsible detailed analysis
-  const [showDetailedAnalysis, setShowDetailedAnalysis] = useState(false);
+  // Split / Analysis page switcher. The analysis used to live below the
+  // sessions list under a "Detailed Analysis" collapse; it's now a peer page
+  // swiped to horizontally. Edit mode pins the user to page 0 (Split) so a
+  // pending edit can't be lost by swiping to Analysis.
+  const [activePage, setActivePage] = useState<0 | 1>(0);
+  const pagerRef = useRef<ScrollView>(null);
+  const { width: screenWidth } = useWindowDimensions();
+  const goToPage = useCallback(
+    (page: 0 | 1, opts?: { animated?: boolean }) => {
+      // Default animated true for user-driven taps; callers that race
+      // scrollEnabled state (e.g. enterEditMode flipping scrollEnabled to
+      // false in the same callback) pass animated:false so the snap can't be
+      // cancelled mid-animation by RN disabling scroll on Android.
+      const animated = opts?.animated ?? true;
+      setActivePage(page);
+      pagerRef.current?.scrollTo({ x: page * screenWidth, animated });
+    },
+    [screenWidth],
+  );
+  const handlePagerMomentumEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      if (screenWidth <= 0) return;
+      const next = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
+      const clamped = (next < 0 ? 0 : next > 1 ? 1 : next) as 0 | 1;
+      if (clamped !== activePage) setActivePage(clamped);
+    },
+    [activePage, screenWidth],
+  );
+  // Re-align scroll position only when the screen width actually changes
+  // (orientation / multitasking) so the active page stays under the segmented
+  // control. activePage is intentionally NOT a trigger: if this fired on every
+  // page change it would clobber goToPage's animated scrollTo with an
+  // instant animated:false jump, so the segmented-control tap would never
+  // animate. The width ref makes the effect a no-op on page-only changes.
+  const lastPagerWidth = useRef(screenWidth);
+  useEffect(() => {
+    if (lastPagerWidth.current !== screenWidth) {
+      lastPagerWidth.current = screenWidth;
+      pagerRef.current?.scrollTo({ x: activePage * screenWidth, animated: false });
+    }
+  }, [screenWidth, activePage]);
   const [isDraggingExercises, setIsDraggingExercises] = useState(false);
   const [isDraggingSessions, setIsDraggingSessions] = useState(false);
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
@@ -346,16 +388,7 @@ export default function SplitDetailScreen() {
     }
   }, [split]);
 
-  // Sort muscles for top/bottom stats
-  const sortedMuscles = useMemo(() => {
-    if (!analysis?.muscles) return [];
-    return [...analysis.muscles]
-      .filter((m) => m.stimulus > 0)
-      .sort((a, b) => b.net_stimulus - a.net_stimulus);
-  }, [analysis]);
-
-  const topMuscle = sortedMuscles[0];
-  const bottomMuscle = sortedMuscles[sortedMuscles.length - 1];
+  // (top/bottom muscle derivation moved into SplitAnalysisPageMobile.)
 
   const enterEditMode = useCallback(() => {
     if (!split) return;
@@ -363,7 +396,12 @@ export default function SplitDetailScreen() {
     setEditName(editable.name);
     setEditSessions(editable.sessions);
     setIsEditing(true);
-  }, [split]);
+    // Edit mode lives on the Split page; snap there so a pending edit can't be
+    // hidden behind the Analysis tab. Use animated:false because the same
+    // callback flips scrollEnabled to false (via isEditing), and on Android
+    // disabling scroll mid-animation can park the pager between pages.
+    goToPage(0, { animated: false });
+  }, [split, goToPage]);
 
   const cancelEdit = useCallback(() => {
     setIsEditing(false);
@@ -775,6 +813,50 @@ export default function SplitDetailScreen() {
         </View>
       )}
 
+      {/* Split / Analysis segmented control */}
+      <View style={styles.segmentedRow}>
+        <TouchableOpacity
+          style={[styles.segmentedBtn, activePage === 0 && styles.segmentedBtnActive]}
+          onPress={() => goToPage(0)}
+          disabled={isEditing && activePage === 0}
+        >
+          <Text style={[styles.segmentedText, activePage === 0 && styles.segmentedTextActive]}>
+            Split
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[
+            styles.segmentedBtn,
+            activePage === 1 && styles.segmentedBtnActive,
+            isEditing && styles.segmentedBtnDisabled,
+          ]}
+          onPress={() => !isEditing && goToPage(1)}
+          disabled={isEditing}
+        >
+          <Text
+            style={[
+              styles.segmentedText,
+              activePage === 1 && styles.segmentedTextActive,
+              isEditing && styles.segmentedTextDisabled,
+            ]}
+          >
+            Analysis
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        ref={pagerRef}
+        horizontal
+        pagingEnabled
+        showsHorizontalScrollIndicator={false}
+        onMomentumScrollEnd={handlePagerMomentumEnd}
+        scrollEnabled={!isEditing && !isDraggingExercises && !isDraggingSessions}
+        keyboardShouldPersistTaps="handled"
+        style={styles.pager}
+      >
+        {/* Page 1: Split (sessions, view or edit) */}
+        <View style={{ width: screenWidth }}>
       <ScrollContainerComponent
         ref={scrollRef}
         contentContainerStyle={styles.scrollContent}
@@ -919,136 +1001,37 @@ export default function SplitDetailScreen() {
           </>
         )}
 
-        {/* Analysis — always visible below sessions */}
-        {analysisLoading ? (
-          <Spinner style={styles.analysisSpinner} />
-        ) : analysisError ? (
-          <Card style={styles.analysisErrorCard}>
-            <Text style={styles.analysisErrorTitle}>Analysis unavailable</Text>
-            <Text style={styles.analysisErrorBody}>{getErrorMessage(analysisError)}</Text>
-            <Text style={styles.analysisErrorHint}>
-              If you recently changed auth cookies, log out and sign back in from Settings.
-            </Text>
-          </Card>
-        ) : analysis ? (
-          <>
-            {/* Summary Stats — 2x2 grid */}
-            <View style={styles.statsGrid}>
-              <View style={styles.statCard}>
-                <Text style={styles.statLabel}>Avg Stimulus</Text>
-                <Text style={[styles.statValue, { color: colors.green }]}>
-                  {analysis.summary.avg_net_stimulus.toFixed(1)}
-                </Text>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statLabel}>Muscles Trained</Text>
-                <Text style={[styles.statValue, { color: colors.blue }]}>
-                  {analysis.summary.muscles_trained}/{analysis.summary.total_muscles}
-                </Text>
-              </View>
-              {topMuscle && (
-                <View style={styles.statCard}>
-                  <Text style={styles.statLabel}>Top Muscle</Text>
-                  <Text style={[styles.statValue, { color: '#4ADE80' }]} numberOfLines={1}>
-                    {topMuscle.display_name}
-                  </Text>
-                  <Text style={styles.statSubValue}>{topMuscle.net_stimulus.toFixed(1)}</Text>
-                </View>
-              )}
-              {bottomMuscle && (
-                <View style={styles.statCard}>
-                  <Text style={styles.statLabel}>Lowest Trained</Text>
-                  <Text style={[styles.statValue, { color: '#EF4444' }]} numberOfLines={1}>
-                    {bottomMuscle.display_name}
-                  </Text>
-                  <Text style={styles.statSubValue}>
-                    {bottomMuscle.net_stimulus.toFixed(1)}
-                  </Text>
-                </View>
-              )}
-            </View>
-
-            {/* Collapsible Detailed Analysis */}
-            <TouchableOpacity
-              style={styles.detailedToggle}
-              onPress={() => setShowDetailedAnalysis(!showDetailedAnalysis)}
-            >
-              <Text style={styles.detailedToggleText}>Detailed Analysis</Text>
-              <InfoButton title={HELP_CONTENT['splits.detailedAnalysis'].title} body={HELP_CONTENT['splits.detailedAnalysis'].body} />
-              <Ionicons
-                name={showDetailedAnalysis ? 'chevron-up' : 'chevron-down'}
-                size={16}
-                color={colors.textSecondary}
-              />
-            </TouchableOpacity>
-
-            {showDetailedAnalysis && (
-              <View style={styles.detailedSection}>
-                {/* Advanced Settings — always interactive, auto-save on change */}
-                <View style={styles.advancedSection}>
-                  <View style={styles.datasetRow}>
-                    <Text style={styles.advLabel}>Dataset</Text>
-                    <View style={styles.datasetPills}>
-                      {(['schoenfeld', 'pelland', 'average'] as const).map((d) => (
-                        <TouchableOpacity
-                          key={d}
-                          style={[styles.pill, advDataset === d && styles.pillActive]}
-                          onPress={() => handleAdvDatasetChange(d)}
-                        >
-                          <Text style={[styles.pillText, advDataset === d && styles.pillTextActive]}>
-                            {d.charAt(0).toUpperCase() + d.slice(1)}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                </View>
-                  <View style={styles.advInputRow}>
-                    <Text style={styles.advLabel}>Cycle Length (days)</Text>
-                    <TextInput
-                      style={styles.advTextInput}
-                      value={advCycleLength}
-                      onChangeText={setAdvCycleLength}
-                      onBlur={handleAdvCycleLengthBlur}
-                      keyboardType="numeric"
-                      placeholder="Auto"
-                      placeholderTextColor={colors.textMuted}
-                    />
-                  </View>
-                  <View style={styles.advInputRow}>
-                    <Text style={styles.advLabel}>Stimulus Duration (hrs)</Text>
-                    <TextInput
-                      style={styles.advTextInput}
-                      value={advStimulusDuration}
-                      onChangeText={setAdvStimulusDuration}
-                      onBlur={handleAdvStimulusBlur}
-                      keyboardType="numeric"
-                    />
-                  </View>
-                  <View style={styles.advInputRow}>
-                    <Text style={styles.advLabel}>Maintenance Volume (sets)</Text>
-                    <TextInput
-                      style={styles.advTextInput}
-                      value={advMaintenanceVolume}
-                      onChangeText={setAdvMaintenanceVolume}
-                      onBlur={handleAdvMaintenanceBlur}
-                      keyboardType="numeric"
-                    />
-                  </View>
-                  {updateMutation.isPending && !isEditing && (
-                    <View style={styles.savingIndicator}>
-                      <Spinner />
-                      <Text style={styles.savingText}>Saving...</Text>
-                    </View>
-                  )}
-                </View>
-
-                {/* Groups / Breakdown tabs */}
-                <AnalysisTabView splitId={split.id} analysis={analysis} splitData={split} />
-              </View>
-            )}
-          </>
-        ) : null}
       </ScrollContainerComponent>
+        </View>
+
+        {/* Page 2: Analysis (flattened layout — no more dropdown nesting) */}
+        <View style={{ width: screenWidth }}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            <SplitAnalysisPageMobile
+              split={split}
+              analysis={analysis}
+              analysisLoading={analysisLoading}
+              analysisError={analysisError}
+              advDataset={advDataset}
+              advCycleLength={advCycleLength}
+              advStimulusDuration={advStimulusDuration}
+              advMaintenanceVolume={advMaintenanceVolume}
+              onAdvDatasetChange={handleAdvDatasetChange}
+              onAdvCycleLengthChange={setAdvCycleLength}
+              onAdvCycleLengthBlur={handleAdvCycleLengthBlur}
+              onAdvStimulusChange={setAdvStimulusDuration}
+              onAdvStimulusBlur={handleAdvStimulusBlur}
+              onAdvMaintenanceChange={setAdvMaintenanceVolume}
+              onAdvMaintenanceBlur={handleAdvMaintenanceBlur}
+              savingAdvSettings={updateMutation.isPending && !isEditing}
+            />
+          </ScrollView>
+        </View>
+      </ScrollView>
 
     </View>
   );
@@ -1153,6 +1136,43 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: 120,
   },
+  // Split / Analysis pager
+  segmentedRow: {
+    flexDirection: 'row',
+    backgroundColor: colors.surfaceElevated,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    borderRadius: borders.radius.lg,
+    padding: 3,
+    gap: 3,
+  },
+  segmentedBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: borders.radius.md,
+  },
+  segmentedBtnActive: {
+    backgroundColor: colors.greenMuted,
+  },
+  segmentedBtnDisabled: {
+    opacity: 0.4,
+  },
+  segmentedText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  segmentedTextActive: {
+    color: colors.green,
+  },
+  segmentedTextDisabled: {
+    color: colors.textDim,
+  },
+  pager: {
+    flex: 1,
+  },
   // View mode
   sessionCard: {
     marginBottom: 12,
@@ -1214,78 +1234,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  analysisSpinner: {
-    marginVertical: 20,
-  },
-  analysisErrorCard: {
-    marginTop: 20,
-    borderColor: 'rgba(239, 68, 68, 0.35)',
-  },
-  analysisErrorTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  analysisErrorBody: {
-    color: colors.red,
-    fontSize: 13,
-    lineHeight: 18,
-    marginBottom: 6,
-  },
-  analysisErrorHint: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  // Stats grid
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  statCard: {
-    width: '47%',
-    backgroundColor: colors.surface,
-    borderRadius: borders.radius.lg,
-    borderWidth: borders.width.thin,
-    borderColor: colors.border,
-    padding: spacing.md,
-  },
-  statLabel: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  statSubValue: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    marginTop: 1,
-  },
-  // Detailed analysis collapsible
-  detailedToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 14,
-    marginTop: 8,
-  },
-  detailedToggleText: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  detailedSection: {
-    marginTop: 4,
-  },
+  // (analysis-page styles + the obsolete "Detailed Analysis" collapsible
+  //  styles now live inside SplitAnalysisPageMobile.)
   // Edit mode
   editNameInput: {
     color: colors.text,
@@ -1317,70 +1267,6 @@ const styles = StyleSheet.create({
     color: colors.green,
     fontSize: 15,
     fontWeight: '600',
-  },
-  // Advanced settings (inside detailed analysis, always interactive)
-  advancedSection: {
-    marginBottom: 16,
-    backgroundColor: colors.surface,
-    borderRadius: borders.radius.lg,
-    borderWidth: borders.width.thin,
-    borderColor: colors.border,
-    padding: spacing.md,
-  },
-  datasetRow: {
-    marginBottom: 12,
-  },
-  advLabel: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  datasetPills: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  pill: {
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: borders.radius.lg,
-    backgroundColor: colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  pillActive: {
-    backgroundColor: colors.greenMuted,
-    borderColor: colors.green,
-  },
-  pillText: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  pillTextActive: {
-    color: colors.green,
-  },
-  advInputRow: {
-    marginBottom: 12,
-  },
-  advTextInput: {
-    color: colors.text,
-    fontSize: 16,
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: borders.radius.md,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-  },
-  savingIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 6,
-  },
-  savingText: {
-    color: colors.textMuted,
-    fontSize: 12,
   },
   errorText: {
     color: colors.red,

@@ -45,6 +45,15 @@ export interface MuscleStats {
   frequency: number;
   leverage: 'S' | 'M' | 'L';
   damage_tier: '+' | '0' | '-';
+  /**
+   * Time-based readiness for the next stimulus application, 0..1. Computed by
+   * the backend as min(1, hours_since_last_trained / stimulus_duration) at
+   * window end — the same ratio the engine uses internally when retraining
+   * within the recovery window. Optional/null when the muscle wasn't trained
+   * as a prime mover in the window: treat as 1.0 (fully ready). Drives the
+   * dashboard's Recovery dial.
+   */
+  recovery_readiness?: number | null;
 }
 
 export interface MuscleGroupSummary {

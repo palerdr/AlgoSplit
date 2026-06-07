@@ -70,12 +70,10 @@ export const MAX_STIMULUS_LEVEL = 7;
  */
 export const OPTIMAL_NET = 1.8;
 
-/**
- * Net stimulus at which a single muscle is treated as having consumed its
- * full weekly recovery budget. Set just above the empirically observed max
- * (~2.74) so a peak muscle reads near-zero headroom for that region.
- */
-export const HEADROOM_CEILING = 2.5;
+// HEADROOM_CEILING was used by the prior volume-based "Headroom" dial. The
+// Recovery dial is now time-based and reads `recovery_readiness` straight off
+// the backend, so this constant has no consumers. Intentionally removed; do
+// not reintroduce a volume-based recovery proxy without explicit design.
 
 /**
  * Map a net weekly stimulus value to a 0–7 heat level.
@@ -109,15 +107,11 @@ export function stimulusAdequacy(netStimulus: number): number {
   return Math.min(1, netStimulus / OPTIMAL_NET);
 }
 
-/**
- * How much of a muscle's weekly recovery budget has been consumed, 0–1.
- * Drives the Headroom dial (headroom = 1 − mean fatigue over all 29 regions).
- * Untrained muscles return 0 (no fatigue, full headroom for that region).
- */
-export function muscleFatigue(netStimulus: number): number {
-  if (!Number.isFinite(netStimulus) || netStimulus <= 0) return 0;
-  return Math.min(1, netStimulus / HEADROOM_CEILING);
-}
+// (Per-muscle readiness normalization lives in computeDashboardDials, which
+//  *excludes* muscles with a missing reading from the stimulus-weighted mean
+//  rather than treating missing as fully ready. An earlier `muscleReadiness`
+//  helper here encoded the opposite ("missing → 1.0") and had no production
+//  consumer; it was removed to avoid two divergent definitions of the rule.)
 
 // ── Legend metadata ─────────────────────────────────────────────────────────
 // Bands worth labelling for the on-screen legend. `level` is the heat level
