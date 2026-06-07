@@ -26,6 +26,11 @@ jest.mock('expo-router', () => {
   return {
     Stack: MockStack,
     Redirect: ({ href }: { href: string }) => <ReactNative.Text>{`redirect:${href}`}</ReactNative.Text>,
+    // AuthLayout calls useSegments() to detect the reset-password route.
+    // Default to an empty array (not the reset-password segment) so the
+    // existing redirect/spinner/screen tests exercise the normal auth flow.
+    // jest.fn so a future test can override per-call for reset-password.
+    useSegments: jest.fn(() => []),
   };
 });
 
