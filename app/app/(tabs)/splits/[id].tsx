@@ -877,6 +877,7 @@ export default function SplitDetailScreen() {
       >
         {/* Page 1: Split (sessions, view or edit) */}
         <View style={{ width: pagerWidth, height: pagerHeight || undefined }}>
+      {isEditing ? (
       <ScrollContainerComponent
         ref={scrollRef}
         style={styles.pageScroll}
@@ -885,8 +886,7 @@ export default function SplitDetailScreen() {
         keyboardShouldPersistTaps="handled"
         scrollEnabled={!isDraggingExercises && !isDraggingSessions}
       >
-        {isEditing ? (
-          <>
+        <>
             {/* Edit: Split name */}
             <TextInput
               style={styles.editNameInput}
@@ -983,9 +983,23 @@ export default function SplitDetailScreen() {
               <Ionicons name="add-circle-outline" size={20} color={colors.green} />
               <Text style={styles.addSessionText}>Add Session</Text>
             </TouchableOpacity>
-          </>
-        ) : (
-          <>
+        </>
+      </ScrollContainerComponent>
+      ) : (
+      // View mode uses a plain RN ScrollView (not the RNGH-based
+      // NestableScrollContainer). The NestableScrollContainer is only needed to
+      // host the drag-reorder list in edit mode; in view mode its gesture
+      // handler swallowed the horizontal pan so the pager never paged between
+      // Split/Analysis. A plain ScrollView lets the parent pager arbitrate the
+      // swipe natively, exactly like the active-workout pager and page 2.
+      <RNScrollView
+        style={styles.pageScroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
+      >
+        <>
             {/* View: Sessions */}
             {split.sessions.map((session) => (
               <Card key={session.id} style={styles.sessionCard}>
@@ -1019,10 +1033,9 @@ export default function SplitDetailScreen() {
                 ))}
               </Card>
             ))}
-          </>
-        )}
-
-      </ScrollContainerComponent>
+        </>
+      </RNScrollView>
+      )}
         </View>
 
         {/* Page 2: Analysis (flattened layout — no more dropdown nesting) */}
