@@ -40,6 +40,8 @@ import {
   generateSessionId,
   normalizeSessionsForSave,
   parseCycleLengthInput,
+  parseStimulusDurationInput,
+  parseMaintenanceVolumeInput,
 } from '../../../src/utils/splitEditHelpers';
 import { colors, borders, spacing } from '../../../src/theme';
 import { triggerExpandTransition } from '../../../src/utils/workoutTransition';
@@ -349,10 +351,13 @@ export default function SplitDetailScreen() {
   // Sync advanced settings from split data when it loads/changes
   useEffect(() => {
     if (split) {
+      // Display clamped values: a split persisted with an out-of-range setting
+      // shows the valid value its analysis actually runs with, and a blur/save
+      // then heals the stored value.
       setAdvDataset((split.dataset as 'schoenfeld' | 'pelland' | 'average') ?? 'average');
-      setAdvCycleLength(split.cycle_length != null ? String(split.cycle_length) : '');
-      setAdvStimulusDuration(String(split.stimulus_duration ?? 48));
-      setAdvMaintenanceVolume(String(split.maintenance_volume ?? 3));
+      setAdvCycleLength(split.cycle_length != null ? String(parseCycleLengthInput(split.cycle_length) ?? '') : '');
+      setAdvStimulusDuration(String(parseStimulusDurationInput(split.stimulus_duration)));
+      setAdvMaintenanceVolume(String(parseMaintenanceVolumeInput(split.maintenance_volume)));
     }
   }, [split]);
 
@@ -371,12 +376,12 @@ export default function SplitDetailScreen() {
 
   const cancelEdit = useCallback(() => {
     setIsEditing(false);
-    // Revert advanced settings to saved values
+    // Revert advanced settings to saved values (clamped to valid ranges)
     if (split) {
       setAdvDataset((split.dataset as 'schoenfeld' | 'pelland' | 'average') ?? 'average');
-      setAdvCycleLength(split.cycle_length != null ? String(split.cycle_length) : '');
-      setAdvStimulusDuration(String(split.stimulus_duration ?? 48));
-      setAdvMaintenanceVolume(String(split.maintenance_volume ?? 3));
+      setAdvCycleLength(split.cycle_length != null ? String(parseCycleLengthInput(split.cycle_length) ?? '') : '');
+      setAdvStimulusDuration(String(parseStimulusDurationInput(split.stimulus_duration)));
+      setAdvMaintenanceVolume(String(parseMaintenanceVolumeInput(split.maintenance_volume)));
     }
   }, [split]);
 
@@ -389,8 +394,8 @@ export default function SplitDetailScreen() {
       sessions: editSessions,
       dataset: advDataset,
       cycle_length: parsedCycleLength,
-      stimulus_duration: parseInt(advStimulusDuration, 10) || 48,
-      maintenance_volume: parseInt(advMaintenanceVolume, 10) || 3,
+      stimulus_duration: parseStimulusDurationInput(advStimulusDuration),
+      maintenance_volume: parseMaintenanceVolumeInput(advMaintenanceVolume),
     };
     return checkHasChanges(split, current);
   }, [split, isEditing, editName, editSessions, advDataset, advCycleLength, advStimulusDuration, advMaintenanceVolume]);
@@ -447,8 +452,8 @@ export default function SplitDetailScreen() {
       }
       const nextDataset = advDataset;
       const nextCycleLength = parsedCycleLength ?? null;
-      const nextStimulus = parseInt(advStimulusDuration, 10) || 48;
-      const nextMaintenance = parseInt(advMaintenanceVolume, 10) || 3;
+      const nextStimulus = parseStimulusDurationInput(advStimulusDuration);
+      const nextMaintenance = parseMaintenanceVolumeInput(advMaintenanceVolume);
       if (nextDataset !== split.dataset) metadataUpdate.dataset = nextDataset;
       if (nextCycleLength !== (split.cycle_length ?? null)) metadataUpdate.cycle_length = nextCycleLength;
       if (nextStimulus !== (split.stimulus_duration ?? 48)) metadataUpdate.stimulus_duration = nextStimulus;
@@ -491,8 +496,8 @@ export default function SplitDetailScreen() {
           sessions: normalizedSessions,
           dataset: advDataset,
           cycle_length: nextCycleLength ?? undefined,
-          stimulus_duration: parseInt(advStimulusDuration, 10) || 48,
-          maintenance_volume: parseInt(advMaintenanceVolume, 10) || 3,
+          stimulus_duration: nextStimulus,
+          maintenance_volume: nextMaintenance,
         }),
       });
       setIsEditing(false);
@@ -531,9 +536,9 @@ export default function SplitDetailScreen() {
           return parseCycleLengthInput(advCycleLength) ?? null;
         })();
       const nextStimulusDuration =
-        overrides?.stimulus_duration ?? (parseInt(advStimulusDuration, 10) || 48);
+        overrides?.stimulus_duration ?? parseStimulusDurationInput(advStimulusDuration);
       const nextMaintenanceVolume =
-        overrides?.maintenance_volume ?? (parseInt(advMaintenanceVolume, 10) || 3);
+        overrides?.maintenance_volume ?? parseMaintenanceVolumeInput(advMaintenanceVolume);
 
       if (
         nextDataset === split.dataset &&
@@ -568,8 +573,13 @@ export default function SplitDetailScreen() {
   );
 
   const handleAdvStimulusBlur = useCallback(() => {
-    if (!isEditing && split && advStimulusDuration !== String(split.stimulus_duration ?? 48)) {
-      saveAdvancedSettings({ stimulus_duration: parseInt(advStimulusDuration, 10) || 48 });
+    if (isEditing || !split) return;
+    // Snap the field to the clamped value so the user sees what will be saved
+    // (e.g. "999" -> "96"), then persist only if it actually differs.
+    const clamped = parseStimulusDurationInput(advStimulusDuration);
+    if (String(clamped) !== advStimulusDuration) setAdvStimulusDuration(String(clamped));
+    if (clamped !== (split.stimulus_duration ?? 48)) {
+      saveAdvancedSettings({ stimulus_duration: clamped });
     }
   }, [isEditing, split, advStimulusDuration, saveAdvancedSettings]);
 
@@ -583,7 +593,7 @@ export default function SplitDetailScreen() {
         return;
       }
       if (nextCycleLength == null) {
-        setAdvCycleLength(split.cycle_length != null ? String(split.cycle_length) : '');
+        setAdvCycleLength(split.cycle_length != null ? String(parseCycleLengthInput(split.cycle_length) ?? '') : '');
         return;
       }
       if (String(nextCycleLength) !== advCycleLength) {
@@ -596,8 +606,11 @@ export default function SplitDetailScreen() {
   }, [isEditing, split, advCycleLength, saveAdvancedSettings]);
 
   const handleAdvMaintenanceBlur = useCallback(() => {
-    if (!isEditing && split && advMaintenanceVolume !== String(split.maintenance_volume ?? 3)) {
-      saveAdvancedSettings({ maintenance_volume: parseInt(advMaintenanceVolume, 10) || 3 });
+    if (isEditing || !split) return;
+    const clamped = parseMaintenanceVolumeInput(advMaintenanceVolume);
+    if (String(clamped) !== advMaintenanceVolume) setAdvMaintenanceVolume(String(clamped));
+    if (clamped !== (split.maintenance_volume ?? 3)) {
+      saveAdvancedSettings({ maintenance_volume: clamped });
     }
   }, [isEditing, split, advMaintenanceVolume, saveAdvancedSettings]);
 

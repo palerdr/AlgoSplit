@@ -33,6 +33,28 @@ export function parseCycleLengthInput(value: string | number | null | undefined)
   return Math.min(7, Math.max(1, parsed));
 }
 
+// Stimulus duration / maintenance volume must land inside the ranges the
+// analysis endpoint accepts (SplitRequest: stimulus 24-96h, maintenance 1-9
+// sets). Unlike cycle length these always resolve to a concrete number (the
+// fields are never "auto"/blank), so an unparseable or out-of-range entry
+// snaps to the bound (or the default) rather than being dropped. Clamping here
+// is what stops a typo from persisting a value the analysis would later 422 on
+// — which used to make the whole Analysis tab error out and lock the user out.
+export const STIMULUS_DURATION_DEFAULT = 48;
+export const MAINTENANCE_VOLUME_DEFAULT = 3;
+
+export function parseStimulusDurationInput(value: string | number | null | undefined): number {
+  const parsed = typeof value === 'number' ? value : parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return STIMULUS_DURATION_DEFAULT;
+  return Math.min(96, Math.max(24, Math.round(parsed)));
+}
+
+export function parseMaintenanceVolumeInput(value: string | number | null | undefined): number {
+  const parsed = typeof value === 'number' ? value : parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return MAINTENANCE_VOLUME_DEFAULT;
+  return Math.min(9, Math.max(1, Math.round(parsed)));
+}
+
 export function normalizeSessionsForSave(
   sessions: SessionInput[],
   cycleLength?: number,
@@ -109,8 +131,8 @@ export function editableToSplitRequest(state: EditableState): SplitRequest {
       })),
     })),
     dataset: state.dataset as 'schoenfeld' | 'pelland' | 'average',
-    stimulus_duration: state.stimulus_duration,
-    maintenance_volume: state.maintenance_volume,
+    stimulus_duration: parseStimulusDurationInput(state.stimulus_duration),
+    maintenance_volume: parseMaintenanceVolumeInput(state.maintenance_volume),
     cycle_length: cycleLength,
   };
 }

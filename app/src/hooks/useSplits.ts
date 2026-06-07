@@ -13,6 +13,11 @@ import {
   splitKeys,
   type SplitExerciseBatchUpdateItem,
 } from '../api/splits.api';
+import {
+  parseCycleLengthInput,
+  parseStimulusDurationInput,
+  parseMaintenanceVolumeInput,
+} from '../utils/splitEditHelpers';
 import type {
   SplitRequest,
   SplitListResponse,
@@ -34,9 +39,13 @@ function splitToRequestPayload(split: SplitResponse, includeBreakdowns = false):
         resistance_profile: exercise.resistance_profile,
       })),
     })),
-    cycle_length: split.cycle_length ?? undefined,
-    stimulus_duration: split.stimulus_duration,
-    maintenance_volume: split.maintenance_volume,
+    // Clamp to the ranges the analysis endpoint accepts. A split persisted with
+    // an out-of-range setting (e.g. a typo that slipped through before bounds
+    // were enforced) would otherwise 422 here and take the whole Analysis tab
+    // down; clamping keeps the analysis renderable so the user can correct it.
+    cycle_length: parseCycleLengthInput(split.cycle_length),
+    stimulus_duration: parseStimulusDurationInput(split.stimulus_duration),
+    maintenance_volume: parseMaintenanceVolumeInput(split.maintenance_volume),
     dataset: split.dataset as 'schoenfeld' | 'pelland' | 'average',
     include_breakdowns: includeBreakdowns,
   };
