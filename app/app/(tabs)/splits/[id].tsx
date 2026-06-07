@@ -7,11 +7,7 @@ import {
   StyleSheet,
   Alert,
   Platform,
-  useWindowDimensions,
   ScrollView as RNScrollView,
-  type NativeSyntheticEvent,
-  type NativeScrollEvent,
-  type LayoutChangeEvent,
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import DraggableFlatList, { NestableDraggableFlatList, NestableScrollContainer } from 'react-native-draggable-flatlist';
@@ -190,58 +186,13 @@ export default function SplitDetailScreen() {
   // sessions list under a "Detailed Analysis" collapse; it's now a peer page
   // swiped to horizontally. Edit mode pins the user to page 0 (Split) so a
   // pending edit can't be lost by swiping to Analysis.
+  // Split / Analysis are toggled exclusively by the segmented control below.
+  // A horizontal swipe-pager was attempted but couldn't reliably arbitrate the
+  // horizontal pan against the nested vertical scrollables on iOS, so it was
+  // removed in favor of the tap toggle (which always works). Only the active
+  // page is mounted; switching is a plain state change.
   const [activePage, setActivePage] = useState<0 | 1>(0);
-  // Plain RN ScrollView (UIScrollView) for the pager — with directionalLock it
-  // arbitrates horizontal-swipe-vs-vertical-scroll against the nested
-  // scrollables natively, which the gesture-handler ScrollView did not (the
-  // inner scrollables swallowed the horizontal pan, so swipe never paged).
-  const pagerRef = useRef<RNScrollView>(null);
-  const { width: screenWidth } = useWindowDimensions();
-  // The pager measures its own box via onLayout; each page wrapper then gets an
-  // explicit width AND height. The height is essential: without a bounded page
-  // height the inner vertical ScrollView grows to its full content and there is
-  // nothing left to scroll (this is why the Breakdown tab couldn't scroll).
-  // Mirrors the proven active-workout pager in app/workout.tsx.
-  const [pagerWidth, setPagerWidth] = useState(screenWidth);
-  const [pagerHeight, setPagerHeight] = useState(0);
-  const goToPage = useCallback(
-    (page: 0 | 1, opts?: { animated?: boolean }) => {
-      // Default animated true for user-driven taps; callers that race
-      // scrollEnabled state (e.g. enterEditMode flipping scrollEnabled to
-      // false in the same callback) pass animated:false so the snap can't be
-      // cancelled mid-animation by RN disabling scroll on Android.
-      const animated = opts?.animated ?? true;
-      setActivePage(page);
-      pagerRef.current?.scrollTo({ x: page * pagerWidth, animated });
-    },
-    [pagerWidth],
-  );
-  const handlePagerMomentumEnd = useCallback(
-    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (pagerWidth <= 0) return;
-      const next = Math.round(e.nativeEvent.contentOffset.x / pagerWidth);
-      const clamped = (next < 0 ? 0 : next > 1 ? 1 : next) as 0 | 1;
-      if (clamped !== activePage) setActivePage(clamped);
-    },
-    [activePage, pagerWidth],
-  );
-  const handlePagerLayout = useCallback((e: LayoutChangeEvent) => {
-    setPagerWidth(e.nativeEvent.layout.width);
-    setPagerHeight(e.nativeEvent.layout.height);
-  }, []);
-  // Re-align scroll position only when the pager box width actually changes
-  // (orientation / multitasking) so the active page stays under the segmented
-  // control. activePage is intentionally NOT a trigger: if this fired on every
-  // page change it would clobber goToPage's animated scrollTo with an
-  // instant animated:false jump, so the segmented-control tap would never
-  // animate. The width ref makes the effect a no-op on page-only changes.
-  const lastPagerWidth = useRef(pagerWidth);
-  useEffect(() => {
-    if (lastPagerWidth.current !== pagerWidth) {
-      lastPagerWidth.current = pagerWidth;
-      pagerRef.current?.scrollTo({ x: activePage * pagerWidth, animated: false });
-    }
-  }, [pagerWidth, activePage]);
+  const goToPage = useCallback((page: 0 | 1) => setActivePage(page), []);
   const [isDraggingExercises, setIsDraggingExercises] = useState(false);
   const [isDraggingSessions, setIsDraggingSessions] = useState(false);
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
@@ -413,11 +364,9 @@ export default function SplitDetailScreen() {
     setEditName(editable.name);
     setEditSessions(editable.sessions);
     setIsEditing(true);
-    // Edit mode lives on the Split page; snap there so a pending edit can't be
-    // hidden behind the Analysis tab. Use animated:false because the same
-    // callback flips scrollEnabled to false (via isEditing), and on Android
-    // disabling scroll mid-animation can park the pager between pages.
-    goToPage(0, { animated: false });
+    // Edit mode lives on the Split page; switch there so a pending edit can't
+    // be hidden behind the Analysis tab.
+    goToPage(0);
   }, [split, goToPage]);
 
   const cancelEdit = useCallback(() => {
@@ -862,22 +811,9 @@ export default function SplitDetailScreen() {
         </TouchableOpacity>
       </View>
 
-      <RNScrollView
-        ref={pagerRef}
-        horizontal
-        pagingEnabled
-        bounces={false}
-        directionalLockEnabled
-        showsHorizontalScrollIndicator={false}
-        onMomentumScrollEnd={handlePagerMomentumEnd}
-        onLayout={handlePagerLayout}
-        scrollEnabled={!isEditing && !isDraggingExercises && !isDraggingSessions}
-        keyboardShouldPersistTaps="handled"
-        style={styles.pager}
-      >
-        {/* Page 1: Split (sessions, view or edit) */}
-        <View style={{ width: pagerWidth, height: pagerHeight || undefined }}>
-      {isEditing ? (
+      {/* Split page (sessions, view or edit) — toggled by the segmented control above */}
+      {activePage === 0 ? (
+        isEditing ? (
       <ScrollContainerComponent
         ref={scrollRef}
         style={styles.pageScroll}
@@ -986,12 +922,10 @@ export default function SplitDetailScreen() {
         </>
       </ScrollContainerComponent>
       ) : (
-      // View mode uses a plain RN ScrollView (not the RNGH-based
-      // NestableScrollContainer). The NestableScrollContainer is only needed to
-      // host the drag-reorder list in edit mode; in view mode its gesture
-      // handler swallowed the horizontal pan so the pager never paged between
-      // Split/Analysis. A plain ScrollView lets the parent pager arbitrate the
-      // swipe natively, exactly like the active-workout pager and page 2.
+      // View mode uses a plain RN ScrollView. NestableScrollContainer (used in
+      // edit mode) is only needed to host the drag-reorder list; using a plain
+      // ScrollView here keeps view-mode scrolling simple and consistent with
+      // the Analysis page.
       <RNScrollView
         style={styles.pageScroll}
         contentContainerStyle={styles.scrollContent}
@@ -1035,11 +969,9 @@ export default function SplitDetailScreen() {
             ))}
         </>
       </RNScrollView>
-      )}
-        </View>
-
-        {/* Page 2: Analysis (flattened layout — no more dropdown nesting) */}
-        <View style={{ width: pagerWidth, height: pagerHeight || undefined }}>
+        )
+      ) : (
+        /* Analysis page (flattened layout — no more dropdown nesting) */
           <RNScrollView
             style={styles.pageScroll}
             contentContainerStyle={styles.scrollContent}
@@ -1065,8 +997,7 @@ export default function SplitDetailScreen() {
               savingAdvSettings={updateMutation.isPending && !isEditing}
             />
           </RNScrollView>
-        </View>
-      </RNScrollView>
+      )}
 
     </View>
   );
@@ -1205,11 +1136,8 @@ const styles = StyleSheet.create({
   segmentedTextDisabled: {
     color: colors.textDim,
   },
-  pager: {
-    flex: 1,
-  },
-  // Inner page scrollables fill the measured page box so their content scrolls
-  // within the bounded height (rather than the scrollable growing to content).
+  // The active page's scrollable fills the remaining space below the header +
+  // segmented control (flex:1), so its content scrolls within that bounded box.
   pageScroll: {
     flex: 1,
   },
