@@ -8,8 +8,10 @@ import {
   Alert,
   Platform,
   useWindowDimensions,
+  ScrollView as RNScrollView,
   type NativeSyntheticEvent,
   type NativeScrollEvent,
+  type LayoutChangeEvent,
 } from 'react-native';
 import { ScrollView } from 'react-native-gesture-handler';
 import DraggableFlatList, { NestableDraggableFlatList, NestableScrollContainer } from 'react-native-draggable-flatlist';
@@ -189,8 +191,19 @@ export default function SplitDetailScreen() {
   // swiped to horizontally. Edit mode pins the user to page 0 (Split) so a
   // pending edit can't be lost by swiping to Analysis.
   const [activePage, setActivePage] = useState<0 | 1>(0);
-  const pagerRef = useRef<ScrollView>(null);
+  // Plain RN ScrollView (UIScrollView) for the pager — with directionalLock it
+  // arbitrates horizontal-swipe-vs-vertical-scroll against the nested
+  // scrollables natively, which the gesture-handler ScrollView did not (the
+  // inner scrollables swallowed the horizontal pan, so swipe never paged).
+  const pagerRef = useRef<RNScrollView>(null);
   const { width: screenWidth } = useWindowDimensions();
+  // The pager measures its own box via onLayout; each page wrapper then gets an
+  // explicit width AND height. The height is essential: without a bounded page
+  // height the inner vertical ScrollView grows to its full content and there is
+  // nothing left to scroll (this is why the Breakdown tab couldn't scroll).
+  // Mirrors the proven active-workout pager in app/workout.tsx.
+  const [pagerWidth, setPagerWidth] = useState(screenWidth);
+  const [pagerHeight, setPagerHeight] = useState(0);
   const goToPage = useCallback(
     (page: 0 | 1, opts?: { animated?: boolean }) => {
       // Default animated true for user-driven taps; callers that race
@@ -199,32 +212,36 @@ export default function SplitDetailScreen() {
       // cancelled mid-animation by RN disabling scroll on Android.
       const animated = opts?.animated ?? true;
       setActivePage(page);
-      pagerRef.current?.scrollTo({ x: page * screenWidth, animated });
+      pagerRef.current?.scrollTo({ x: page * pagerWidth, animated });
     },
-    [screenWidth],
+    [pagerWidth],
   );
   const handlePagerMomentumEnd = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-      if (screenWidth <= 0) return;
-      const next = Math.round(e.nativeEvent.contentOffset.x / screenWidth);
+      if (pagerWidth <= 0) return;
+      const next = Math.round(e.nativeEvent.contentOffset.x / pagerWidth);
       const clamped = (next < 0 ? 0 : next > 1 ? 1 : next) as 0 | 1;
       if (clamped !== activePage) setActivePage(clamped);
     },
-    [activePage, screenWidth],
+    [activePage, pagerWidth],
   );
-  // Re-align scroll position only when the screen width actually changes
+  const handlePagerLayout = useCallback((e: LayoutChangeEvent) => {
+    setPagerWidth(e.nativeEvent.layout.width);
+    setPagerHeight(e.nativeEvent.layout.height);
+  }, []);
+  // Re-align scroll position only when the pager box width actually changes
   // (orientation / multitasking) so the active page stays under the segmented
   // control. activePage is intentionally NOT a trigger: if this fired on every
   // page change it would clobber goToPage's animated scrollTo with an
   // instant animated:false jump, so the segmented-control tap would never
   // animate. The width ref makes the effect a no-op on page-only changes.
-  const lastPagerWidth = useRef(screenWidth);
+  const lastPagerWidth = useRef(pagerWidth);
   useEffect(() => {
-    if (lastPagerWidth.current !== screenWidth) {
-      lastPagerWidth.current = screenWidth;
-      pagerRef.current?.scrollTo({ x: activePage * screenWidth, animated: false });
+    if (lastPagerWidth.current !== pagerWidth) {
+      lastPagerWidth.current = pagerWidth;
+      pagerRef.current?.scrollTo({ x: activePage * pagerWidth, animated: false });
     }
-  }, [screenWidth, activePage]);
+  }, [pagerWidth, activePage]);
   const [isDraggingExercises, setIsDraggingExercises] = useState(false);
   const [isDraggingSessions, setIsDraggingSessions] = useState(false);
   const [draggingSessionId, setDraggingSessionId] = useState<string | null>(null);
@@ -845,20 +862,24 @@ export default function SplitDetailScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView
+      <RNScrollView
         ref={pagerRef}
         horizontal
         pagingEnabled
+        bounces={false}
+        directionalLockEnabled
         showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={handlePagerMomentumEnd}
+        onLayout={handlePagerLayout}
         scrollEnabled={!isEditing && !isDraggingExercises && !isDraggingSessions}
         keyboardShouldPersistTaps="handled"
         style={styles.pager}
       >
         {/* Page 1: Split (sessions, view or edit) */}
-        <View style={{ width: screenWidth }}>
+        <View style={{ width: pagerWidth, height: pagerHeight || undefined }}>
       <ScrollContainerComponent
         ref={scrollRef}
+        style={styles.pageScroll}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
@@ -1005,8 +1026,9 @@ export default function SplitDetailScreen() {
         </View>
 
         {/* Page 2: Analysis (flattened layout — no more dropdown nesting) */}
-        <View style={{ width: screenWidth }}>
-          <ScrollView
+        <View style={{ width: pagerWidth, height: pagerHeight || undefined }}>
+          <RNScrollView
+            style={styles.pageScroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
@@ -1029,9 +1051,9 @@ export default function SplitDetailScreen() {
               onAdvMaintenanceBlur={handleAdvMaintenanceBlur}
               savingAdvSettings={updateMutation.isPending && !isEditing}
             />
-          </ScrollView>
+          </RNScrollView>
         </View>
-      </ScrollView>
+      </RNScrollView>
 
     </View>
   );
@@ -1171,6 +1193,11 @@ const styles = StyleSheet.create({
     color: colors.textDim,
   },
   pager: {
+    flex: 1,
+  },
+  // Inner page scrollables fill the measured page box so their content scrolls
+  // within the bounded height (rather than the scrollable growing to content).
+  pageScroll: {
     flex: 1,
   },
   // View mode
