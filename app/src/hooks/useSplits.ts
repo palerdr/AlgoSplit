@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData, type QueryClient } from '@tanstack/react-query';
 import {
   getSplits,
   getSplit,
@@ -113,6 +113,12 @@ export function useSplitAnalysis(
   return useQuery({
     ...splitAnalysisQueryOptions(id!, false, splitData),
     enabled: !!id && enabled,
+    // Changing an analysis setting (e.g. dataset) bumps split.updated_at, which
+    // is part of the query key — so the swap spawns a brand-new query. Without
+    // keepPreviousData that reads as isLoading=true and the whole Analysis page
+    // blanks to a spinner. Holding the previous result lets only the numbers
+    // (stats / bars) refresh in place when the new analysis lands.
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -124,6 +130,10 @@ export function useSplitAnalysisWithBreakdowns(
   return useQuery({
     ...splitAnalysisQueryOptions(id!, true, splitData),
     enabled: !!id && enabled,
+    // Same rationale as useSplitAnalysis: keep the prior breakdown rendered on a
+    // setting change so the Breakdown tab's bars update in place rather than
+    // flashing a spinner.
+    placeholderData: keepPreviousData,
   });
 }
 
