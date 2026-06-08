@@ -10,7 +10,7 @@ interface Props {
 /**
  * Compact legend that explains the body-map colors. Shows the full 0–7 heat
  * ramp as a gradient strip with the key physiological anchors labelled
- * (maintenance → building → growing → optimal) so the map is self-documenting.
+ * (maintain → growing → optimal) so the map is self-documenting.
  */
 export default function StimulusLegend({ width }: Props) {
   return (

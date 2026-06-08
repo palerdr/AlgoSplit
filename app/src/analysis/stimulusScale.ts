@@ -127,7 +127,6 @@ export interface StimulusBand {
 
 export const STIMULUS_LEGEND: StimulusBand[] = [
   { label: 'Maintain', level: 0, minNet: Number.NEGATIVE_INFINITY },
-  { label: 'Building', level: 3, minNet: STIMULUS_THRESHOLDS[2] },
   { label: 'Growing', level: 5, minNet: STIMULUS_THRESHOLDS[4] },
   { label: 'Optimal', level: 7, minNet: STIMULUS_THRESHOLDS[6] },
 ];
