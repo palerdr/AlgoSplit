@@ -32,13 +32,13 @@ export const colors = {
   // adjacent levels stay distinguishable on a phone.
   stimulus: [
     '#3A3D44', // 0 - maintaining or below (cold / no growth)
-    '#2E5E86', // 1 - minimal (cool blue)
-    '#1C8C8F', // 2 - low (teal)
-    '#5FD07A', // 3 - building (light green)
-    '#43C266', // 4 - moderate
-    '#2FAE52', // 5 - good
-    '#1F9444', // 6 - high (rich green)
-    '#137A36', // 7 - optimal (deep forest green)
+    '#45617C', // 1 - minimal (desaturated steel-blue — eases out of gray)
+    '#2C8789', // 2 - low (teal bridge into the greens)
+    '#6FD98A', // 3 - building (lightest green)
+    '#4FC471', // 4 - moderate
+    '#34AD56', // 5 - good / growing (mid green)
+    '#188E3E', // 6 - high (rich green)
+    '#0B6E2B', // 7 - optimal (deep forest — widest gap from growing)
   ] as const,
 
   // Transparent

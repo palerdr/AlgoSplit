@@ -1120,7 +1120,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: colors.surfaceElevated,
     marginHorizontal: spacing.md,
-    marginTop: spacing.sm,
+    // Sit a bit lower so the segmented control isn't crowding the header title.
+    marginTop: spacing.lg,
     borderRadius: borders.radius.lg,
     padding: 3,
     gap: 3,

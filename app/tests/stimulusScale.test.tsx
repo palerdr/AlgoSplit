@@ -15,11 +15,13 @@ import {
 
 describe('StimulusLegend', () => {
   it('renders without crashing and shows every band label', () => {
-    const { getByText } = render(<StimulusLegend />);
+    const { getByText, queryByText } = render(<StimulusLegend />);
+    // Three labelled anchors: Maintain → Growing → Optimal. "Building" was
+    // dropped to declutter the ramp.
     expect(getByText('Maintain')).toBeTruthy();
-    expect(getByText('Building')).toBeTruthy();
     expect(getByText('Growing')).toBeTruthy();
     expect(getByText('Optimal')).toBeTruthy();
+    expect(queryByText('Building')).toBeNull();
   });
 
   it('accepts an explicit width prop without crashing', () => {

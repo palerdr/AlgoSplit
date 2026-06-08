@@ -347,12 +347,10 @@ export default function StimulusBreakdownMobile({ sessionBreakdowns }: Props) {
 
   return (
     <View>
+      {/* No descriptive hint here: the "?" help button already explains the
+          breakdown, and the Regions tab has no equivalent caption — so omitting
+          it keeps the two tabs' top spacing aligned. */}
       <View style={styles.breakdownHeader}>
-        <Text style={styles.breakdownHint}>
-          {viewMode === 'exercise'
-            ? 'Inspect stimulus by split day and exercise.'
-            : 'Inspect each muscle group, sub-regions, and exercise contributions.'}
-        </Text>
         <ViewToggle mode={viewMode} onChange={setViewMode} />
       </View>
 
@@ -414,13 +412,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   breakdownHeader: {
-    gap: 10,
     marginBottom: spacing.md,
-  },
-  breakdownHint: {
-    color: colors.textSecondary,
-    fontSize: 12,
-    lineHeight: 18,
   },
   toggleWrap: {
     flexDirection: 'row',

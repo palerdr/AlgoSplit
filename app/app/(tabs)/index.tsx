@@ -433,6 +433,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'center',
     marginTop: 16,
+    // Breathing room before the gradient legend below — it read as cramped
+    // sitting directly under the dials.
+    marginBottom: 22,
     gap: 12,
     marginLeft: 10,
   },
