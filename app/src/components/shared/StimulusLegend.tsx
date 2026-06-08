@@ -29,15 +29,16 @@ export default function StimulusLegend({ width }: Props) {
         ))}
       </View>
       <View style={styles.labels}>
-        {colors.stimulus.map((_, level) => {
-          // One label cell per heat level so each label sits directly under
-          // the band it describes. Cells without a labelled band render empty
-          // spacers, keeping the ramp and label row column-aligned.
-          const band = STIMULUS_LEGEND.find((b) => b.level === level);
+        {STIMULUS_LEGEND.map((band, i) => {
+          // Three evenly-spaced cells: first pinned left, last pinned right,
+          // middle ("Growing") centered — so the anchor labels read as the
+          // start / midpoint / end of the ramp rather than sitting under their
+          // exact heat-level swatch.
+          const align = i === 0 ? 'left' : i === STIMULUS_LEGEND.length - 1 ? 'right' : 'center';
           return (
-            <View key={level} style={styles.labelCell}>
-              {band ? <Text style={styles.label}>{band.label}</Text> : null}
-            </View>
+            <Text key={band.label} style={[styles.labelCell, styles.label, { textAlign: align }]}>
+              {band.label}
+            </Text>
           );
         })}
       </View>
@@ -74,7 +75,6 @@ const styles = StyleSheet.create({
   },
   labelCell: {
     flex: 1,
-    alignItems: 'center',
   },
   label: {
     color: colors.textMuted,
