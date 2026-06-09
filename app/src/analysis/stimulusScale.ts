@@ -114,9 +114,10 @@ export function stimulusAdequacy(netStimulus: number): number {
 //  consumer; it was removed to avoid two divergent definitions of the rule.)
 
 // ── Legend metadata ─────────────────────────────────────────────────────────
-// Bands worth labelling for the on-screen legend. `level` is the heat level
-// the label refers to and is also used by StimulusLegend to position the label
-// directly under its band in the ramp.
+// Anchor labels for the on-screen legend, in left-to-right order. StimulusLegend
+// spaces them evenly across the ramp (first left, last right, middle centered)
+// rather than under their exact swatch. `level`/`minNet` document which band
+// each anchor refers to and color the ramp; they no longer drive positioning.
 export interface StimulusBand {
   label: string;
   /** Heat level (0–7) this label refers to. */
