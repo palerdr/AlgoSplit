@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors, borders, spacing } from '../../theme';
 import { EXERCISE_DATABASE, findExercise } from '../../data/exercises';
 import { useCustomExercises } from '../../hooks/useCustomExercises';
+import { useSplitCreateStore } from '../../stores/splitCreateStore';
 import { InfoButton } from '../ui';
 import { HELP_CONTENT } from '../../data/helpContent';
 import type { ExerciseInput } from '../../types/api.types';
@@ -47,6 +48,10 @@ export default function ExerciseRowMobile({
   const { data: customData } = useCustomExercises();
   const [query, setQuery] = useState(exercise.name);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const importFlag = useSplitCreateStore((s) =>
+    exercise.id ? s.importFlags[exercise.id] : undefined,
+  );
+  const clearImportFlag = useSplitCreateStore((s) => s.clearImportFlag);
 
   const allExerciseNames = useMemo(() => {
     const customNames = customData?.exercises.map((e) => e.exercise_name) ?? [];
@@ -69,9 +74,10 @@ export default function ExerciseRowMobile({
       setShowSuggestions(false);
       const found = findExercise(name);
       const uni = found?.unilateral ?? exercise.unilateral;
+      if (exercise.id) clearImportFlag(exercise.id);
       onUpdate({ ...exercise, name, unilateral: uni || undefined });
     },
-    [exercise, onUpdate],
+    [exercise, onUpdate, clearImportFlag],
   );
 
   const handleBlur = useCallback(() => {
@@ -80,9 +86,10 @@ export default function ExerciseRowMobile({
     if (query !== exercise.name) {
       const found = findExercise(query);
       const uni = found?.unilateral ?? exercise.unilateral;
+      if (exercise.id) clearImportFlag(exercise.id);
       onUpdate({ ...exercise, name: query, unilateral: uni || undefined });
     }
-  }, [query, exercise, onUpdate]);
+  }, [query, exercise, onUpdate, clearImportFlag]);
 
   const toggleUnilateral = () => {
     onUpdate({ ...exercise, unilateral: !exercise.unilateral });
@@ -137,6 +144,27 @@ export default function ExerciseRowMobile({
           <Ionicons name="close" size={18} color={colors.textMuted} />
         </TouchableOpacity>
       </View>
+
+      {/* Import review flag: exercise needs confirmation or wasn't recognized */}
+      {importFlag && (
+        <View style={styles.importFlagRow}>
+          <Ionicons
+            name={importFlag === 'unrecognized' ? 'alert-circle' : 'help-circle'}
+            size={14}
+            color={importFlag === 'unrecognized' ? colors.red : colors.yellow}
+          />
+          <Text
+            style={[
+              styles.importFlagText,
+              { color: importFlag === 'unrecognized' ? colors.red : colors.yellow },
+            ]}
+          >
+            {importFlag === 'unrecognized'
+              ? 'Not recognized — rename it or create a custom exercise'
+              : 'Uncertain match — double-check this exercise name'}
+          </Text>
+        </View>
+      )}
 
       {/* Inline suggestions (expands card, no z-index issues) */}
       {showSuggestions && suggestions.length > 0 && (
@@ -239,6 +267,18 @@ const styles = StyleSheet.create({
     borderRadius: borders.radius.sm,
     paddingVertical: 6,
     paddingHorizontal: 10,
+  },
+  importFlagRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 5,
+    paddingHorizontal: 2,
+  },
+  importFlagText: {
+    fontSize: 11,
+    fontWeight: '600',
+    flexShrink: 1,
   },
   suggestionsInline: {
     marginTop: 4,

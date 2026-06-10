@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware.js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { SessionInput } from '../types/api.types';
+import type { ImportExerciseStatus, SessionInput } from '../types/api.types';
 import { generateExerciseId, generateSessionId } from '../utils/splitEditHelpers';
 
 function makeDefaultSession(): SessionInput {
@@ -13,6 +13,10 @@ function makeDefaultSession(): SessionInput {
   };
 }
 
+// Exercises flagged by the spreadsheet import for user review,
+// keyed by client-side exercise id.
+type ImportFlags = Record<string, Exclude<ImportExerciseStatus, 'matched'>>;
+
 interface SplitCreateState {
   splitName: string;
   sessions: SessionInput[];
@@ -20,6 +24,7 @@ interface SplitCreateState {
   cycleLength: string;
   stimulusDuration: string;
   maintenanceVolume: string;
+  importFlags: ImportFlags;
 
   setSplitName: (name: string) => void;
   setSessions: (sessions: SessionInput[]) => void;
@@ -27,6 +32,8 @@ interface SplitCreateState {
   setCycleLength: (length: string) => void;
   setStimulusDuration: (duration: string) => void;
   setMaintenanceVolume: (volume: string) => void;
+  setImportFlags: (flags: ImportFlags) => void;
+  clearImportFlag: (exerciseId: string) => void;
   reset: () => void;
 }
 
@@ -37,6 +44,7 @@ const initialState = {
   cycleLength: '',
   stimulusDuration: '48',
   maintenanceVolume: '3',
+  importFlags: {} as ImportFlags,
 };
 
 export const useSplitCreateStore = create<SplitCreateState>()(
@@ -50,7 +58,15 @@ export const useSplitCreateStore = create<SplitCreateState>()(
       setCycleLength: (length) => set({ cycleLength: length }),
       setStimulusDuration: (duration) => set({ stimulusDuration: duration }),
       setMaintenanceVolume: (volume) => set({ maintenanceVolume: volume }),
-      reset: () => set({ ...initialState, sessions: [makeDefaultSession()] }),
+      setImportFlags: (flags) => set({ importFlags: flags }),
+      clearImportFlag: (exerciseId) =>
+        set((state) => {
+          if (!state.importFlags[exerciseId]) return state;
+          const next = { ...state.importFlags };
+          delete next[exerciseId];
+          return { importFlags: next };
+        }),
+      reset: () => set({ ...initialState, sessions: [makeDefaultSession()], importFlags: {} }),
     }),
     {
       name: 'split-create-storage',
@@ -62,6 +78,7 @@ export const useSplitCreateStore = create<SplitCreateState>()(
         cycleLength: state.cycleLength,
         stimulusDuration: state.stimulusDuration,
         maintenanceVolume: state.maintenanceVolume,
+        importFlags: state.importFlags,
       }),
     },
   ),

@@ -6,6 +6,7 @@ export default function SplitsLayout() {
       <Stack.Screen name="index" />
       <Stack.Screen name="[id]" />
       <Stack.Screen name="create" />
+      <Stack.Screen name="import" />
       <Stack.Screen name="compare" />
     </Stack>
   );
