@@ -11,6 +11,7 @@ import pytest
 from core.split_import import (
     infer_sheet,
     infer_split,
+    parse_day_cell,
     parse_day_header,
     parse_sets_cell,
     split_embedded_sets,
@@ -67,6 +68,20 @@ def test_parse_day_header_rejects(text):
     assert parse_day_header(text) is None
 
 
+@pytest.mark.parametrize("text,expected", [
+    ("1", 1),
+    ("13", 13),       # days have their own 1-14 bound, unlike sets (1-12)
+    ("14", 14),
+    ("15", None),
+    ("Day 12", 12),
+    ("Friday", 5),
+    ("Squat", None),
+    ("", None),
+])
+def test_parse_day_cell(text, expected):
+    assert parse_day_cell(text) == expected
+
+
 # ---------------------------------------------------------------------------
 # Long format
 # ---------------------------------------------------------------------------
@@ -120,6 +135,35 @@ def test_long_with_reps_and_weight_columns_ignored():
     assert len(parse.sessions) == 2
     assert parse.sessions[0].exercises[0].sets == 5
     assert parse.sessions[0].exercises[0].name == "Squat"
+
+
+def test_long_sparse_high_days_not_silently_merged():
+    # Day values 13/14 must form their own sessions (later re-sequenced with
+    # a warning), not silently merge into the previous kept session.
+    grid = [
+        ["Day", "Exercise", "Sets"],
+        ["1", "Squat", "5"],
+        ["2", "Bench Press", "4"],
+        ["13", "Deadlift", "3"],
+        ["14", "Overhead Press", "3"],
+    ]
+    parse = infer_sheet(grid)
+    assert parse is not None
+    assert [len(s.exercises) for s in parse.sessions] == [1, 1, 1, 1]
+    assert [e.name for e in parse.sessions[1].exercises] == ["Bench Press"]
+    assert any("1-7" in w for w in parse.warnings)
+
+
+def test_long_unreadable_day_cell_warns():
+    grid = [
+        ["Day", "Exercise", "Sets"],
+        ["1", "Squat", "5"],
+        ["??", "Deadlift", "3"],
+    ]
+    parse = infer_sheet(grid)
+    assert parse is not None
+    # Falls back to the previous session, but says so.
+    assert any("couldn't be read" in w for w in parse.warnings)
 
 
 def test_long_unrecognized_exercise_flagged_not_dropped():

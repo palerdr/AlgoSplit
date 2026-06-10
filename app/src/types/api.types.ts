@@ -818,6 +818,7 @@ export interface ImportPreviewExercise {
   name: string;
   sets: number;
   unilateral: boolean;
+  resistance_profile?: string | null;
 }
 
 export interface ImportPreviewSession {

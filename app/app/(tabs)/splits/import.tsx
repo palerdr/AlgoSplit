@@ -61,6 +61,9 @@ export default function ImportSplitScreen() {
       }),
     }));
 
+    // Reset first so dataset/cycle/stimulus values from an abandoned manual
+    // draft don't silently apply to the imported split.
+    useSplitCreateStore.getState().reset();
     useSplitCreateStore.setState({
       splitName: preview.split.name,
       sessions,

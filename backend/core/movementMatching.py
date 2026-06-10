@@ -222,7 +222,6 @@ class PatternMatcher:
 
             # Triceps isolation (protect against overhead press)
             Rule(required=("tricep", "extension"), any_of=(), banned=(), pattern="elbow_extension_isolation", weight=60),
-            Rule(required=("triceps", "extension"), any_of=(), banned=(), pattern="elbow_extension_isolation", weight=60),
             Rule(required=("tricep", "pushdown"), any_of=(), banned=(), pattern="elbow_extension_isolation", weight=60),
             Rule(required=("skull", "crusher"), any_of=(), banned=(), pattern="elbow_extension_isolation", weight=60),
             Rule(required=("tricep", "kickback"), any_of=(), banned=(), pattern="elbow_extension_isolation", weight=60),
@@ -417,7 +416,7 @@ class PatternMatcher:
             Rule(required=("rack", "pull"), any_of=(), banned=(), pattern="hinge_compound", weight=35),
 
             # Calves
-            Rule(required=("calf",), any_of=("raise", "raises", "press"), banned=(), pattern="ankle_plantarflexion_isolation", weight=40),
+            Rule(required=("calf",), any_of=("raise", "press"), banned=(), pattern="ankle_plantarflexion_isolation", weight=40),
         ]
 
         self.fallback_rules: List[Rule] = [
@@ -480,9 +479,14 @@ class PatternMatcher:
             vocab.update(src.split())
             vocab.update(dst.split())
         vocab.update(self.muscle_only.keys())
+        # Unilateral cue words: not rule tokens, but typo-correcting them
+        # preserves the unilateral flag ("singel leg press")
+        vocab.update({"single", "unilateral", "alternating", "one"})
         self._fuzzy_vocab: List[str] = sorted(vocab)
         self._fuzzy_vocab_set: Set[str] = vocab
         self.fuzzy_cutoff: float = 0.8
+        # Skip fuzzy correction for long cell texts (notes/sentences)
+        self.fuzzy_max_tokens: int = 8
 
     # -----------------------
     # Override store (optional)
@@ -687,6 +691,12 @@ class PatternMatcher:
     # -----------------------
     # Public classification
     # -----------------------
+    def _muscle_only_match(self, tokens: Set[str]) -> Optional[str]:
+        for muscle_token, pattern in self.muscle_only.items():
+            if muscle_token in tokens:
+                return pattern
+        return None
+
     def classify_detailed(self, exercise_name: str) -> MatchResult:
         """
         Classify an exercise into a movement pattern, with confidence signals.
@@ -711,25 +721,32 @@ class PatternMatcher:
 
         if base_pattern is None:
             # 2) Muscle-only fallback (token must appear, not substring)
-            for muscle_token, pattern in self.muscle_only.items():
-                if muscle_token in tokens:
-                    return MatchResult(pattern, is_unilateral, score=self.min_score)
+            muscle_pattern = self._muscle_only_match(tokens)
+            if muscle_pattern:
+                return MatchResult(muscle_pattern, is_unilateral, score=self.min_score)
 
             # 3) Last-resort typo correction, then one re-run of the pipeline.
             # Only reachable when nothing matched, so it cannot change the
-            # result for any input that already classifies.
-            corrected_basic = self._fuzzy_correct(basic)
+            # result for any input that already classifies. Long cell texts
+            # (notes, sentences) are skipped — per-token fuzzy matching there
+            # is expensive and any match would be meaningless.
+            corrected_basic = None
+            if len(tokens) <= self.fuzzy_max_tokens:
+                corrected_basic = self._fuzzy_correct(basic)
             if corrected_basic is not None:
                 renormalized = self._apply_aliases(corrected_basic)
                 tokens = self._token_set(renormalized)
+                # The correction may have repaired a unilateral cue too
+                # ("singel leg press" -> "single leg press")
+                is_unilateral = is_unilateral or self._detect_unilateral(renormalized, tokens)
                 base_pattern, score, ambiguous = self._choose_best_pattern(tokens)
                 if base_pattern is None:
-                    for muscle_token, pattern in self.muscle_only.items():
-                        if muscle_token in tokens:
-                            return MatchResult(
-                                pattern, is_unilateral,
-                                score=self.min_score, fuzzy_corrected=True,
-                            )
+                    muscle_pattern = self._muscle_only_match(tokens)
+                    if muscle_pattern:
+                        return MatchResult(
+                            muscle_pattern, is_unilateral,
+                            score=self.min_score, fuzzy_corrected=True,
+                        )
                 else:
                     fuzzy_corrected = True
 
@@ -806,6 +823,16 @@ def move_match_detailed(exercise_name: str) -> Tuple[Optional[Movement], MatchRe
     """
     result = _classify_cached(exercise_name)
     return (_build_movement(result), result)
+
+
+def detect_unilateral(exercise_name: str) -> bool:
+    """
+    Word-boundary unilateral detection on a raw exercise name, for callers
+    outside the rule pipeline (e.g. user-override matching) that previously
+    used naive substring checks ("one" in "zone").
+    """
+    normalized = _MATCHER._normalize_text(exercise_name)
+    return _MATCHER._detect_unilateral(normalized, set(normalized.split()))
 
 
 def get_all_patterns() -> Dict[str, Dict[str, float]]:

@@ -10,8 +10,10 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
+from schemas.splits import SessionCreate
 
-MAX_TOTAL_CELLS = 20_000
+
+MAX_TOTAL_CELLS = 10_000
 MAX_SHEETS = 20
 
 
@@ -49,23 +51,15 @@ class ImportedExerciseStatus(BaseModel):
     score: int = Field(default=0, description="Matcher confidence score")
 
 
-class ImportPreviewExercise(BaseModel):
-    name: str
-    sets: int
-    unilateral: bool = False
-
-
-class ImportPreviewSession(BaseModel):
-    name: str
-    day_number: int
-    exercises: List[ImportPreviewExercise]
-
-
 class ImportPreviewSplit(BaseModel):
-    """SplitCreate-shaped payload, ready to prefill the split builder."""
+    """
+    SplitCreate-shaped payload, ready to prefill the split builder.
+    Reuses SessionCreate/ExerciseCreate so the preview contract can't drift
+    from the create contract it exists to prefill.
+    """
 
     name: str
-    sessions: List[ImportPreviewSession]
+    sessions: List[SessionCreate]
 
 
 class ImportPreviewResponse(BaseModel):

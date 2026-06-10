@@ -86,6 +86,20 @@ def parse_sets_cell(text: str) -> Optional[int]:
     return None
 
 
+def parse_day_cell(text: str) -> Optional[int]:
+    """
+    Extract a day number from a dedicated day column cell ('3', 'Day 12',
+    'Monday'). Days have their own bounds (1-14, the longest cycle the
+    product models) — distinct from set counts (1-12).
+    """
+    m = BARE_INT_RE.match(text)
+    if m:
+        value = int(m.group(1))
+        return value if 1 <= value <= 14 else None
+    header = parse_day_header(text)
+    return header[0] if header else None
+
+
 def split_embedded_sets(text: str) -> Tuple[str, Optional[int]]:
     """Split 'Bench Press 3x8' / 'Squat (5 sets)' into (name, sets)."""
     m = TRAILING_SETS_RE.search(text)
@@ -203,15 +217,28 @@ def _normalize_grid(grid: List[List[Any]]) -> List[List[str]]:
     return [[row[c] for c in keep_cols] for row in cleaned]
 
 
+_PROFILE_SAMPLE_LIMIT = 40
+
+
 def _column_profile(grid: List[List[str]], col: int, matcher: MatcherFn) -> Dict[str, float]:
+    """
+    Classify a column by the fraction of exercise/set-like/header cells.
+    Long columns are sampled evenly — the fractions converge quickly and
+    running the matcher on every cell of a large sheet is the dominant cost.
+    """
     cells = [row[col] for row in grid if row[col]]
     if not cells:
         return {"exercise": 0.0, "setlike": 0.0, "header": 0.0, "n": 0}
-    n = len(cells)
-    exercise = sum(1 for c in cells if matcher(split_embedded_sets(c)[0])[0] is not None)
-    setlike = sum(1 for c in cells if parse_sets_cell(c) is not None)
-    header = sum(1 for c in cells if parse_day_header(c) is not None)
-    return {"exercise": exercise / n, "setlike": setlike / n, "header": header / n, "n": n}
+    if len(cells) > _PROFILE_SAMPLE_LIMIT:
+        step = max(1, len(cells) // _PROFILE_SAMPLE_LIMIT)
+        sampled = cells[::step][:_PROFILE_SAMPLE_LIMIT]
+    else:
+        sampled = cells
+    n = len(sampled)
+    exercise = sum(1 for c in sampled if matcher(split_embedded_sets(c)[0])[0] is not None)
+    setlike = sum(1 for c in sampled if parse_sets_cell(c) is not None)
+    header = sum(1 for c in sampled if parse_day_header(c) is not None)
+    return {"exercise": exercise / n, "setlike": setlike / n, "header": header / n, "n": len(cells)}
 
 
 def _classify_exercise(raw: str, sets: Optional[int], matcher: MatcherFn) -> ImportedExercise:
@@ -305,6 +332,7 @@ def _parse_long(grid: List[List[str]], matcher: MatcherFn) -> Optional[ImportPar
     by_key: Dict[Tuple[str, int], ImportedSession] = {}
     warnings: List[str] = []
     current_day = 1
+    unreadable_days = 0
 
     for row in body:
         raw = row[ex_col]
@@ -314,10 +342,9 @@ def _parse_long(grid: List[List[str]], matcher: MatcherFn) -> Optional[ImportPar
         day: Optional[int] = None
         if "day" in col_roles:
             day_cell = row[col_roles["day"]]
-            day = parse_sets_cell(day_cell)
-            if day is None:
-                header = parse_day_header(day_cell)
-                day = header[0] if header else None
+            day = parse_day_cell(day_cell)
+            if day is None and day_cell:
+                unreadable_days += 1
         session_name = row[col_roles["session"]] if "session" in col_roles else ""
         if day is None and session_name:
             header = parse_day_header(session_name)
@@ -337,6 +364,11 @@ def _parse_long(grid: List[List[str]], matcher: MatcherFn) -> Optional[ImportPar
 
     if not sessions:
         return None
+    if unreadable_days:
+        warnings.append(
+            f"{unreadable_days} day value(s) couldn't be read; those exercises "
+            "were grouped with the previous session — double-check the preview."
+        )
     return ImportParse(layout="long", sessions=sessions, warnings=warnings)
 
 

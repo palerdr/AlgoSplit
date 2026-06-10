@@ -10,9 +10,11 @@ hit-rate).
 
 import pytest
 
+from core.granular_patterns import GRANULAR_PATTERNS
 from core.movementMatching import (
     MatchResult,
     _MATCHER,
+    detect_unilateral,
     move_match,
     move_match_detailed,
 )
@@ -306,18 +308,49 @@ def test_non_exercise_strings_do_not_match(text):
 # dead code (this previously affected hinge/ab/forearm rules).
 # ---------------------------------------------------------------------------
 
-def test_no_dead_rules():
+def _all_rules():
     for stage_name, stage in (
         ("specific", _MATCHER.specific_rules),
         ("general", _MATCHER.general_rules),
         ("fallback", _MATCHER.fallback_rules),
     ):
         for rule in stage:
-            max_score = rule.weight + 3 * len(rule.required) + (2 if rule.any_of else 0)
-            assert max_score >= _MATCHER.min_score, (
-                f"[{stage_name}] rule {rule.required} -> {rule.pattern} can never "
-                f"reach min_score ({max_score} < {_MATCHER.min_score})"
+            yield stage_name, rule
+
+
+def test_no_dead_rules():
+    for stage_name, rule in _all_rules():
+        max_score = rule.weight + 3 * len(rule.required) + (2 if rule.any_of else 0)
+        assert max_score >= _MATCHER.min_score, (
+            f"[{stage_name}] rule {rule.required} -> {rule.pattern} can never "
+            f"reach min_score ({max_score} < {_MATCHER.min_score})"
+        )
+
+
+def test_rule_tokens_are_singularization_fixed_points():
+    # Input tokens are singularized before rule matching, so a required/any_of
+    # token that singularization rewrites (e.g. "rows", "raises") makes the
+    # rule unreachable. banned tokens are exempt: bans are safety nets and may
+    # deliberately cover non-normalized forms reachable via fuzzy correction.
+    for stage_name, rule in _all_rules():
+        for token in (*rule.required, *rule.any_of):
+            assert _MATCHER._singularize_token(token) == token, (
+                f"[{stage_name}] rule token {token!r} (pattern {rule.pattern}) is not a "
+                f"singularization fixed point — it can never appear in input tokens"
             )
+
+
+def test_rule_patterns_exist_in_granular_patterns():
+    # A typo'd pattern name would classify successfully and then silently
+    # yield no Movement (move_match returns None for unknown patterns).
+    for stage_name, rule in _all_rules():
+        assert rule.pattern in GRANULAR_PATTERNS, (
+            f"[{stage_name}] rule {rule.required} maps to unknown pattern {rule.pattern!r}"
+        )
+    for token, pattern in _MATCHER.muscle_only.items():
+        assert pattern in GRANULAR_PATTERNS, (
+            f"muscle_only[{token!r}] maps to unknown pattern {pattern!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -357,3 +390,31 @@ def test_unilateral_detection_preserved():
     movement = move_match("Single Leg Press")
     assert movement is not None
     assert movement.unilateral is True
+
+
+def test_fuzzy_correction_repairs_unilateral_cue():
+    # "singel legg press" only matches after fuzzy correction to
+    # "single leg press"; the unilateral flag must come from the corrected
+    # text, not the pre-correction text.
+    movement, result = move_match_detailed("singel legg press")
+    assert movement is not None
+    assert result.fuzzy_corrected is True
+    assert movement.unilateral is True
+
+
+def test_fuzzy_skipped_for_long_cell_texts():
+    # Sentence-length cells (notes columns) skip the per-token fuzzy pass.
+    long_text = "this is a long note about how training went last week overall"
+    movement, result = move_match_detailed(long_text)
+    assert movement is None
+    assert result.fuzzy_corrected is False
+
+
+def test_detect_unilateral_uses_word_boundaries():
+    assert detect_unilateral("One Arm Row") is True
+    assert detect_unilateral("Single Leg RDL") is True
+    # Substring false positives the old override-path check produced:
+    assert detect_unilateral("Zone Training") is False
+    assert detect_unilateral("Prone Hold") is False
+    # Dumbbell work is bilateral by default:
+    assert detect_unilateral("DB Bench Press") is False

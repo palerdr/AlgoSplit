@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any, Tuple, cast
 from core.movementMatching import (
     move_match as default_move_match,
     move_match_detailed as default_move_match_detailed,
+    detect_unilateral,
     MatchResult,
     Movement,
 )
@@ -199,10 +200,10 @@ def move_match_with_overrides(
             if pattern_override in GRANULAR_PATTERNS:
                 targets = GRANULAR_PATTERNS[pattern_override]
 
-                is_unilateral = any(
-                    word in normalized_name
-                    for word in ["single", "one", "unilateral", "dumbbell", "db"]
-                )
+                # Word-boundary detection, consistent with default matching
+                # (a substring check here flagged "zone"/"prone" via "one",
+                # and treated all dumbbell work as unilateral).
+                is_unilateral = detect_unilateral(exercise_name)
 
                 movement = Movement(
                     pattern_override,
@@ -237,33 +238,26 @@ def move_match_with_overrides_detailed(
     signals for callers that triage matches (e.g. the import preview).
 
     Custom exercises and explicit user overrides are treated as fully
-    confident matches (score=100, never ambiguous).
+    confident matches (score=100, never ambiguous). When user_maps is not
+    provided it is loaded once via preload_user_exercise_maps.
     """
-    movement = None
     if user_id:
-        normalized_name = exercise_name.lower().strip()
         try:
-            if user_maps is not None:
-                custom = user_maps.get("custom", {}).get(normalized_name)
-                pattern_override = user_maps.get("overrides", {}).get(normalized_name)
-                if custom:
-                    movement = _build_movement_from_custom(custom, exercise_name)
-                elif pattern_override in GRANULAR_PATTERNS:
-                    movement = move_match_with_overrides(exercise_name, user_id, user_maps)
-            else:
-                movement = move_match_with_overrides(exercise_name, user_id)
-                if movement is not None and not movement.is_custom:
-                    # Distinguish a default match from a user override: a
-                    # default match carries the default MatchResult below.
-                    default_movement, default_result = default_move_match_detailed(exercise_name)
-                    if default_movement is not None and default_movement.name == movement.name:
-                        return (movement, default_result)
+            maps = user_maps if user_maps is not None else preload_user_exercise_maps(user_id)
+            normalized_name = exercise_name.lower().strip()
+
+            custom = maps.get("custom", {}).get(normalized_name)
+            if custom:
+                movement = _build_movement_from_custom(custom, exercise_name)
+                return (movement, MatchResult(movement.name, movement.unilateral, score=100))
+
+            pattern_override = maps.get("overrides", {}).get(normalized_name)
+            if pattern_override in GRANULAR_PATTERNS:
+                movement = move_match_with_overrides(exercise_name, user_id, maps)
+                if movement is not None:
+                    return (movement, MatchResult(movement.name, movement.unilateral, score=100))
         except Exception as e:
             print(f"Error checking exercise overrides: {e}")
-            movement = None
-
-        if movement is not None:
-            return (movement, MatchResult(movement.name, movement.unilateral, score=100))
 
     return default_move_match_detailed(exercise_name)
 

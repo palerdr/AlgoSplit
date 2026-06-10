@@ -8,6 +8,8 @@ exercises are reported for resolution — never rejected — the existing
 POST /api/splits validation remains the backstop on save.
 """
 
+from typing import Dict, Optional, Tuple
+
 from fastapi import APIRouter, Depends
 
 from api.dependencies import AuthUser, get_current_user
@@ -15,6 +17,7 @@ from core.exerciseMatching import (
     move_match_with_overrides_detailed,
     preload_user_exercise_maps,
 )
+from core.movementMatching import MatchResult, Movement
 from core.split_import import infer_split
 from schemas.imports import (
     ImportPreviewRequest,
@@ -26,8 +29,10 @@ from schemas.imports import (
 router = APIRouter(prefix="/api/splits/import", tags=["imports"])
 
 
+# Sync handler on purpose: inference is pure CPU, so FastAPI runs it in the
+# threadpool instead of blocking the event loop for large grids.
 @router.post("/preview", response_model=ImportPreviewResponse)
-async def preview_import(
+def preview_import(
     data: ImportPreviewRequest,
     current_user: AuthUser = Depends(get_current_user),
 ) -> ImportPreviewResponse:
@@ -35,10 +40,19 @@ async def preview_import(
     # doesn't hit the database per cell.
     user_maps = preload_user_exercise_maps(current_user.id)
 
-    def matcher(name: str):
-        return move_match_with_overrides_detailed(
-            name, user_id=current_user.id, user_maps=user_maps
-        )
+    # Per-request memo: the inference passes (column profiling + extraction)
+    # revisit the same cell strings, and the module-level lru_cache evicts
+    # on large grids.
+    memo: Dict[str, Tuple[Optional[Movement], MatchResult]] = {}
+
+    def matcher(name: str) -> Tuple[Optional[Movement], MatchResult]:
+        hit = memo.get(name)
+        if hit is None:
+            hit = move_match_with_overrides_detailed(
+                name, user_id=current_user.id, user_maps=user_maps
+            )
+            memo[name] = hit
+        return hit
 
     preview = infer_split(
         [sheet.model_dump() for sheet in data.sheets],

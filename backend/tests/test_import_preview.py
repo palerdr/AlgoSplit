@@ -43,6 +43,7 @@ def test_preview_long_format(import_client):
     assert [s["day_number"] for s in split["sessions"]] == [1, 2]
     assert split["sessions"][0]["exercises"][0] == {
         "name": "Bench Press", "sets": 4, "unilateral": False,
+        "resistance_profile": None,
     }
 
     statuses = {e["raw_name"]: e["status"] for e in body["exercises"]}
