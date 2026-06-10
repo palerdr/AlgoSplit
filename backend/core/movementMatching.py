@@ -15,6 +15,7 @@ muscle targeting percentages used by the net weekly stimulus model.
 
 from __future__ import annotations
 
+import difflib
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -91,6 +92,25 @@ class Rule:
     weight: int = 10
 
 
+@dataclass(frozen=True)
+class MatchResult:
+    """
+    Full classification outcome, including the confidence signals that
+    classify() historically discarded.
+
+    pattern: canonical pattern name, or None when unrecognized
+    is_unilateral: single-limb cue detected in the name
+    score: winning rule score (0 when unrecognized or matched via muscle_only)
+    ambiguous: runner-up pattern scored within ambiguity_margin of the winner
+    fuzzy_corrected: match only succeeded after typo-correcting tokens
+    """
+    pattern: Optional[str]
+    is_unilateral: bool = False
+    score: int = 0
+    ambiguous: bool = False
+    fuzzy_corrected: bool = False
+
+
 class PatternMatcher:
     """
     Robust movement pattern matcher with:
@@ -145,6 +165,15 @@ class PatternMatcher:
             # is bag-of-words, so we convert to unique directional tokens.
             ("high to low", "htl"),
             ("low to high", "lth"),
+            # Spreadsheet-style abbreviations and spellings. Word boundaries
+            # keep two-letter aliases from firing inside longer tokens, and
+            # list order keeps "rdl"/"sldl" ahead of the bare "dl".
+            ("dead lift", "deadlift"),
+            ("ghr", "glute ham raise"),
+            ("sldl", "stiff leg deadlift"),
+            ("cgbp", "close grip bench press"),
+            ("dl", "deadlift"),
+            ("bp", "bench press"),
         ]
 
         # -------------------------
@@ -180,6 +209,7 @@ class PatternMatcher:
             Rule(required=("clamshell",), any_of=(), banned=(), pattern="hip_abduction_isolation", weight=55),
             Rule(required=("hip", "adduction"), any_of=(), banned=(), pattern="hip_adduction_isolation", weight=60),
             Rule(required=("adductor",), any_of=(), banned=(), pattern="hip_adduction_isolation", weight=55),
+            Rule(required=("copenhagen",), any_of=(), banned=(), pattern="hip_adduction_isolation", weight=65),
 
             # Close grip pressing (tricep-dominant compound)
             Rule(required=("close", "grip", "bench"), any_of=(), banned=(), pattern="tricep_compound", weight=70),
@@ -192,7 +222,6 @@ class PatternMatcher:
 
             # Triceps isolation (protect against overhead press)
             Rule(required=("tricep", "extension"), any_of=(), banned=(), pattern="elbow_extension_isolation", weight=60),
-            Rule(required=("triceps", "extension"), any_of=(), banned=(), pattern="elbow_extension_isolation", weight=60),
             Rule(required=("tricep", "pushdown"), any_of=(), banned=(), pattern="elbow_extension_isolation", weight=60),
             Rule(required=("skull", "crusher"), any_of=(), banned=(), pattern="elbow_extension_isolation", weight=60),
             Rule(required=("tricep", "kickback"), any_of=(), banned=(), pattern="elbow_extension_isolation", weight=60),
@@ -286,6 +315,36 @@ class PatternMatcher:
             Rule(required=("flutter", "kick"), any_of=(), banned=(), pattern="leg_raise", weight=55),
             Rule(required=("scissor", "kick"), any_of=(), banned=(), pattern="leg_raise", weight=55),
             Rule(required=("mountain", "climber"), any_of=(), banned=(), pattern="anti_extension", weight=50),
+
+            # Bench press variants
+            Rule(required=("floor", "press"), any_of=(), banned=(), pattern="humeral_adduction_compound", weight=60),
+            Rule(required=("pin", "press"), any_of=(), banned=("leg",), pattern="humeral_adduction_compound", weight=60),
+            Rule(required=("larsen", "press"), any_of=(), banned=(), pattern="humeral_adduction_compound", weight=60),
+            Rule(required=("spoto", "press"), any_of=(), banned=(), pattern="humeral_adduction_compound", weight=60),
+
+            # Overhead press variants
+            Rule(required=("landmine", "press"), any_of=(), banned=(), pattern="pronated_vertical_press_compound", weight=60),
+            Rule(required=("z", "press"), any_of=(), banned=(), pattern="pronated_vertical_press_compound", weight=60),
+            Rule(required=("viking", "press"), any_of=(), banned=(), pattern="neutral_vertical_press_compound", weight=60),
+
+            # Triceps variants
+            Rule(required=("jm", "press"), any_of=(), banned=(), pattern="elbow_extension_isolation", weight=60),
+            Rule(required=("pushdown",), any_of=(), banned=("pull",), pattern="elbow_extension_isolation", weight=50),
+
+            # Posterior chain variants
+            Rule(required=("swing",), any_of=("kettlebell", "kb", "russian"), banned=(), pattern="hinge_compound", weight=55),
+            Rule(required=("glute", "ham", "raise"), any_of=(), banned=(), pattern="knee_flexion_isolation", weight=65),
+            Rule(required=("reverse", "nordic"), any_of=(), banned=(), pattern="knee_extension_isolation", weight=70),
+
+            # Quad-dominant squat lookalikes (must outscore the generic squat rule)
+            Rule(required=("sissy", "squat"), any_of=(), banned=(), pattern="knee_extension_isolation", weight=70),
+            Rule(required=("spanish", "squat"), any_of=(), banned=(), pattern="knee_extension_isolation", weight=70),
+
+            # Shoulder abbreviation ("lat raise" = lateral raise)
+            Rule(required=("lat", "raise"), any_of=(), banned=("pulldown", "pull"), pattern="shoulder_abduction_isolation", weight=55),
+
+            # Loaded carries (alongside the existing farmer walk rule)
+            Rule(required=("carry",), any_of=("suitcase", "farmer", "loaded"), banned=(), pattern="wrist_flexion_isolation", weight=50),
         ]
 
         self.general_rules: List[Rule] = [
@@ -335,7 +394,7 @@ class PatternMatcher:
             Rule(required=("romanian", "deadlift"), any_of=(), banned=(), pattern="hinge_compound", weight=45),
             Rule(required=("stiff", "leg"), any_of=(), banned=(), pattern="hinge_compound", weight=45),
             Rule(required=("good", "morning"), any_of=(), banned=(), pattern="hinge_compound", weight=45),
-            Rule(required=("hinge",), any_of=(), banned=(), pattern="hinge_compound", weight=30),
+            Rule(required=("hinge",), any_of=(), banned=(), pattern="hinge_compound", weight=35),
 
             Rule(required=("lunge",), any_of=(), banned=(), pattern="lunge_compound", weight=40),
             Rule(required=("split", "squat"), any_of=(), banned=(), pattern="lunge_compound", weight=45),
@@ -347,7 +406,7 @@ class PatternMatcher:
             Rule(required=("sit", "up"), any_of=(), banned=(), pattern="spinal_flexion", weight=40),
             Rule(required=("v", "up"), any_of=(), banned=(), pattern="spinal_flexion", weight=40),
             Rule(required=("toe", "touch"), any_of=(), banned=(), pattern="spinal_flexion", weight=40),
-            Rule(required=("ab",), any_of=("crunch", "wheel", "rollout"), banned=(), pattern="spinal_flexion", weight=25),
+            Rule(required=("ab",), any_of=("crunch", "wheel", "rollout"), banned=(), pattern="spinal_flexion", weight=32),
             Rule(required=("ab", "machine"), any_of=(), banned=(), pattern="spinal_flexion", weight=45),
 
             Rule(required=("back", "extension"), any_of=(), banned=(), pattern="spinal_extension", weight=40),
@@ -357,30 +416,40 @@ class PatternMatcher:
             Rule(required=("rack", "pull"), any_of=(), banned=(), pattern="hinge_compound", weight=35),
 
             # Calves
-            Rule(required=("calf",), any_of=("raise", "raises", "press"), banned=(), pattern="ankle_plantarflexion_isolation", weight=40),
+            Rule(required=("calf",), any_of=("raise", "press"), banned=(), pattern="ankle_plantarflexion_isolation", weight=40),
         ]
 
         self.fallback_rules: List[Rule] = [
-            # Forearms fallback
-            Rule(required=("forearm",), any_of=(), banned=(), pattern="wrist_flexion_isolation", weight=20),
-            Rule(required=("forearms",), any_of=(), banned=(), pattern="wrist_flexion_isolation", weight=20),
+            # Forearms fallback (weight must clear min_score: w + 3*len(required))
+            Rule(required=("forearm",), any_of=(), banned=(), pattern="wrist_flexion_isolation", weight=32),
         ]
 
-        # Muscle-only fallback (when user types just muscle name)
+        # Muscle-only fallback (when user types just muscle name).
+        # Tokens are singularized before matching, so singular keys are the
+        # ones that actually fire; plural keys are kept defensively.
         self.muscle_only: Dict[str, str] = {
             "biceps": "elbow_flexion_isolation",
             "bicep": "elbow_flexion_isolation",
+            "bis": "elbow_flexion_isolation",
             "triceps": "elbow_extension_isolation",
             "tricep": "elbow_extension_isolation",
+            "tri": "elbow_extension_isolation",
             "calves": "ankle_plantarflexion_isolation",
             "calf": "ankle_plantarflexion_isolation",
             "abs": "spinal_flexion",
+            "abdominal": "spinal_flexion",
             "abdominals": "spinal_flexion",
+            "erector": "spinal_extension",
             "erectors": "spinal_extension",
             "forearm": "wrist_flexion_isolation",
             "forearms": "wrist_flexion_isolation",
+            "quad": "knee_extension_isolation",
             "quads": "knee_extension_isolation",
+            "hamstring": "knee_flexion_isolation",
             "hamstrings": "knee_flexion_isolation",
+            "hammy": "knee_flexion_isolation",
+            "hammie": "knee_flexion_isolation",
+            "glute": "hip_extension_isolation",
             "glutes": "hip_extension_isolation",
         }
 
@@ -393,6 +462,31 @@ class PatternMatcher:
 
         # If top two scores are too close, treat as ambiguous
         self.ambiguity_margin: int = 8
+
+        # -------------------------
+        # Typo-correction vocabulary
+        # -------------------------
+        # Every token the rules can react to, plus alias inputs/outputs and
+        # muscle shorthand. Used by the last-resort fuzzy fallback, which only
+        # runs when rule matching and muscle_only both fail — so it cannot
+        # change the result for anything that already matches.
+        vocab: Set[str] = set()
+        for stage in (self.specific_rules, self.general_rules, self.fallback_rules):
+            for rule in stage:
+                vocab.update(rule.required)
+                vocab.update(rule.any_of)
+        for src, dst in self._phrase_aliases:
+            vocab.update(src.split())
+            vocab.update(dst.split())
+        vocab.update(self.muscle_only.keys())
+        # Unilateral cue words: not rule tokens, but typo-correcting them
+        # preserves the unilateral flag ("singel leg press")
+        vocab.update({"single", "unilateral", "alternating", "one"})
+        self._fuzzy_vocab: List[str] = sorted(vocab)
+        self._fuzzy_vocab_set: Set[str] = vocab
+        self.fuzzy_cutoff: float = 0.8
+        # Skip fuzzy correction for long cell texts (notes/sentences)
+        self.fuzzy_max_tokens: int = 8
 
     # -----------------------
     # Override store (optional)
@@ -425,19 +519,42 @@ class PatternMatcher:
     # -----------------------
     # Normalization utilities
     # -----------------------
-    def _normalize_text(self, text: str) -> str:
+    # Irregular plural forms the trailing-s heuristic would mangle.
+    _IRREGULAR_PLURALS: Dict[str, str] = {
+        "ups": "up",       # the len<=3 guard would otherwise skip it
+        "calves": "calf",
+    }
+
+    def _singularize_token(self, token: str) -> str:
+        irregular = self._IRREGULAR_PLURALS.get(token)
+        if irregular:
+            return irregular
+        # Short tokens ("abs", "bis", "21s") and -ss words ("press") stay as-is
+        if len(token) <= 3 or token.endswith("ss"):
+            return token
+        if token.endswith("s"):
+            return token[:-1]
+        return token
+
+    def _basic_normalize(self, text: str) -> str:
+        """Lowercase, strip punctuation, singularize tokens. No aliases yet."""
         text = text.lower()
         # Keep alphanumerics and spaces, replace punctuation with spaces
         text = re.sub(r"[^a-z0-9\s]", " ", text)
         text = re.sub(r"\s+", " ", text).strip()
+        # Singularize BEFORE alias expansion so plural shorthand still chains
+        # through aliases ("skullcrushers" -> "skullcrusher" -> "skull crusher")
+        return " ".join(self._singularize_token(t) for t in text.split())
 
-        # Apply phrase aliases (string-level) before tokenization
+    def _apply_aliases(self, text: str) -> str:
         for src, dst in self._phrase_aliases:
             # Replace whole-word occurrences where possible
             # Use word boundaries to avoid weird partial replacements
             text = re.sub(rf"\b{re.escape(src)}\b", dst, text)
-
         return text
+
+    def _normalize_text(self, text: str) -> str:
+        return self._apply_aliases(self._basic_normalize(text))
 
     def _tokenize(self, normalized_text: str) -> List[str]:
         return normalized_text.split()
@@ -545,16 +662,47 @@ class PatternMatcher:
         return base_pattern
 
     # -----------------------
+    # Fuzzy typo fallback
+    # -----------------------
+    def _fuzzy_correct(self, basic_text: str) -> Optional[str]:
+        """
+        Correct unknown tokens against the matcher vocabulary.
+
+        Operates on pre-alias text so corrected tokens still flow through
+        alias expansion ("puldown" -> "pulldown" -> "pull down").
+        Returns the corrected string, or None if nothing was corrected.
+        """
+        corrected: List[str] = []
+        changed = False
+        for token in basic_text.split():
+            if token in self._fuzzy_vocab_set or len(token) < 4 or not token.isalpha():
+                corrected.append(token)
+                continue
+            close = difflib.get_close_matches(
+                token, self._fuzzy_vocab, n=1, cutoff=self.fuzzy_cutoff
+            )
+            if close:
+                corrected.append(close[0])
+                changed = True
+            else:
+                corrected.append(token)
+        return " ".join(corrected) if changed else None
+
+    # -----------------------
     # Public classification
     # -----------------------
-    def classify(self, exercise_name: str) -> Tuple[Optional[str], bool]:
-        """
-        Classify an exercise into a movement pattern.
+    def _muscle_only_match(self, tokens: Set[str]) -> Optional[str]:
+        for muscle_token, pattern in self.muscle_only.items():
+            if muscle_token in tokens:
+                return pattern
+        return None
 
-        Returns:
-            (pattern_name, is_unilateral) or (None, False)
+    def classify_detailed(self, exercise_name: str) -> MatchResult:
         """
-        normalized = self._normalize_text(exercise_name)
+        Classify an exercise into a movement pattern, with confidence signals.
+        """
+        basic = self._basic_normalize(exercise_name)
+        normalized = self._apply_aliases(basic)
 
         # 0) Overrides (deployment-ready)
         if self._override_get is not None:
@@ -562,34 +710,66 @@ class PatternMatcher:
             if overridden:
                 tokens = self._token_set(normalized)
                 is_uni = self._detect_unilateral(normalized, tokens)
-                return (overridden, is_uni)
+                return MatchResult(overridden, is_uni, score=100)
 
         tokens = self._token_set(normalized)
         is_unilateral = self._detect_unilateral(normalized, tokens)
 
         # 1) Rule-based selection with scoring
         base_pattern, score, ambiguous = self._choose_best_pattern(tokens)
+        fuzzy_corrected = False
 
-        # 2) Muscle-only fallback if rules didn't classify
         if base_pattern is None:
-            # Require that the token itself appears, not substring
-            for muscle_token, pattern in self.muscle_only.items():
-                if muscle_token in tokens:
-                    return (pattern, is_unilateral)
-            return (None, False)
+            # 2) Muscle-only fallback (token must appear, not substring)
+            muscle_pattern = self._muscle_only_match(tokens)
+            if muscle_pattern:
+                return MatchResult(muscle_pattern, is_unilateral, score=self.min_score)
 
-        # 3) Refinement via modifiers
+            # 3) Last-resort typo correction, then one re-run of the pipeline.
+            # Only reachable when nothing matched, so it cannot change the
+            # result for any input that already classifies. Long cell texts
+            # (notes, sentences) are skipped — per-token fuzzy matching there
+            # is expensive and any match would be meaningless.
+            corrected_basic = None
+            if len(tokens) <= self.fuzzy_max_tokens:
+                corrected_basic = self._fuzzy_correct(basic)
+            if corrected_basic is not None:
+                renormalized = self._apply_aliases(corrected_basic)
+                tokens = self._token_set(renormalized)
+                # The correction may have repaired a unilateral cue too
+                # ("singel leg press" -> "single leg press")
+                is_unilateral = is_unilateral or self._detect_unilateral(renormalized, tokens)
+                base_pattern, score, ambiguous = self._choose_best_pattern(tokens)
+                if base_pattern is None:
+                    muscle_pattern = self._muscle_only_match(tokens)
+                    if muscle_pattern:
+                        return MatchResult(
+                            muscle_pattern, is_unilateral,
+                            score=self.min_score, fuzzy_corrected=True,
+                        )
+                else:
+                    fuzzy_corrected = True
+
+            if base_pattern is None:
+                return MatchResult(None)
+
+        # 4) Refinement via modifiers
         refined = self._refine_with_modifiers(base_pattern, tokens)
 
-        # 4) If ambiguous, you can decide whether to return None (to prompt user)
-        # For now, we still return the best match to preserve "good enough" behavior.
-        # In app UI, you might instead return None and ask user to select.
-        # Example policy:
-        #   if ambiguous: return (None, is_unilateral)
-        _ = score  # keep available if you want to log/telemetry later
-        _ = ambiguous
+        return MatchResult(
+            refined, is_unilateral,
+            score=score, ambiguous=ambiguous, fuzzy_corrected=fuzzy_corrected,
+        )
 
-        return (refined, is_unilateral)
+    def classify(self, exercise_name: str) -> Tuple[Optional[str], bool]:
+        """
+        Classify an exercise into a movement pattern.
+
+        Returns:
+            (pattern_name, is_unilateral) or (None, False)
+        """
+        result = self.classify_detailed(exercise_name)
+        return (result.pattern, result.is_unilateral)
 
 
 # Global matcher instance (same usage pattern as before)
@@ -600,9 +780,25 @@ _MATCHER = PatternMatcher()
 # Public API (unchanged)
 # -----------------------------
 @lru_cache(maxsize=512)
-def _classify_cached(exercise_name: str) -> Tuple[Optional[str], bool]:
+def _classify_cached(exercise_name: str) -> MatchResult:
     """Cached classification — avoids re-running regex rules for repeated exercise names."""
-    return _MATCHER.classify(exercise_name)
+    return _MATCHER.classify_detailed(exercise_name)
+
+
+def _build_movement(result: MatchResult) -> Optional[Movement]:
+    if not result.pattern or result.pattern not in GRANULAR_PATTERNS:
+        return None
+
+    # Get flattened targets for backward compatibility
+    targets = get_flat_muscle_targets(result.pattern)
+    resistance_profile = get_pattern_resistance_profile(result.pattern)
+
+    return Movement(
+        result.pattern,
+        targets,
+        resistance_profile=resistance_profile,
+        is_unilateral=result.is_unilateral
+    )
 
 
 def move_match(exercise_name: str) -> Optional[Movement]:
@@ -616,25 +812,27 @@ def move_match(exercise_name: str) -> Optional[Movement]:
         Movement object with pattern name, muscle targets from granular_patterns,
         resistance profile, and unilateral flag. Returns None if not recognized.
     """
-    pattern_name, is_unilateral = _classify_cached(exercise_name)
+    return _build_movement(_classify_cached(exercise_name))
 
-    if not pattern_name:
-        return None
 
-    # Verify pattern exists in granular_patterns
-    if pattern_name not in GRANULAR_PATTERNS:
-        return None
+def move_match_detailed(exercise_name: str) -> Tuple[Optional[Movement], MatchResult]:
+    """
+    Like move_match, but also returns the MatchResult confidence signals
+    (score, ambiguity, fuzzy correction) for callers that triage matches —
+    e.g. the spreadsheet import preview.
+    """
+    result = _classify_cached(exercise_name)
+    return (_build_movement(result), result)
 
-    # Get flattened targets for backward compatibility
-    targets = get_flat_muscle_targets(pattern_name)
-    resistance_profile = get_pattern_resistance_profile(pattern_name)
 
-    return Movement(
-        pattern_name,
-        targets,
-        resistance_profile=resistance_profile,
-        is_unilateral=is_unilateral
-    )
+def detect_unilateral(exercise_name: str) -> bool:
+    """
+    Word-boundary unilateral detection on a raw exercise name, for callers
+    outside the rule pipeline (e.g. user-override matching) that previously
+    used naive substring checks ("one" in "zone").
+    """
+    normalized = _MATCHER._normalize_text(exercise_name)
+    return _MATCHER._detect_unilateral(normalized, set(normalized.split()))
 
 
 def get_all_patterns() -> Dict[str, Dict[str, float]]:

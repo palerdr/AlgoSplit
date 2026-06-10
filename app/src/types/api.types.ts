@@ -788,3 +788,56 @@ export interface BodyweightEntryListResponse {
 export interface BodyweightBatchCreate {
   entries: BodyweightEntryCreate[];
 }
+
+// ============================================
+// Spreadsheet Import
+// ============================================
+
+export interface ImportSheet {
+  name: string;
+  grid: string[][];
+}
+
+export interface ImportPreviewRequest {
+  sheets: ImportSheet[];
+  split_name_hint?: string;
+}
+
+export type ImportExerciseStatus = 'matched' | 'ambiguous' | 'unrecognized';
+
+export interface ImportedExerciseStatus {
+  session_index: number;
+  exercise_index: number;
+  raw_name: string;
+  status: ImportExerciseStatus;
+  pattern: string | null;
+  score: number;
+}
+
+export interface ImportPreviewExercise {
+  name: string;
+  sets: number;
+  unilateral: boolean;
+  resistance_profile?: string | null;
+}
+
+export interface ImportPreviewSession {
+  name: string;
+  day_number: number;
+  exercises: ImportPreviewExercise[];
+}
+
+export interface ImportPreviewSplit {
+  name: string;
+  sessions: ImportPreviewSession[];
+}
+
+export interface ImportPreviewResponse {
+  split: ImportPreviewSplit | null;
+  layout: 'long' | 'wide' | 'blocked' | 'unknown';
+  confidence: number;
+  exercises: ImportedExerciseStatus[];
+  warnings: string[];
+  sheet_name: string | null;
+  skipped_sheets: string[];
+}

@@ -3,8 +3,14 @@ Exercise matching with user-specific overrides and custom exercises
 Wrapper around movementMatching that supports database-backed user overrides
 """
 
-from typing import Optional, Dict, Any, cast
-from core.movementMatching import move_match as default_move_match, Movement
+from typing import Optional, Dict, Any, Tuple, cast
+from core.movementMatching import (
+    move_match as default_move_match,
+    move_match_detailed as default_move_match_detailed,
+    detect_unilateral,
+    MatchResult,
+    Movement,
+)
 from core.granular_patterns import GRANULAR_PATTERNS
 from db.supabase import get_supabase_client
 
@@ -194,10 +200,10 @@ def move_match_with_overrides(
             if pattern_override in GRANULAR_PATTERNS:
                 targets = GRANULAR_PATTERNS[pattern_override]
 
-                is_unilateral = any(
-                    word in normalized_name
-                    for word in ["single", "one", "unilateral", "dumbbell", "db"]
-                )
+                # Word-boundary detection, consistent with default matching
+                # (a substring check here flagged "zone"/"prone" via "one",
+                # and treated all dumbbell work as unilateral).
+                is_unilateral = detect_unilateral(exercise_name)
 
                 movement = Movement(
                     pattern_override,
@@ -220,6 +226,40 @@ def move_match_with_overrides(
     if movement_cache is not None:
         movement_cache[normalized_name] = movement
     return movement
+
+
+def move_match_with_overrides_detailed(
+    exercise_name: str,
+    user_id: Optional[str] = None,
+    user_maps: Optional[UserExerciseMaps] = None,
+) -> Tuple[Optional[Movement], MatchResult]:
+    """
+    Like move_match_with_overrides, but also returns MatchResult confidence
+    signals for callers that triage matches (e.g. the import preview).
+
+    Custom exercises and explicit user overrides are treated as fully
+    confident matches (score=100, never ambiguous). When user_maps is not
+    provided it is loaded once via preload_user_exercise_maps.
+    """
+    if user_id:
+        try:
+            maps = user_maps if user_maps is not None else preload_user_exercise_maps(user_id)
+            normalized_name = exercise_name.lower().strip()
+
+            custom = maps.get("custom", {}).get(normalized_name)
+            if custom:
+                movement = _build_movement_from_custom(custom, exercise_name)
+                return (movement, MatchResult(movement.name, movement.unilateral, score=100))
+
+            pattern_override = maps.get("overrides", {}).get(normalized_name)
+            if pattern_override in GRANULAR_PATTERNS:
+                movement = move_match_with_overrides(exercise_name, user_id, maps)
+                if movement is not None:
+                    return (movement, MatchResult(movement.name, movement.unilateral, score=100))
+        except Exception as e:
+            print(f"Error checking exercise overrides: {e}")
+
+    return default_move_match_detailed(exercise_name)
 
 
 def get_exercise_pattern(exercise_name: str, user_id: Optional[str] = None) -> dict:

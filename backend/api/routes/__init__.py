@@ -4,6 +4,7 @@ API routes for AlgoSplit
 
 from .auth import router as auth_router
 from .splits import router as splits_router
+from .imports import router as imports_router
 from .workouts import router as workouts_router
 from .overrides import router as overrides_router
 from .custom_exercises import router as custom_exercises_router
@@ -19,6 +20,7 @@ from .bodyweight import router as bodyweight_router
 __all__ = [
     "auth_router",
     "splits_router",
+    "imports_router",
     "workouts_router",
     "overrides_router",
     "custom_exercises_router",
