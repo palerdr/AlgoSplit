@@ -27,41 +27,53 @@ split-ai/
 ## Setup
 
 ### Prerequisites
-- Python 3.8+
-- pip
+- Python 3.12+
+- [uv](https://docs.astral.sh/uv/) (recommended) — `curl -LsSf https://astral.sh/uv/install.sh | sh`
 
-### Installation
+### Installation (uv, recommended)
 
-1. Clone the repository:
 ```bash
-cd "C:\Users\jcena\OneDrive\Desktop\Split.Ai"
+git clone <repo-url> && cd AlgoSplit
+
+# Resolves + installs runtime + dev deps into backend/.venv from uv.lock.
+uv sync --project backend
 ```
 
-2. Create a virtual environment:
+The Python interpreter is pinned to 3.12 via `backend/pyproject.toml`. uv will
+auto-install it if missing.
+
+### Installation (pip fallback)
+
+`backend/requirements.txt` and the root `requirements.txt` are auto-generated
+from `backend/uv.lock` (see header in each file). They stay in the tree so
+deployment targets without uv (Render, etc.) can still install with pip:
+
 ```bash
-python -m venv venv
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r backend/requirements.txt
 ```
 
-3. Activate the virtual environment:
-```bash
-# Windows
-venv\Scripts\activate
+### Regenerating the lockfile
 
-# Mac/Linux
-source venv/bin/activate
-```
+After editing `backend/pyproject.toml`:
 
-4. Install dependencies:
 ```bash
-pip install -r requirements.txt
+cd backend && uv lock
+# Sync both requirements.txt files from the lock:
+uv export --no-dev --no-hashes --no-emit-project --format requirements-txt -o requirements.txt
+cd .. && uv export --project backend --no-dev --no-hashes --no-emit-project --format requirements-txt -o requirements.txt
 ```
 
 ### Running the API
 
 Start the development server:
 ```bash
-cd backend
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uv run --project backend uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Or with the pip-installed venv activated:
+```bash
+cd backend && uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 The API will be available at:

@@ -51,6 +51,10 @@ SUPABASE_JWT_SECRET=your-jwt-secret
    Start Command: uvicorn main:app --host 0.0.0.0 --port $PORT
    ```
 
+   `backend/requirements.txt` is auto-generated from `backend/uv.lock` (header
+   in the file documents the regen command), so the pip install above gets
+   the same pinned versions as a local `uv sync`.
+
 4. **Add Environment Variables**
    In Render dashboard → Environment:
    ```
