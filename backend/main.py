@@ -301,7 +301,7 @@ async def shutdown_event():
 # Import API routes
 from api import analysis_routes
 from api.routes import (
-    auth_router, splits_router, workouts_router, overrides_router,
+    auth_router, splits_router, imports_router, workouts_router, overrides_router,
     custom_exercises_router, comparisons_router,
     programs_router, session_templates_router, program_sessions_router, program_diagnostics_router,
     periodization_router, meso_templates_router, bodyweight_router,
@@ -310,6 +310,7 @@ from api.routes import (
 # Include routers
 app.include_router(auth_router)  # Auth router (has its own /auth prefix)
 app.include_router(splits_router)  # Splits router (has its own /api/splits prefix)
+app.include_router(imports_router)  # Import preview router (has its own /api/splits/import prefix)
 app.include_router(workouts_router)  # Workouts router (has its own /api/workouts prefix)
 app.include_router(overrides_router)  # Overrides router (has its own /api/exercise-overrides prefix)
 app.include_router(custom_exercises_router)  # Custom exercises router (has its own /api/custom-exercises prefix)
