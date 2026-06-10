@@ -297,8 +297,10 @@ async def forgot_password(request: ForgotPasswordRequest):
         supabase = get_supabase_client()
         supabase.auth.reset_password_email(request.email)
     except Exception:
-        # Swallow errors to prevent email enumeration
-        logger.debug("Password reset request for %s (may or may not exist)", request.email)
+        # Swallow the error AND do not log the email — logging it would create a
+        # PII trail in production logs, and the failure itself is not
+        # actionable (Supabase enumerates internally).
+        logger.debug("Password reset request failed for unknown account")
 
     return {"message": "If an account with that email exists, a reset link has been sent."}
 

@@ -195,6 +195,10 @@ function InteractiveBody({
   const raycasterRef = useRef(new THREE.Raycaster());
   const bodyDataRef = useRef<SegmentedBodyData | null>(null);
   const rafRef = useRef<number | null>(null);
+  // True when something visible has changed (drag, inertia, color update). The
+  // rAF loop reads this and skips renderer.render()+endFrameEXP when stale, so
+  // a stationary body costs nothing per frame instead of repainting at 60fps.
+  const needsRenderRef = useRef(true);
 
   // Track latest stimulus levels for color updates
   const stimulusRef = useRef(stimulusLevels);
@@ -259,6 +263,7 @@ function InteractiveBody({
         if (groupRef.current) {
           groupRef.current.rotation.y = rotationRef.current;
         }
+        needsRenderRef.current = true;
       },
       onPanResponderRelease: () => {
         isDraggingRef.current = false;
@@ -344,19 +349,31 @@ function InteractiveBody({
         groupRef.current = group;
         scene.add(group);
 
-        // Animation loop
+        // Animation loop — gated on `needsRenderRef`. We still tick rAF every
+        // frame so drag/inertia can wake the renderer back up, but we skip the
+        // GPU work + buffer swap when nothing visible has changed. Apple
+        // reviewers will reject apps that burn battery animating an idle scene.
         const animate = () => {
           rafRef.current = requestAnimationFrame(animate);
+
+          let needsRender = needsRenderRef.current;
+          needsRenderRef.current = false;
 
           // Apply inertia when not dragging
           if (!isDraggingRef.current && Math.abs(velocityRef.current) > MIN_INERTIA_VELOCITY) {
             velocityRef.current *= INERTIA_DECAY;
             rotationRef.current = normalizeRotation(rotationRef.current + velocityRef.current);
+            needsRender = true;
           } else if (!Number.isFinite(velocityRef.current)) {
             velocityRef.current = 0;
           }
 
-          // Always sync rotation from ref (covers both drag + inertia)
+          if (isDraggingRef.current) {
+            needsRender = true;
+          }
+
+          if (!needsRender) return;
+
           if (groupRef.current) {
             groupRef.current.position.x = BODY_3D_CONFIG.model.offsetX;
             groupRef.current.position.y = BODY_3D_CONFIG.model.offsetY;
@@ -393,6 +410,7 @@ function InteractiveBody({
   useEffect(() => {
     if (bodyDataRef.current) {
       updateSegmentedBodyColors(bodyDataRef.current, stimulusLevels);
+      needsRenderRef.current = true;
     }
   }, [stimulusLevels]);
 

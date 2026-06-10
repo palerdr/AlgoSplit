@@ -271,7 +271,69 @@ Vercel and Render will automatically:
 
 ---
 
-## 10. Troubleshooting
+## 10. iOS App Store Submission
+
+The mobile app is configured for submission; the items below are the
+human-only steps that must be done before / during submission.
+
+### Pre-build (required)
+
+1. **EAS project ID** — replace the placeholder in `app/app.json` →
+   `expo.extra.eas.projectId`. Run `eas init` from `app/` to mint one.
+
+2. **App Store Connect record** — create the app with bundle ID
+   `com.algosplit.app` (matches `app/app.json` → `ios.bundleIdentifier`).
+
+3. **Privacy policy URL** — Apple requires a hosted privacy policy. Paste
+   it into App Store Connect → App Privacy and link to it from the in-app
+   Settings screen.
+
+4. **Support URL** — required by App Store Connect; a landing page or
+   GitHub Issues link is fine for v1.
+
+### App Privacy form (App Store Connect)
+
+The privacy manifest in `app/app.json` already declares this. Mirror it:
+
+| Data type | Linked | Tracking | Purpose |
+|---|---|---|---|
+| Email Address | Yes | No | App Functionality |
+| Other User Content (workout data) | Yes | No | App Functionality |
+| Fitness | Yes | No | App Functionality |
+
+Answer "No" to the Tracking question — there are no tracking SDKs and
+the manifest reflects that.
+
+### Already handled in code
+
+- **Export compliance**: `app.json` → `ios.infoPlist.ITSAppUsesNonExemptEncryption: false`
+- **Required Reason APIs**: declared in `ios.privacyManifests.NSPrivacyAccessedAPITypes`
+  (UserDefaults `CA92.1`, FileTimestamp `C617.1`, SystemBootTime `35F9.1`, DiskSpace `E174.1`)
+- **Account deletion** (Apple requires since June 2022): `app/app/(tabs)/settings.tsx`
+- **Token storage in iOS Keychain**: `app/src/api/client.ts` via `expo-secure-store`
+- **HTTPS-only API**: `app/src/api/client.ts` (localhost only in dev)
+- **No service-role keys in the client bundle**
+
+### Build & submit
+
+```bash
+cd app
+eas build --platform ios --profile production
+eas submit --platform ios
+```
+
+### Smoke-test before submitting
+
+- [ ] Sign up → log in → log out → log back in
+- [ ] Create a split, log a workout, view analysis
+- [ ] Import a spreadsheet (DocumentPicker flow)
+- [ ] Delete account — confirm full data removal
+- [ ] Pull-to-refresh on dashboard while on cellular (ATS check)
+- [ ] Background the app for >30s, return — auth survives via Keychain
+
+---
+
+## 11. Troubleshooting
 
 ### "CORS Error"
 - Check backend CORS origins include your Vercel URL
