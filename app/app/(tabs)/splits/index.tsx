@@ -149,11 +149,11 @@ export default function SplitsScreen() {
             <Text style={styles.compareBtnText}>Compare</Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={styles.compareBtn}
+            style={styles.iconBtn}
             onPress={() => router.push('/(tabs)/splits/import')}
+            accessibilityLabel="Import split from spreadsheet"
           >
-            <Ionicons name="cloud-upload-outline" size={16} color={colors.text} />
-            <Text style={styles.compareBtnText}>Import</Text>
+            <Ionicons name="download-outline" size={18} color={colors.text} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.addBtn}
@@ -242,6 +242,16 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 13,
     fontWeight: '600',
+  },
+  iconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
   },
   addBtn: {
     width: 36,
