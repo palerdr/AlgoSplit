@@ -322,7 +322,13 @@ export default function CreateSplitScreen() {
           <Text style={styles.headerTitle}>Create Split</Text>
           <InfoButton title={HELP_CONTENT['splits.overview'].title} body={HELP_CONTENT['splits.overview'].body} />
         </View>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity
+          style={styles.importBtn}
+          onPress={() => router.push('/(tabs)/splits/import')}
+          accessibilityLabel="Import split from spreadsheet"
+        >
+          <Ionicons name="download-outline" size={18} color={colors.text} />
+        </TouchableOpacity>
       </View>
 
       <ScrollContainerComponent
@@ -516,6 +522,16 @@ const styles = StyleSheet.create({
   headerTitle: {
     ...typography.h3,
     color: colors.text,
+  },
+  importBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: borders.width.thin,
+    borderColor: colors.border,
   },
   scrollContent: {
     paddingHorizontal: 20,
