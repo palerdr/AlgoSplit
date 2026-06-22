@@ -1,257 +1,266 @@
-# Split.AI - Workout Split Analysis & Optimization
+# AlgoSplit
 
-An intelligent workout analysis tool that evaluates training splits using research-backed muscle stimulus and fatigue models (Schoenfeld & Pelland curves).
+AlgoSplit is a training split planner, workout tracker, and analysis app. It combines a React Native/Expo client with a FastAPI backend that models muscle stimulus, fatigue, recovery, and training history against user-created splits.
 
-## Features
+The project is no longer an API-only prototype. It now includes authentication, Supabase-backed persistence, split editing/importing, logged workout history, progress charts, custom exercise overrides, comparisons, bodyweight tracking, and program/session-template workflows.
 
-- **Exercise Pattern Recognition**: Automatically classifies exercises into movement patterns
-- **Muscle Stimulus Calculation**: Computes weekly stimulus for 16 muscle groups
-- **Atrophy Modeling**: Accounts for recovery windows and training frequency
-- **Optimization Suggestions**: Provides actionable recommendations for improving your split
-- **REST API**: FastAPI backend for easy integration
+## What It Does
 
-## Project Structure
+- Build and edit weekly or custom-cycle training splits.
+- Analyze splits across 29 muscle regions using research-backed stimulus and fatigue curves.
+- Parse exercise names into movement patterns, target muscles, resistance profiles, bilateral/unilateral status, and axial fatigue contributions.
+- Start workouts from saved split sessions or from a blank quick workout.
+- Log sets, reps, load, RIR, notes, unilateral work, and workout duration.
+- Reuse previous workout data as entry-field shadow values.
+- Track workout history, recent stimulus, progress trends, and bodyweight.
+- Manage custom exercises and user-specific exercise overrides.
+- Save split comparisons and work with programs, microcycles, session templates, and scheduled sessions.
 
+## Tech Stack
+
+| Area | Stack |
+| --- | --- |
+| App | Expo Router, React Native 0.83, React 19, TypeScript |
+| State/data | Zustand, TanStack Query, AsyncStorage, SecureStore |
+| API | FastAPI, Pydantic v2, Uvicorn |
+| Database/auth | Supabase Postgres, Supabase Auth/JWT, RLS |
+| Analysis | Python engine under `backend/core` |
+| Tests | Jest/Jest Expo, pytest |
+| Deployment | Expo/Vercel-style web export for app, Render/Fly/Railway for API, Supabase for data |
+
+## Repository Layout
+
+```text
+algosplit/
+|-- app/                    # Expo app: native + web client
+|   |-- app/                # Expo Router screens
+|   |-- src/                # API clients, hooks, stores, components, utils
+|   |-- tests/              # Jest tests for app logic/components
+|   `-- package.json
+|-- backend/
+|   |-- api/                # FastAPI routes, dependencies, security
+|   |-- core/               # Analysis engine and movement matching
+|   |-- db/migrations/      # Supabase SQL migrations
+|   |-- schemas/            # Pydantic request/response models
+|   `-- main.py
+|-- legacy/                 # Older prototype code retained for reference
+|-- sync/                   # Supporting sync utilities
+|-- DATA_FLOW.md            # Analysis/session flow notes
+|-- DEPLOYMENT.md           # Older deployment notes, still partly useful
+|-- requirements.txt        # Backend Python dependencies
+`-- README.md
 ```
-split-ai/
-├── backend/
-│   ├── api/              # FastAPI routes
-│   ├── core/             # Core analysis engine
-│   ├── schemas/          # Pydantic models
-│   └── main.py           # FastAPI application
-├── legacy/               # Old prototype code
-├── requirements.txt      # Python dependencies
-└── README.md
-```
 
-## Setup
+## Local Development
 
 ### Prerequisites
-- Python 3.8+
-- pip
 
-### Installation
+- Node.js and npm
+- Python 3.10+
+- A Supabase project with the migrations in `backend/db/migrations` applied
+- Expo tooling through `npx expo`
 
-1. Clone the repository:
+### 1. Install Dependencies
+
 ```bash
-cd "C:\Users\jcena\OneDrive\Desktop\Split.Ai"
-```
+# App
+cd app
+npm ci
 
-2. Create a virtual environment:
-```bash
-python -m venv venv
-```
-
-3. Activate the virtual environment:
-```bash
-# Windows
-venv\Scripts\activate
-
-# Mac/Linux
-source venv/bin/activate
-```
-
-4. Install dependencies:
-```bash
+# Backend
+cd ..
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
-### Running the API
+On macOS/Linux, activate the virtualenv with:
 
-Start the development server:
+```bash
+source .venv/bin/activate
+```
+
+### 2. Configure Environment
+
+For the app, create `app/.env` when overriding the default API URL:
+
+```env
+EXPO_PUBLIC_API_URL=http://localhost:8000
+```
+
+For the backend, configure these environment variables in your shell or hosting platform:
+
+```env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_JWT_SECRET=...
+FRONTEND_URL=http://localhost:8081
+
+# Optional security/rate-limit controls
+APP_ENV=development
+RATE_LIMIT_ENABLED=true
+RATE_LIMIT_REDIS_URL=
+TRUST_PROXY=false
+AUTH_COOKIE_SECURE=false
+AUTH_EXPOSE_ACCESS_TOKEN=true
+```
+
+The backend also supports cookie/CSRF overrides such as `AUTH_COOKIE_NAME`, `AUTH_COOKIE_DOMAIN`, `AUTH_COOKIE_SAMESITE`, and `CSRF_HEADER_NAME`.
+
+### 3. Run the Backend
+
 ```bash
 cd backend
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The API will be available at:
-- **API**: http://localhost:8000
-- **Interactive Docs**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
+Useful API URLs:
 
-## API Endpoints
+- API root: `http://localhost:8000`
+- OpenAPI docs: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
+- Health: `http://localhost:8000/health`
 
-### 1. Analyze Split
-`POST /api/analyze-split`
+### 4. Run the App
 
-Analyzes a complete training split and returns muscle stimulus breakdown with optimization suggestions.
-
-**Request:**
-```json
-{
-  "name": "PPL Split",
-  "sessions": [
-    {
-      "name": "Push",
-      "day": 1,
-      "exercises": [
-        {"name": "Bench Press", "sets": 4},
-        {"name": "Overhead Press", "sets": 3}
-      ]
-    }
-  ],
-  "stimulus_duration": 48,
-  "maintenance_volume": 4,
-  "dataset": "average"
-}
-```
-
-**Response:**
-```json
-{
-  "split_name": "PPL Split",
-  "muscles": [
-    {
-      "name": "pecs",
-      "stimulus": 5.23,
-      "atrophy": 1.12,
-      "net_stimulus": 4.11,
-      "primary_sets": 6,
-      "frequency": 2
-    }
-  ],
-  "suggestions": [
-    {
-      "priority": "HIGH",
-      "muscle": "biceps",
-      "issue": "Under-stimulated",
-      "suggestion": "Net stimulus is only 0.82. Consider adding 2-4 more sets."
-    }
-  ],
-  "summary": {
-    "total_sets": 42,
-    "muscles_trained": 12,
-    "avg_net_stimulus": 3.45
-  }
-}
-```
-
-### 2. Parse Exercise
-`POST /api/parse-exercise`
-
-Validates and classifies a single exercise.
-
-**Request:**
-```json
-{
-  "text": "Bench Press"
-}
-```
-
-**Response:**
-```json
-{
-  "original_text": "Bench Press",
-  "recognized": true,
-  "pattern": "horizontal press",
-  "targets": {
-    "pecs": 0.80,
-    "front_delt": 0.10,
-    "triceps": 0.10
-  },
-  "unilateral": false,
-  "confidence": "high"
-}
-```
-
-### 3. Get Movement Patterns
-`GET /api/movement-patterns`
-
-Returns all available movement patterns and their muscle targets.
-
-**Response:**
-```json
-{
-  "patterns": [
-    {
-      "name": "horizontal press",
-      "display_name": "Horizontal Press",
-      "targets": {
-        "pecs": 0.80,
-        "front_delt": 0.10,
-        "triceps": 0.10
-      }
-    }
-  ],
-  "total_count": 32
-}
-```
-
-## Scientific Model
-
-Split.AI uses peer-reviewed research on muscle stimulus and fatigue:
-
-### Stimulus Calculation
-- **Diminishing Returns**: Uses Schoenfeld & Pelland curves for set-by-set stimulus
-- **CNS Fatigue**: Global fatigue accumulates across the workout
-- **Recovery Penalty**: Insufficient recovery reduces stimulus effectiveness
-- **Unilateral Bonus**: Single-arm/leg movements get 5% MUR boost
-
-### Atrophy Model
-- **Stimulus Window**: Default 48 hours for muscle protein synthesis
-- **Decay Rate**: Linear atrophy after stimulus window closes
-- **Frequency Optimization**: Automatic detection of suboptimal training frequency
-
-## Example Use Cases
-
-### 1. Validate a Training Split
 ```bash
-curl -X POST http://localhost:8000/api/analyze-split \
-  -H "Content-Type: application/json" \
-  -d @example_split.json
+cd app
+npm start
 ```
 
-### 2. Check Exercise Recognition
+Common targets:
+
 ```bash
-curl -X POST http://localhost:8000/api/parse-exercise \
-  -H "Content-Type: application/json" \
-  -d '{"text": "Bulgarian Split Squat"}'
+npm run web
+npm run ios
+npm run android
 ```
 
-## Development
+The Expo app default production API URL is set in `app/app.json` under `expo.extra.apiUrl`. Use `EXPO_PUBLIC_API_URL` locally when pointing at a different backend.
 
-### Running Tests
+## Scripts and Checks
+
+### App
+
+```bash
+cd app
+npm test -- --runInBand
+npx tsc --noEmit
+npm run build:web
+```
+
+Current caveat: the full Jest suite may hang in the older hook tests under `app/__tests__/hooks`. The actively maintained app tests under `app/tests`, plus targeted hook/route tests, should be run directly when validating focused changes.
+
+### Backend
+
 ```bash
 pytest
 ```
 
-### Code Structure
-- **MainClasses.py**: Core `Split`, `Session`, and `Muscle` classes
-- **movementMatching.py**: Regex-based exercise classifier
-- **movement_patterns.py**: Database of 60+ movement patterns
-- **schemas/models.py**: Pydantic validation models
-- **api/routes.py**: FastAPI route handlers
+## API Surface
 
-## Deployment
+The root endpoint exposes a live endpoint map. Major route groups include:
 
-### Railway (Backend)
-1. Create Railway account
-2. Connect GitHub repository
-3. Deploy from `backend/` directory
-4. Set `START_COMMAND`: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+- `POST /auth/signup`, `POST /auth/login`, `GET /auth/user`, `POST /auth/logout`
+- `GET/POST /api/splits`
+- `GET/PUT/DELETE /api/splits/{id}`
+- `POST /api/splits/{id}/analyze`
+- `POST /api/analyze-split`
+- `POST /api/analyze-workouts`
+- `POST /api/parse-exercise`
+- `GET /api/movement-patterns`
+- `GET/POST /api/workouts`
+- `GET/DELETE /api/workouts/{id}`
+- `GET /api/workouts/summaries`
+- `GET /api/workouts/dates`
+- `GET /api/workouts/stats/summary`
+- `GET/POST /api/custom-exercises`
+- `GET/POST /api/exercise-overrides`
+- `GET/POST /api/comparisons`
+- `GET/POST /api/programs`
+- `GET/POST /api/session-templates`
+- `GET/POST /api/bodyweight`
 
-### Vercel (Frontend - Coming Soon)
-Frontend will be built with Next.js and deployed separately.
+## Data Model
 
-## Roadmap
+Supabase migrations currently cover:
 
-- [x] Core analysis engine
-- [x] REST API
-- [ ] Next.js frontend
-- [ ] User authentication
-- [ ] Database integration (PostgreSQL)
-- [ ] Workout history tracking
-- [ ] Progress visualization
-- [ ] Mobile app (React Native)
+- `splits`, `sessions`, `exercises`
+- `workout_logs`, `workout_exercises`
+- `exercise_overrides`
+- RLS policies and triggers
+- `comparisons`
+- `custom_exercises`
+- `programs`, mesocycles, microcycles, program sessions, templates
+- `bodyweight`
+- RIR support on logged workout exercises
 
-## Contributing
+Apply migrations in order from `backend/db/migrations` when bootstrapping a new Supabase project.
 
-This is a personal project, but suggestions and feedback are welcome!
+## Analysis Model
+
+The analysis engine models:
+
+- Set-by-set stimulus with diminishing returns.
+- Recovery penalties when a muscle is retrained inside the stimulus window.
+- CNS/global fatigue and axial fatigue.
+- Consecutive-day penalties.
+- Bilateral/unilateral modifiers.
+- Region-level muscle contribution tiers.
+- Atrophy after the configured stimulus duration.
+- Group summaries, optimization suggestions, and optional session breakdowns.
+
+Default analysis settings can be adjusted per split:
+
+- `stimulus_duration`: 24-96 hours
+- `maintenance_volume`: 1-9 sets
+- `dataset`: `schoenfeld`, `pelland`, or `average`
+
+## Deployment Notes
+
+Typical production layout:
+
+```text
+Expo web/native app -> FastAPI API -> Supabase Auth/Postgres
+```
+
+Backend hosting options used by the project:
+
+- Render
+- Fly.io
+- Railway
+
+Backend start command:
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port $PORT
+```
+
+App web export:
+
+```bash
+cd app
+npm run build:web
+```
+
+For production, set:
+
+- backend Supabase credentials
+- `FRONTEND_URL`
+- secure cookie settings when serving browser traffic cross-origin
+- `TRUST_PROXY=true` only behind a trusted reverse proxy
+- optional Redis URL for distributed rate limiting
+
+## Development Notes
+
+- Prefer the app API hooks in `app/src/hooks` over direct component-level API calls.
+- Workout state lives in `app/src/stores/workoutStore.ts`.
+- API clients live in `app/src/api`.
+- Shared TypeScript response/request shapes live in `app/src/types/api.types.ts`.
+- Backend route schemas should mirror those TypeScript types.
+- Performance-sensitive backend routes emit `Server-Timing` and perf logs.
 
 ## License
 
-MIT License - See LICENSE file for details
-
-## Acknowledgments
-
-Built on exercise science research by Brad Schoenfeld, Chris Beardsley, and others in the hypertrophy research community.
+No license file is currently present in this repository.
