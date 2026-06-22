@@ -106,10 +106,7 @@ export function useLogWorkout() {
   return useMutation({
     mutationFn: (data: WorkoutLogCreate) => logWorkout(data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: workoutKeys.lists() });
-      qc.invalidateQueries({ queryKey: workoutKeys.stats() });
-      qc.invalidateQueries({ queryKey: [...workoutKeys.all, 'dates'] });
-      qc.invalidateQueries({ queryKey: [...workoutKeys.all, 'recent-stimulus'] });
+      invalidateWorkoutDerivedQueries(qc);
     },
   });
 }
@@ -119,15 +116,20 @@ export function useDeleteWorkout() {
   return useMutation({
     mutationFn: (id: string) => deleteWorkout(id),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: workoutKeys.lists() });
-      qc.invalidateQueries({ queryKey: workoutKeys.stats() });
-      qc.invalidateQueries({ queryKey: [...workoutKeys.all, 'dates'] });
-      qc.invalidateQueries({ queryKey: [...workoutKeys.all, 'recent-stimulus'] });
+      invalidateWorkoutDerivedQueries(qc);
     },
   });
 }
 
-type PreviousExerciseMap = Record<string, { reps: number[]; weight: number[]; rir?: (number | null)[] }>;
+export function invalidateWorkoutDerivedQueries(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: workoutKeys.lists() });
+  qc.invalidateQueries({ queryKey: workoutKeys.stats() });
+  qc.invalidateQueries({ queryKey: [...workoutKeys.all, 'dates'] });
+  qc.invalidateQueries({ queryKey: [...workoutKeys.all, 'recent-stimulus'] });
+  qc.invalidateQueries({ queryKey: [...workoutKeys.all, 'previous'] });
+}
+
+type PreviousExerciseMap = Record<string, { reps: number[]; weight: number[]; rir?: (number | null)[]; notes?: string | null }>;
 
 async function fetchPreviousWorkoutData(sessionName: string): Promise<PreviousExerciseMap | null> {
   const history = await getWorkouts({ limit: 50 });
@@ -148,6 +150,7 @@ async function fetchPreviousWorkoutData(sessionName: string): Promise<PreviousEx
           reps: ex.reps,
           weight: ex.weight,
           rir: ex.rir ?? undefined,
+          notes: ex.notes,
         };
       }
     }

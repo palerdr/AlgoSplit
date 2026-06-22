@@ -116,6 +116,84 @@ describe('exerciseNotesByKey legacy fallback + forward migration', () => {
 
     expect(useWorkoutStore.getState().activeWorkout?.exercises[0]?.notes).toBe('current cue');
   });
+
+  it('backfills blank split exercise notes from previous workout history', () => {
+    const splitId = 'split-abc';
+    const sessionName = 'Push';
+    const exerciseName = 'Bench Press';
+
+    useWorkoutStore.getState().startWorkoutFromSession(
+      sessionName,
+      [{ name: exerciseName, sets: 1, unilateral: false }],
+      {
+        [exerciseName]: {
+          reps: [8],
+          weight: [185],
+          notes: 'pause at chest',
+        },
+      },
+      'session-abc',
+      splitId,
+    );
+
+    const newKey = `${splitId}:${sessionName}:${exerciseName}`;
+    expect(useWorkoutStore.getState().activeWorkout?.exercises[0]?.notes).toBe('pause at chest');
+    expect(useWorkoutStore.getState().exerciseNotesByKey[newKey]).toBe('pause at chest');
+  });
+
+  it('does not replace local split notes with older previous workout notes', () => {
+    const splitId = 'split-abc';
+    const sessionName = 'Push';
+    const exerciseName = 'Bench Press';
+    const newKey = `${splitId}:${sessionName}:${exerciseName}`;
+    useWorkoutStore.setState({ exerciseNotesByKey: { [newKey]: 'current cue' } });
+
+    useWorkoutStore.getState().startWorkoutFromSession(
+      sessionName,
+      [{ name: exerciseName, sets: 1, unilateral: false }],
+      {
+        [exerciseName]: {
+          reps: [8],
+          weight: [185],
+          notes: 'old cue',
+        },
+      },
+      'session-abc',
+      splitId,
+    );
+
+    expect(useWorkoutStore.getState().activeWorkout?.exercises[0]?.notes).toBe('current cue');
+    expect(useWorkoutStore.getState().exerciseNotesByKey[newKey]).toBe('current cue');
+  });
+
+  it('applies late fetched previous data to blank notes without overwriting typed notes', () => {
+    const splitId = 'split-abc';
+    const sessionName = 'Push';
+
+    useWorkoutStore.getState().startWorkoutFromSession(
+      sessionName,
+      [
+        { name: 'Bench Press', sets: 1, unilateral: false },
+        { name: 'Incline Press', sets: 1, unilateral: false },
+      ],
+      undefined,
+      'session-abc',
+      splitId,
+    );
+
+    const inclineId = useWorkoutStore.getState().activeWorkout?.exercises[1]?.id!;
+    useWorkoutStore.getState().updateExerciseNotes(inclineId, 'fresh typed note');
+
+    useWorkoutStore.getState().applyPreviousWorkoutData({
+      'Bench Press': { reps: [8], weight: [185], notes: 'pause at chest' },
+      'Incline Press': { reps: [10], weight: [95], notes: 'old incline note' },
+    });
+
+    const exercises = useWorkoutStore.getState().activeWorkout?.exercises;
+    expect(exercises?.[0]?.notes).toBe('pause at chest');
+    expect(exercises?.[1]?.notes).toBe('fresh typed note');
+    expect(useWorkoutStore.getState().activeWorkout?.previousData?.['Bench Press'].reps).toEqual([8]);
+  });
 });
 
 describe('addSet preserves exercise.notes', () => {

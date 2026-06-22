@@ -45,6 +45,7 @@ export default function WorkoutScreen() {
   const getWorkoutData = useWorkoutStore((s) => s.getWorkoutData);
   const storedIndex = useWorkoutStore((s) => s.currentExerciseIndex);
   const setStoredIndex = useWorkoutStore((s) => s.setCurrentExerciseIndex);
+  const applyPreviousWorkoutData = useWorkoutStore((s) => s.applyPreviousWorkoutData);
 
   const logWorkoutMutation = useLogWorkout();
 
@@ -54,12 +55,9 @@ export default function WorkoutScreen() {
   // Persist fetched previous data into the workout store so it survives
   // tab switches without waiting for a fresh query re-fetch.
   useEffect(() => {
-    if (!fetchedPrevData || !activeWorkout || activeWorkout.previousData) return;
-    useWorkoutStore.setState((s) => {
-      if (!s.activeWorkout || s.activeWorkout.previousData) return s;
-      return { activeWorkout: { ...s.activeWorkout, previousData: fetchedPrevData } };
-    });
-  }, [fetchedPrevData, activeWorkout?.startedAt]);
+    if (!fetchedPrevData || !activeWorkout) return;
+    applyPreviousWorkoutData(fetchedPrevData);
+  }, [applyPreviousWorkoutData, fetchedPrevData, activeWorkout?.startedAt]);
 
   const previousData = activeWorkout?.previousData ?? fetchedPrevData ?? undefined;
 

@@ -10,6 +10,13 @@ export interface SetData {
   completed: boolean;
 }
 
+export interface PreviousExerciseData {
+  reps: number[];
+  weight: number[];
+  rir?: (number | null)[];
+  notes?: string | null;
+}
+
 export interface WorkoutExercise {
   id: string;
   name: string;
@@ -26,7 +33,7 @@ interface ActiveWorkout {
   exercises: WorkoutExercise[];
   sessionId?: string;
   splitId?: string;
-  previousData?: Record<string, { reps: number[]; weight: number[]; rir?: (number | null)[] }>;
+  previousData?: Record<string, PreviousExerciseData>;
 }
 
 interface RestTimerState {
@@ -119,6 +126,7 @@ interface WorkoutState {
   updateSet: (exerciseId: string, setIndex: number, data: Partial<SetData>) => void;
   completeSet: (exerciseId: string, setIndex: number) => void;
   updateExerciseNotes: (exerciseId: string, notes: string) => void;
+  applyPreviousWorkoutData: (previousData: ActiveWorkout['previousData']) => void;
   resetExerciseProgress: (exerciseId: string) => void;
   renameExercise: (exerciseId: string, newName: string) => void;
   reorderExercises: (fromIndex: number, toIndex: number) => void;
@@ -180,7 +188,7 @@ export const useWorkoutStore = create<WorkoutState>()(
         // shipped. For everyone else the legacy keys are unrecoverable — the
         // current row IDs don't match what was used to save. Partial recovery
         // is still better than none, and the cost is one dictionary lookup.
-        const migrations: Record<string, string> = {};
+        const noteBackfills: Record<string, string> = {};
         const workoutExercises: WorkoutExercise[] = exercises.map((ex) => {
           const newKey = buildExerciseNotesKey(splitId, sessionName, ex.name);
           let persistedNotes = newKey ? (exerciseNotesByKey[newKey] ?? '') : '';
@@ -189,7 +197,14 @@ export const useWorkoutStore = create<WorkoutState>()(
             const legacyNotes = legacyKey ? exerciseNotesByKey[legacyKey] : undefined;
             if (legacyNotes) {
               persistedNotes = legacyNotes;
-              if (newKey) migrations[newKey] = legacyNotes;
+              if (newKey) noteBackfills[newKey] = legacyNotes;
+            }
+          }
+          if (!persistedNotes) {
+            const previousNotes = previousData?.[ex.name]?.notes?.trim();
+            if (previousNotes) {
+              persistedNotes = previousNotes;
+              if (newKey) noteBackfills[newKey] = previousNotes;
             }
           }
           let sets: SetData[];
@@ -224,7 +239,7 @@ export const useWorkoutStore = create<WorkoutState>()(
             splitId,
             previousData,
           },
-          exerciseNotesByKey: { ...prev.exerciseNotesByKey, ...migrations },
+          exerciseNotesByKey: { ...prev.exerciseNotesByKey, ...noteBackfills },
         }));
       },
 
@@ -366,6 +381,38 @@ export const useWorkoutStore = create<WorkoutState>()(
           exerciseNotesByKey: noteKey
             ? { ...exerciseNotesByKey, [noteKey]: notes }
             : exerciseNotesByKey,
+        });
+      },
+
+      applyPreviousWorkoutData: (previousData) => {
+        if (!previousData) return;
+        set((prev) => {
+          if (!prev.activeWorkout) return prev;
+
+          const noteBackfills: Record<string, string> = {};
+          const exercises = prev.activeWorkout.exercises.map((ex) => {
+            if (ex.notes.trim()) return ex;
+
+            const previousNotes = previousData[ex.name]?.notes?.trim();
+            if (!previousNotes) return ex;
+
+            const noteKey = buildExerciseNotesKey(
+              prev.activeWorkout?.splitId,
+              prev.activeWorkout?.sessionName,
+              ex.name,
+            );
+            if (noteKey) noteBackfills[noteKey] = previousNotes;
+            return { ...ex, notes: previousNotes };
+          });
+
+          return {
+            activeWorkout: {
+              ...prev.activeWorkout,
+              exercises,
+              previousData,
+            },
+            exerciseNotesByKey: { ...prev.exerciseNotesByKey, ...noteBackfills },
+          };
         });
       },
 
