@@ -24,6 +24,7 @@ function extractToken(url: string): string | undefined {
 }
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const USE_NATIVE_TRANSITION_DRIVER = Platform.OS !== 'web';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -40,23 +41,80 @@ export { queryClient };
 
 export default function RootLayout() {
   const router = useRouter();
+  const routerRef = useRef(router);
   const expandScale = useRef(new Animated.Value(0)).current;
   const wrapperOpacity = useRef(new Animated.Value(1)).current;
   const darkFade = useRef(new Animated.Value(0)).current;
+  const transitionTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [showOverlay, setShowOverlay] = useState(false);
 
+  useEffect(() => {
+    routerRef.current = router;
+  }, [router]);
+
+  const clearTransitionTimers = useCallback(() => {
+    transitionTimers.current.forEach((timer) => clearTimeout(timer));
+    transitionTimers.current = [];
+  }, []);
+
+  const resetTransitionOverlay = useCallback(() => {
+    clearTransitionTimers();
+    expandScale.stopAnimation();
+    wrapperOpacity.stopAnimation();
+    darkFade.stopAnimation();
+    setShowOverlay(false);
+    expandScale.setValue(0);
+    wrapperOpacity.setValue(1);
+    darkFade.setValue(0);
+  }, [clearTransitionTimers, darkFade, expandScale, wrapperOpacity]);
+
   const handleTransition = useCallback(() => {
+    clearTransitionTimers();
+    expandScale.stopAnimation();
+    wrapperOpacity.stopAnimation();
+    darkFade.stopAnimation();
+
     setShowOverlay(true);
     expandScale.setValue(0.8);
     wrapperOpacity.setValue(1);
     darkFade.setValue(0);
+
+    let didNavigate = false;
+    let didFadeOut = false;
+
+    const navigateToWorkout = () => {
+      if (didNavigate) return;
+      didNavigate = true;
+      routerRef.current.push('/workout');
+    };
+
+    const fadeOutOverlay = () => {
+      if (didFadeOut) return;
+      didFadeOut = true;
+      Animated.timing(wrapperOpacity, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: USE_NATIVE_TRANSITION_DRIVER,
+      }).start(() => {
+        resetTransitionOverlay();
+      });
+    };
+
+    // Navigation and cleanup are intentionally timer-backed. The white circle
+    // animation is visual polish; a dropped Animated callback should never
+    // strand the user behind an overlay or block the workout route.
+    transitionTimers.current = [
+      setTimeout(navigateToWorkout, 260),
+      setTimeout(fadeOutOverlay, 620),
+      setTimeout(resetTransitionOverlay, 1200),
+    ];
 
     Animated.parallel([
       Animated.timing(expandScale, {
         toValue: 40,
         duration: 320,
         easing: Easing.bezier(0.22, 1, 0.36, 1),
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE_TRANSITION_DRIVER,
       }),
       Animated.sequence([
         Animated.delay(120),
@@ -64,29 +122,22 @@ export default function RootLayout() {
           toValue: 1,
           duration: 220,
           easing: Easing.bezier(0.4, 0, 0.2, 1),
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_TRANSITION_DRIVER,
         }),
       ]),
     ]).start(() => {
-      router.push('/workout');
-      setTimeout(() => {
-        Animated.timing(wrapperOpacity, {
-          toValue: 0,
-          duration: 150,
-          useNativeDriver: true,
-        }).start(() => {
-          setShowOverlay(false);
-          expandScale.setValue(0);
-          wrapperOpacity.setValue(1);
-          darkFade.setValue(0);
-        });
-      }, 30);
+      navigateToWorkout();
+      transitionTimers.current.push(setTimeout(fadeOutOverlay, 30));
     });
-  }, []);
+  }, [clearTransitionTimers, darkFade, expandScale, resetTransitionOverlay, wrapperOpacity]);
 
   useEffect(() => {
-    registerTransitionHandler(handleTransition);
-  }, [handleTransition]);
+    const unregisterTransitionHandler = registerTransitionHandler(handleTransition);
+    return () => {
+      resetTransitionOverlay();
+      unregisterTransitionHandler();
+    };
+  }, [handleTransition, resetTransitionOverlay]);
 
   // Deep-link handler for password-reset URLs (e.g. algosplit://reset-password
   // #access_token=XYZ&type=recovery from Supabase recovery emails, or a query
