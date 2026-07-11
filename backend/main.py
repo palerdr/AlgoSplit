@@ -1,18 +1,20 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 import logging
 import os
 import sys
 from pathlib import Path
 from time import perf_counter
+from urllib.parse import urlparse
 from uuid import uuid4
 
 # Add backend to path for imports
 backend_path = Path(__file__).parent
 sys.path.insert(0, str(backend_path))
 
-from api.security import AUTH_COOKIE_NAME
+from api.security import AUTH_COOKIE_NAME, IS_PRODUCTION
 from core.rate_limit import RateLimitRule, RateLimiter
 from db.supabase import get_supabase_client
 
@@ -21,11 +23,56 @@ app = FastAPI(
     title="AlgoSplit API",
     description="Workout split analysis and optimization API based on exercise science research",
     version="1.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
+    # Interactive API documentation is useful locally but expands the public
+    # attack surface in production.
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc",
 )
 
 logger = logging.getLogger("algosplit.api")
+
+
+def _parse_csv_env(name: str) -> list[str]:
+    return [item.strip() for item in os.getenv(name, "").split(",") if item.strip()]
+
+
+def _validate_origin(origin: str) -> str:
+    parsed = urlparse(origin)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise RuntimeError(f"Invalid CORS origin in FRONTEND_URL: {origin!r}")
+    if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+        raise RuntimeError(f"CORS origins must not include a path: {origin!r}")
+    if IS_PRODUCTION and parsed.scheme != "https":
+        raise RuntimeError("Production FRONTEND_URL values must use HTTPS")
+    return origin.rstrip("/")
+
+
+# A bounded request size prevents accidental or malicious payloads from tying
+# up workers before Pydantic gets a chance to validate the contents.
+MAX_REQUEST_BODY_BYTES = int(os.getenv("MAX_REQUEST_BODY_BYTES", str(1 * 1024 * 1024)))
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_REQUEST_BODY_BYTES:
+                return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+        except ValueError:
+            return JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header"})
+
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.url.path.startswith(("/auth/", "/api/")):
+        response.headers["Cache-Control"] = "no-store"
+    if IS_PRODUCTION:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Content-Security-Policy"] = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    return response
 
 
 @app.exception_handler(HTTPException)
@@ -154,17 +201,34 @@ async def perf_timing_middleware(request: Request, call_next):
     return response
 
 
-# CORS middleware for frontend access
-frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+# CORS and Host controls. Production requires explicit values instead of
+# accepting development origins or arbitrary Host headers.
+if IS_PRODUCTION:
+    frontend_origins = _parse_csv_env("FRONTEND_URL")
+    if not frontend_origins:
+        raise RuntimeError("FRONTEND_URL must be set in production")
+    allowed_origins = [_validate_origin(origin) for origin in frontend_origins]
 
-allowed_origins = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://localhost:8000",
-    "http://localhost:8081",
-]
-if frontend_url not in allowed_origins:
-    allowed_origins.append(frontend_url)
+    allowed_hosts = _parse_csv_env("ALLOWED_HOSTS")
+    if not allowed_hosts:
+        render_hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME", "").strip()
+        allowed_hosts = [render_hostname] if render_hostname else []
+    if not allowed_hosts:
+        raise RuntimeError("ALLOWED_HOSTS must be set in production")
+else:
+    allowed_origins = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:8000",
+        "http://localhost:8081",
+    ]
+    allowed_origins.extend(
+        origin for origin in _parse_csv_env("FRONTEND_URL")
+        if origin not in allowed_origins
+    )
+    allowed_hosts = ["localhost", "127.0.0.1", "testserver"]
+
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
 app.add_middleware(
     CORSMiddleware,

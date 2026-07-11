@@ -203,7 +203,7 @@ export default function TabLayout() {
     sessionId?: string,
     splitId?: string,
   ) => {
-    prefetchPreviousWorkoutData(queryClient, sessionName);
+    prefetchPreviousWorkoutData(queryClient, sessionName, splitId);
     useWorkoutStore.getState().startWorkoutFromSession(sessionName, exercises, undefined, sessionId, splitId);
     triggerExpandTransition();
   }, [queryClient]);

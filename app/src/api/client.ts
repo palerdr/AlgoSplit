@@ -138,6 +138,15 @@ export const apiClient = axios.create({
   },
 });
 
+// Kept separate from apiClient so a failed refresh cannot recursively invoke
+// the 401 interceptor. It is also cookie-aware for browser sessions, where
+// the HttpOnly refresh token is never exposed to application JavaScript.
+const refreshClient = axios.create({
+  baseURL: API_BASE_URL,
+  withCredentials: Platform.OS === 'web',
+  headers: { 'Content-Type': 'application/json' },
+});
+
 // Request interceptor
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
@@ -163,15 +172,18 @@ apiClient.interceptors.request.use(
 // Response interceptor — attempt silent token refresh on 401 before logging out.
 // This prevents mid-session logouts when the access token expires during a
 // long workout (Supabase JWTs expire after 60 min by default).
-let _refreshPromise: Promise<boolean> | null = null;
+type RefreshOutcome = 'refreshed' | 'invalid' | 'unavailable';
+let _refreshPromise: Promise<RefreshOutcome> | null = null;
 
-async function attemptTokenRefresh(): Promise<boolean> {
+async function attemptTokenRefresh(): Promise<RefreshOutcome> {
   const refreshToken = await tokenStore.getRefreshToken();
-  if (!refreshToken) return false;
+  if (!refreshToken && Platform.OS !== 'web') return 'invalid';
   try {
-    const res = await axios.post<{ access_token: string; refresh_token: string }>(
-      `${API_BASE_URL}/auth/refresh`,
-      { refresh_token: refreshToken },
+    const csrfToken = await getCsrfToken();
+    const res = await refreshClient.post<{ access_token: string; refresh_token: string }>(
+      '/auth/refresh',
+      refreshToken ? { refresh_token: refreshToken } : undefined,
+      csrfToken ? { headers: { 'X-CSRF-Token': csrfToken } } : undefined,
     );
     if (res.data.access_token) {
       await tokenStore.setToken(res.data.access_token);
@@ -179,24 +191,31 @@ async function attemptTokenRefresh(): Promise<boolean> {
     if (res.data.refresh_token) {
       await tokenStore.setRefreshToken(res.data.refresh_token);
     }
-    return true;
-  } catch {
-    return false;
+    return 'refreshed';
+  } catch (error) {
+    if (axios.isAxiosError(error) && [400, 401, 403].includes(error.response?.status ?? 0)) {
+      return 'invalid';
+    }
+    return 'unavailable';
   }
 }
 
 apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
-    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
-    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+    const originalRequest = error.config as InternalAxiosRequestConfig & {
+      _retry?: boolean;
+      _authRefreshUnavailable?: boolean;
+    };
+    const isRefreshRequest = originalRequest?.url?.endsWith('/auth/refresh');
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry && !isRefreshRequest) {
       originalRequest._retry = true;
       // Deduplicate concurrent refresh attempts
       if (!_refreshPromise) {
         _refreshPromise = attemptTokenRefresh().finally(() => { _refreshPromise = null; });
       }
-      const refreshed = await _refreshPromise;
-      if (refreshed) {
+      const refreshOutcome = await _refreshPromise;
+      if (refreshOutcome === 'refreshed') {
         // Retry the original request with the new token
         const newToken = await tokenStore.getToken();
         if (newToken) {
@@ -204,13 +223,27 @@ apiClient.interceptors.response.use(
         }
         return apiClient(originalRequest);
       }
-      // Refresh failed — force logout
-      await tokenStore.clearToken();
-      emitAuthLogout();
+      if (refreshOutcome === 'invalid') {
+        // An expired/revoked refresh credential is the only refresh failure
+        // that ends a session. A sleeping Render instance or flaky network
+        // must not discard an otherwise valid local session.
+        await tokenStore.clearToken();
+        emitAuthLogout();
+      } else {
+        originalRequest._authRefreshUnavailable = true;
+      }
     }
     return Promise.reject(error);
   }
 );
+
+export function isRecoverableAuthError(error: unknown): boolean {
+  if (!axios.isAxiosError(error)) return true;
+  const config = error.config as (InternalAxiosRequestConfig & {
+    _authRefreshUnavailable?: boolean;
+  }) | undefined;
+  return !error.response || Boolean(config?._authRefreshUnavailable);
+}
 
 // Helper to handle API errors
 export function getErrorMessage(error: unknown): string {

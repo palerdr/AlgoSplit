@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware.js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { WorkoutExerciseCreate } from '../types/api.types';
+import { normalizeExerciseIdentity } from '../utils/exerciseIdentity';
 
 export interface SetData {
   reps: number;
@@ -54,11 +55,6 @@ function generateId(): string {
   return Math.random().toString(36).substring(2, 9);
 }
 
-function buildSideNote(side: 'L' | 'R', notes: string): string {
-  const trimmed = notes.trim();
-  return trimmed ? `${side} | ${trimmed}` : side;
-}
-
 function toWorkoutCompletionIso(workoutDate?: string): string | undefined {
   if (!workoutDate) return undefined;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(workoutDate)) return undefined;
@@ -76,7 +72,16 @@ function toWorkoutCompletionIso(workoutDate?: string): string | undefined {
   return `${workoutDate}T${hh}:${mm}:${ss}.${ms}Z`;
 }
 
-function buildExerciseNotesKey(
+function buildSharedExerciseNotesKey(
+  splitId?: string,
+  exerciseName?: string,
+): string | null {
+  if (!splitId || !exerciseName) return null;
+  return `${splitId}:${normalizeExerciseIdentity(exerciseName)}`;
+}
+
+/** Key schema used by the previous release; retained for lazy migration. */
+function buildSessionExerciseNotesKey(
   splitId?: string,
   sessionName?: string,
   exerciseName?: string,
@@ -98,6 +103,15 @@ function buildLegacyExerciseNotesKey(
 ): string | null {
   if (!splitId || !sessionId || !templateExerciseId) return null;
   return `${splitId}:${sessionId}:${templateExerciseId}`;
+}
+
+export function getPreviousExerciseData(
+  previousData: ActiveWorkout['previousData'],
+  exerciseName: string,
+): PreviousExerciseData | undefined {
+  // Raw-name lookup keeps an in-progress workout persisted by the previous
+  // app version functional after upgrading to normalized history keys.
+  return previousData?.[normalizeExerciseIdentity(exerciseName)] ?? previousData?.[exerciseName];
 }
 
 interface WorkoutState {
@@ -178,9 +192,9 @@ export const useWorkoutStore = create<WorkoutState>()(
       startWorkoutFromSession: (sessionName, exercises, previousData, sessionId, splitId) => {
         const { selectedWorkoutDate, exerciseNotesByKey } = get();
         set({ currentExerciseIndex: 0 });
-        // Lazy migration: copy hits from the legacy IDs-based key to the new
-        // name-based key on each session start so notes saved before the key
-        // schema change resurface and stay aligned with future writes.
+        // Notes now follow an exercise through every day in the split. Read
+        // older session- and UUID-keyed values once, then migrate them to the
+        // stable split + normalized-exercise identity.
         //
         // Caveat: Supabase regenerates session/exercise row UUIDs on every
         // split edit. This means legacy keys (splitId:sessionId:templateExerciseId)
@@ -190,8 +204,16 @@ export const useWorkoutStore = create<WorkoutState>()(
         // is still better than none, and the cost is one dictionary lookup.
         const noteBackfills: Record<string, string> = {};
         const workoutExercises: WorkoutExercise[] = exercises.map((ex) => {
-          const newKey = buildExerciseNotesKey(splitId, sessionName, ex.name);
+          const newKey = buildSharedExerciseNotesKey(splitId, ex.name);
           let persistedNotes = newKey ? (exerciseNotesByKey[newKey] ?? '') : '';
+          if (!persistedNotes) {
+            const sessionKey = buildSessionExerciseNotesKey(splitId, sessionName, ex.name);
+            const sessionNotes = sessionKey ? exerciseNotesByKey[sessionKey] : undefined;
+            if (sessionNotes) {
+              persistedNotes = sessionNotes;
+              if (newKey) noteBackfills[newKey] = sessionNotes;
+            }
+          }
           if (!persistedNotes) {
             const legacyKey = buildLegacyExerciseNotesKey(splitId, sessionId, ex.templateExerciseId);
             const legacyNotes = legacyKey ? exerciseNotesByKey[legacyKey] : undefined;
@@ -201,7 +223,7 @@ export const useWorkoutStore = create<WorkoutState>()(
             }
           }
           if (!persistedNotes) {
-            const previousNotes = previousData?.[ex.name]?.notes?.trim();
+            const previousNotes = getPreviousExerciseData(previousData, ex.name)?.notes?.trim();
             if (previousNotes) {
               persistedNotes = previousNotes;
               if (newKey) noteBackfills[newKey] = previousNotes;
@@ -368,9 +390,8 @@ export const useWorkoutStore = create<WorkoutState>()(
         const { activeWorkout, exerciseNotesByKey } = get();
         if (!activeWorkout) return;
         const exercise = activeWorkout.exercises.find((ex) => ex.id === exerciseId);
-        const noteKey = buildExerciseNotesKey(
+        const noteKey = buildSharedExerciseNotesKey(
           activeWorkout.splitId,
-          activeWorkout.sessionName,
           exercise?.name,
         );
         set({
@@ -393,12 +414,11 @@ export const useWorkoutStore = create<WorkoutState>()(
           const exercises = prev.activeWorkout.exercises.map((ex) => {
             if (ex.notes.trim()) return ex;
 
-            const previousNotes = previousData[ex.name]?.notes?.trim();
+            const previousNotes = getPreviousExerciseData(previousData, ex.name)?.notes?.trim();
             if (!previousNotes) return ex;
 
-            const noteKey = buildExerciseNotesKey(
+            const noteKey = buildSharedExerciseNotesKey(
               prev.activeWorkout?.splitId,
-              prev.activeWorkout?.sessionName,
               ex.name,
             );
             if (noteKey) noteBackfills[noteKey] = previousNotes;
@@ -507,7 +527,7 @@ export const useWorkoutStore = create<WorkoutState>()(
                     reps: entry.sets.map((s) => s.reps),
                     weight: entry.sets.map((s) => s.weight),
                     rir: hasAnyRir ? entry.sets.map((s) => s.rir ?? 0) : undefined,
-                    notes: buildSideNote(entry.side, exercise.notes),
+                    notes: exercise.notes || undefined,
                   };
                 });
             }

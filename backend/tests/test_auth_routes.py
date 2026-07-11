@@ -10,6 +10,7 @@ def test_signup_sets_auth_and_csrf_cookies(client):
     assert body["token_type"] == "bearer"
     assert body["access_token"].startswith("token-")
     assert "algosplit_access_token" in response.cookies
+    assert "algosplit_refresh_token" in response.cookies
     assert "algosplit_csrf_token" in response.cookies
 
 
@@ -40,4 +41,36 @@ def test_logout_returns_204_and_clears_cookies(client):
     assert response.status_code == 204
     set_cookie = response.headers.get("set-cookie", "")
     assert "algosplit_access_token" in set_cookie
+    assert "algosplit_refresh_token" in set_cookie
     assert "algosplit_csrf_token" in set_cookie
+
+
+def test_cookie_refresh_requires_csrf_and_rotates_session(client):
+    cookies = {
+        "algosplit_refresh_token": "refresh-token",
+        "algosplit_csrf_token": "csrf-token",
+    }
+
+    rejected = client.post("/auth/refresh", json={}, cookies=cookies)
+    assert rejected.status_code == 403
+    assert rejected.json()["detail"] == "Invalid CSRF token"
+
+    response = client.post(
+        "/auth/refresh",
+        json={},
+        cookies=cookies,
+        headers={"X-CSRF-Token": "csrf-token"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["access_token"] == "token-refreshed"
+    assert "algosplit_refresh_token" in response.headers.get("set-cookie", "")
+
+
+def test_api_responses_include_baseline_security_headers(client):
+    response = client.get("/auth/user")
+
+    assert response.status_code == 200
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["cache-control"] == "no-store"

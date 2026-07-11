@@ -13,6 +13,7 @@ import {
 } from '../api/workouts.api';
 import { traceAsync } from '../dev/perfTrace';
 import type { WorkoutLogCreate } from '../types/api.types';
+import { normalizeExerciseIdentity } from '../utils/exerciseIdentity';
 
 export function useWorkoutHistory(params?: { limit?: number; offset?: number; days?: number }) {
   return useQuery({
@@ -129,28 +130,69 @@ export function invalidateWorkoutDerivedQueries(qc: QueryClient) {
   qc.invalidateQueries({ queryKey: [...workoutKeys.all, 'previous'] });
 }
 
-type PreviousExerciseMap = Record<string, { reps: number[]; weight: number[]; rir?: (number | null)[]; notes?: string | null }>;
+export type PreviousExerciseMap = Record<string, {
+  reps: number[];
+  weight: number[];
+  rir?: (number | null)[];
+  notes?: string | null;
+}>;
 
-async function fetchPreviousWorkoutData(sessionName: string): Promise<PreviousExerciseMap | null> {
-  const history = await getWorkouts({ limit: 50 });
-  // Scan through recent workouts for this session to build per-exercise
-  // previous data. If an exercise was skipped in the most recent workout,
-  // we look further back to find the last time it was actually logged.
-  const matchingWorkouts = history.workouts.filter(
-    (w) => w.session_name.toLowerCase() === sessionName.toLowerCase(),
-  );
+function stripLegacyUnilateralNotePrefix(
+  notes: string | null | undefined,
+  isRepeatedExercise: boolean,
+): string | null | undefined {
+  if (!notes || !isRepeatedExercise) return notes;
+  // Earlier clients overloaded notes with "L", "R", "L | note", or
+  // "R | note" to distinguish unilateral rows. Side is a display concern;
+  // remove only this legacy encoding when the workout has repeated names.
+  const match = notes.trim().match(/^[LR](?:\s*\|\s*(.*))?$/);
+  return match ? (match[1]?.trim() || undefined) : notes;
+}
+
+export function buildPreviousExerciseMap(
+  workouts: Array<{
+    session_name: string;
+    split_id?: string | null;
+    exercises: Array<{
+      exercise_name: string;
+      reps: number[];
+      weight: number[];
+      rir?: (number | null)[] | null;
+      notes?: string | null;
+    }>;
+  }>,
+  sessionName: string,
+  splitId?: string,
+): PreviousExerciseMap | null {
+  // Within a split, a name identifies the exercise across all of its days.
+  // Session names are only a fallback for free/legacy workouts with no split.
+  const normalizedSessionName = sessionName.trim().toLocaleLowerCase();
+  const matchingWorkouts = workouts.filter((workout) => (
+    splitId
+      ? workout.split_id === splitId
+      : workout.session_name.trim().toLocaleLowerCase() === normalizedSessionName
+  ));
   if (matchingWorkouts.length === 0) return null;
 
-  const result: PreviousExerciseMap = {};
+  // Exercise names are user-controlled. Null-prototype dictionaries prevent a
+  // name such as "__proto__" from changing the map's prototype chain.
+  const result: PreviousExerciseMap = Object.create(null) as PreviousExerciseMap;
   for (const workout of matchingWorkouts) {
-    for (const ex of workout.exercises) {
-      // Only use the first (most recent) occurrence of each exercise
-      if (!(ex.exercise_name in result)) {
-        result[ex.exercise_name] = {
-          reps: ex.reps,
-          weight: ex.weight,
-          rir: ex.rir ?? undefined,
-          notes: ex.notes,
+    const nameCounts = workout.exercises.reduce<Record<string, number>>((counts, exercise) => {
+      const key = normalizeExerciseIdentity(exercise.exercise_name);
+      counts[key] = (counts[key] ?? 0) + 1;
+      return counts;
+    }, Object.create(null) as Record<string, number>);
+    for (const exercise of workout.exercises) {
+      const exerciseKey = normalizeExerciseIdentity(exercise.exercise_name);
+      // The history endpoint is reverse chronological. Keep the first
+      // occurrence so skipped exercises can still find their last logged set.
+      if (!Object.prototype.hasOwnProperty.call(result, exerciseKey)) {
+        result[exerciseKey] = {
+          reps: exercise.reps,
+          weight: exercise.weight,
+          rir: exercise.rir ?? undefined,
+          notes: stripLegacyUnilateralNotePrefix(exercise.notes, nameCounts[exerciseKey] > 1),
         };
       }
     }
@@ -158,14 +200,22 @@ async function fetchPreviousWorkoutData(sessionName: string): Promise<PreviousEx
   return result;
 }
 
+async function fetchPreviousWorkoutData(
+  sessionName: string,
+  splitId?: string,
+): Promise<PreviousExerciseMap | null> {
+  const history = await getWorkouts({ limit: 50 });
+  return buildPreviousExerciseMap(history.workouts, sessionName, splitId);
+}
+
 /**
  * Fetch the most recent workout for a given session name.
  * Returns previous exercise data in the shape the store expects.
  */
-export function usePreviousWorkoutData(sessionName: string | undefined) {
+export function usePreviousWorkoutData(sessionName: string | undefined, splitId?: string) {
   return useQuery({
-    queryKey: [...workoutKeys.all, 'previous', sessionName],
-    queryFn: () => fetchPreviousWorkoutData(sessionName!),
+    queryKey: [...workoutKeys.all, 'previous', splitId ?? 'session', sessionName],
+    queryFn: () => fetchPreviousWorkoutData(sessionName!, splitId),
     enabled: !!sessionName,
     staleTime: 10 * 60 * 1000,
   });
@@ -175,10 +225,14 @@ export function usePreviousWorkoutData(sessionName: string | undefined) {
  * Prefetch previous workout data for a session so it is warm in the
  * React Query cache before the workout screen mounts.
  */
-export function prefetchPreviousWorkoutData(qc: QueryClient, sessionName: string) {
+export function prefetchPreviousWorkoutData(
+  qc: QueryClient,
+  sessionName: string,
+  splitId?: string,
+) {
   qc.prefetchQuery({
-    queryKey: [...workoutKeys.all, 'previous', sessionName],
-    queryFn: () => fetchPreviousWorkoutData(sessionName),
+    queryKey: [...workoutKeys.all, 'previous', splitId ?? 'session', sessionName],
+    queryFn: () => fetchPreviousWorkoutData(sessionName, splitId),
     staleTime: 10 * 60 * 1000,
   });
 }

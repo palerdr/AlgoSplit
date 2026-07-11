@@ -41,6 +41,24 @@ def build_workout_response(workout_data: dict, exercises_data: list) -> WorkoutL
     Returns:
         WorkoutLogResponse with all nested data
     """
+    name_counts: dict[str, int] = {}
+    for exercise in exercises_data:
+        name = exercise["exercise_name"].strip().casefold()
+        name_counts[name] = name_counts.get(name, 0) + 1
+
+    def normalized_notes(exercise: dict):
+        notes = exercise.get("notes")
+        if not notes or name_counts[exercise["exercise_name"].strip().casefold()] < 2:
+            return notes
+        # Do not expose the pre-fix unilateral side encoding ("L | note") as
+        # user content. New records store the note unchanged for both sides.
+        stripped = str(notes).strip()
+        if stripped in {"L", "R"}:
+            return None
+        if len(stripped) >= 3 and stripped[0] in {"L", "R"} and stripped[1:].lstrip().startswith("|"):
+            return stripped.split("|", 1)[1].strip() or None
+        return notes
+
     exercises = [
         WorkoutExerciseResponse(
             id=ex["id"],
@@ -50,7 +68,7 @@ def build_workout_response(workout_data: dict, exercises_data: list) -> WorkoutL
             reps=ex["reps"],
             weight=ex["weight"],
             order_index=ex["order_index"],
-            notes=ex.get("notes"),
+            notes=normalized_notes(ex),
             rir=ex.get("rir"),
             created_at=ex["created_at"],
         )

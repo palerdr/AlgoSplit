@@ -6,7 +6,7 @@ import os
 import secrets
 from typing import Optional
 
-from fastapi import Response
+from fastapi import HTTPException, Request, Response, status
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -17,15 +17,18 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 _app_env = os.getenv("APP_ENV", os.getenv("ENV", "development")).strip().lower()
-_is_production = _app_env in {"prod", "production"}
+IS_PRODUCTION = _app_env in {"prod", "production"}
 
 AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "algosplit_access_token")
+AUTH_REFRESH_COOKIE_NAME = os.getenv("AUTH_REFRESH_COOKIE_NAME", "algosplit_refresh_token")
 CSRF_COOKIE_NAME = os.getenv("CSRF_COOKIE_NAME", "algosplit_csrf_token")
 CSRF_HEADER_NAME = os.getenv("CSRF_HEADER_NAME", "X-CSRF-Token")
 CSRF_PROTECTED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
-AUTH_COOKIE_SECURE = _env_bool("AUTH_COOKIE_SECURE", _is_production)
-AUTH_COOKIE_HTTPONLY = _env_bool("AUTH_COOKIE_HTTPONLY", True)
+# Production cookies must never be readable by script or sent over HTTP. Local
+# development can opt out to support an http://localhost backend.
+AUTH_COOKIE_SECURE = True if IS_PRODUCTION else _env_bool("AUTH_COOKIE_SECURE", False)
+AUTH_COOKIE_HTTPONLY = True if IS_PRODUCTION else _env_bool("AUTH_COOKIE_HTTPONLY", True)
 AUTH_COOKIE_PATH = os.getenv("AUTH_COOKIE_PATH", "/")
 AUTH_COOKIE_DOMAIN: Optional[str] = os.getenv("AUTH_COOKIE_DOMAIN")
 AUTH_COOKIE_SAMESITE = os.getenv(
@@ -34,10 +37,16 @@ AUTH_COOKIE_SAMESITE = os.getenv(
 ).strip().lower()
 if AUTH_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
     AUTH_COOKIE_SAMESITE = "lax"
+if AUTH_COOKIE_SAMESITE == "none" and not AUTH_COOKIE_SECURE:
+    raise RuntimeError("AUTH_COOKIE_SAMESITE=none requires AUTH_COOKIE_SECURE=true")
 
-# Default True so native clients (iOS/Android) can receive the token via JSON.
-# For web-only deployments set AUTH_EXPOSE_ACCESS_TOKEN=false in env.
-AUTH_EXPOSE_ACCESS_TOKEN = _env_bool("AUTH_EXPOSE_ACCESS_TOKEN", True)
+# Browser sessions use HttpOnly cookies by default in production, keeping both
+# access and refresh tokens out of localStorage and JavaScript. Native-only
+# deployments can explicitly set this to true and continue using SecureStore.
+AUTH_EXPOSE_ACCESS_TOKEN = _env_bool("AUTH_EXPOSE_ACCESS_TOKEN", not IS_PRODUCTION)
+AUTH_REFRESH_COOKIE_MAX_AGE_SECONDS = int(
+    os.getenv("AUTH_REFRESH_COOKIE_MAX_AGE_SECONDS", str(30 * 24 * 60 * 60))
+)
 
 
 def _cookie_common() -> dict:
@@ -49,7 +58,12 @@ def _cookie_common() -> dict:
     }
 
 
-def set_auth_cookies(response: Response, access_token: str, max_age: int) -> str:
+def set_auth_cookies(
+    response: Response,
+    access_token: str,
+    refresh_token: str,
+    max_age: int,
+) -> str:
     csrf_token = secrets.token_urlsafe(32)
 
     auth_cookie = _cookie_common()
@@ -60,6 +74,16 @@ def set_auth_cookies(response: Response, access_token: str, max_age: int) -> str
         httponly=AUTH_COOKIE_HTTPONLY,
         **auth_cookie,
     )
+
+    if refresh_token:
+        refresh_cookie = _cookie_common()
+        response.set_cookie(
+            key=AUTH_REFRESH_COOKIE_NAME,
+            value=refresh_token,
+            max_age=AUTH_REFRESH_COOKIE_MAX_AGE_SECONDS,
+            httponly=True,
+            **refresh_cookie,
+        )
 
     csrf_cookie = _cookie_common()
     response.set_cookie(
@@ -75,4 +99,19 @@ def set_auth_cookies(response: Response, access_token: str, max_age: int) -> str
 def clear_auth_cookies(response: Response) -> None:
     cookie = _cookie_common()
     response.delete_cookie(AUTH_COOKIE_NAME, **cookie)
+    response.delete_cookie(AUTH_REFRESH_COOKIE_NAME, **cookie)
     response.delete_cookie(CSRF_COOKIE_NAME, **cookie)
+
+
+def validate_csrf_request(request: Request) -> None:
+    """Enforce double-submit CSRF protection for a cookie-authenticated write."""
+    if request.method.upper() not in CSRF_PROTECTED_METHODS:
+        return
+
+    csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME)
+    csrf_header = request.headers.get(CSRF_HEADER_NAME)
+    if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid CSRF token",
+        )

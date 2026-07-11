@@ -4,7 +4,7 @@ Handles user signup, login, and user info retrieval
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Depends, status, Response
+from fastapi import APIRouter, HTTPException, Depends, status, Request, Response
 
 logger = logging.getLogger("algosplit.auth")
 from db.supabase import get_supabase_client, get_supabase_admin, get_supabase_client_with_token
@@ -18,11 +18,13 @@ from schemas.auth import (
     UserInfo,
     ErrorResponse,
 )
-from api.dependencies import get_current_user, AuthUser
+from api.dependencies import _decode_token, get_current_user, AuthUser
 from api.security import (
     AUTH_EXPOSE_ACCESS_TOKEN,
+    AUTH_REFRESH_COOKIE_NAME,
     clear_auth_cookies,
     set_auth_cookies,
+    validate_csrf_request,
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -74,7 +76,7 @@ async def signup(request: SignUpRequest, http_response: Response):
         refresh_token = sign_up_response.session.refresh_token if sign_up_response.session else ""
         expires_in = sign_up_response.session.expires_in if sign_up_response.session else 3600
         if access_token:
-            set_auth_cookies(http_response, access_token, expires_in)
+            set_auth_cookies(http_response, access_token, refresh_token, expires_in)
         return AuthResponse(
             access_token=access_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
             refresh_token=refresh_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
@@ -163,6 +165,7 @@ async def login(request: LoginRequest, http_response: Response):
         set_auth_cookies(
             http_response,
             login_response.session.access_token,
+            login_response.session.refresh_token,
             login_response.session.expires_in,
         )
         return AuthResponse(
@@ -237,13 +240,30 @@ async def get_user(current_user: AuthUser = Depends(get_current_user)):
     summary="Refresh access token",
     description="Exchange a refresh token for a new access token",
 )
-async def refresh(request: RefreshRequest, http_response: Response):
+async def refresh(
+    http_request: Request,
+    http_response: Response,
+    request: RefreshRequest | None = None,
+):
     """
     Refresh an expired access token using a Supabase refresh token.
     """
     try:
+        refresh_token = request.refresh_token if request else None
+        refresh_cookie = http_request.cookies.get(AUTH_REFRESH_COOKIE_NAME)
+        if refresh_cookie:
+            # Refresh rotates credentials, so it is a state-changing operation
+            # when performed with browser cookies and must be CSRF protected.
+            validate_csrf_request(http_request)
+            refresh_token = refresh_cookie
+        if not refresh_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired refresh token",
+            )
+
         supabase = get_supabase_client()
-        session_response = supabase.auth.refresh_session(request.refresh_token)
+        session_response = supabase.auth.refresh_session(refresh_token)
 
         if not session_response.user or not session_response.session:
             raise HTTPException(
@@ -254,6 +274,7 @@ async def refresh(request: RefreshRequest, http_response: Response):
         set_auth_cookies(
             http_response,
             session_response.session.access_token,
+            session_response.session.refresh_token,
             session_response.session.expires_in,
         )
         return AuthResponse(
@@ -324,26 +345,20 @@ async def reset_password(request: ResetPasswordRequest):
     """
     try:
         admin = get_supabase_admin()
-        # Decode the token to get the user ID, then update via admin
-        from jose import jwt, JWTError
-        import os
-
-        # Verify the token is valid by decoding it
-        # We use the admin client to update the password by user ID
+        # Verify a recovery token using the same validated JWT configuration
+        # as every authenticated route. A normal access token must never be
+        # accepted as a password-reset credential.
         try:
-            payload = jwt.decode(
-                request.access_token,
-                os.getenv("SUPABASE_JWT_SECRET", ""),
-                algorithms=["HS256"],
-                audience="authenticated",
-            )
+            payload = _decode_token(request.access_token)
             user_id = payload.get("sub")
-            if not user_id:
+            if not user_id or payload.get("type") != "recovery":
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid reset token",
                 )
-        except JWTError:
+        except HTTPException:
+            raise
+        except Exception:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired reset token",
