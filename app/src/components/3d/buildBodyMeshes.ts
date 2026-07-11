@@ -1,4 +1,4 @@
-import { THREE } from 'expo-three';
+import * as THREE from 'three';
 import { getRegionHex, NEUTRAL_HEX, VISIBLE_REGION_IDS } from './regionColors';
 
 // ─── Types ───────────────────────────────────────────────────────

@@ -10,7 +10,7 @@ class SignUpRequest(BaseModel):
     """Request body for user sign up"""
 
     email: EmailStr = Field(..., description="User's email address")
-    password: str = Field(..., min_length=8, description="User's password (min 8 characters)")
+    password: str = Field(..., min_length=8, max_length=256, description="User's password (min 8 characters)")
 
     model_config = {
         "json_schema_extra": {
@@ -28,7 +28,7 @@ class LoginRequest(BaseModel):
     """Request body for user login"""
 
     email: EmailStr = Field(..., description="User's email address")
-    password: str = Field(..., description="User's password")
+    password: str = Field(..., min_length=1, max_length=256, description="User's password")
 
     model_config = {
         "json_schema_extra": {
@@ -43,9 +43,9 @@ class LoginRequest(BaseModel):
 
 
 class RefreshRequest(BaseModel):
-    """Request body for token refresh"""
+    """Optional request body for native-client token refresh."""
 
-    refresh_token: str = Field(..., description="Supabase refresh token")
+    refresh_token: Optional[str] = Field(None, description="Supabase refresh token")
 
 
 class AuthResponse(BaseModel):
@@ -103,7 +103,7 @@ class ResetPasswordRequest(BaseModel):
     """Request body for resetting password with a new one"""
 
     access_token: str = Field(..., description="Access token from Supabase reset link")
-    new_password: str = Field(..., min_length=8, description="New password (min 8 characters)")
+    new_password: str = Field(..., min_length=8, max_length=256, description="New password (min 8 characters)")
 
 
 class ErrorResponse(BaseModel):

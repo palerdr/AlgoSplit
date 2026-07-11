@@ -14,8 +14,8 @@ from pydantic import BaseModel, Field, field_validator
 class WorkoutExerciseCreate(BaseModel):
     """Exercise data for a logged workout"""
 
-    exercise_name: str = Field(..., min_length=1, description="Exercise name")
-    sets_completed: int = Field(..., gt=0, description="Number of sets completed")
+    exercise_name: str = Field(..., min_length=1, max_length=200, description="Exercise name")
+    sets_completed: int = Field(..., gt=0, le=100, description="Number of sets completed")
     reps: List[int] = Field(..., min_items=1, description="Reps for each set, e.g., [8, 8, 7]")
     weight: List[float] = Field(..., min_items=1, description="Weight in pounds for each set, e.g., [185, 185, 185]")
     rir: Optional[List[int]] = Field(None, description="Reps in reserve for each set, e.g., [2, 3, 2]")
@@ -92,7 +92,7 @@ class WorkoutLogCreate(BaseModel):
     program_session_id: Optional[str] = Field(
         None, description="Program session to mark completed"
     )
-    session_name: str = Field(..., min_length=1, description="Name of session performed")
+    session_name: str = Field(..., min_length=1, max_length=200, description="Name of session performed")
     completed_at: Optional[datetime] = Field(
         None, description="When workout was completed (defaults to now)"
     )
@@ -101,7 +101,7 @@ class WorkoutLogCreate(BaseModel):
     )
     notes: Optional[str] = Field(None, max_length=1000, description="Overall workout notes")
     exercises: List[WorkoutExerciseCreate] = Field(
-        ..., min_items=1, description="Exercises performed"
+        ..., min_items=1, max_length=100, description="Exercises performed"
     )
 
     model_config = {

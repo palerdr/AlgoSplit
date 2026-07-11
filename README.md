@@ -106,7 +106,7 @@ AUTH_COOKIE_SECURE=false
 AUTH_EXPOSE_ACCESS_TOKEN=true
 ```
 
-The backend also supports cookie/CSRF overrides such as `AUTH_COOKIE_NAME`, `AUTH_COOKIE_DOMAIN`, `AUTH_COOKIE_SAMESITE`, and `CSRF_HEADER_NAME`.
+The backend also supports cookie/CSRF overrides such as `AUTH_COOKIE_NAME`, `AUTH_REFRESH_COOKIE_NAME`, `AUTH_COOKIE_DOMAIN`, `AUTH_COOKIE_SAMESITE`, and `CSRF_HEADER_NAME`.
 
 ### 3. Run the Backend
 
@@ -247,8 +247,10 @@ npm run build:web
 For production, set:
 
 - backend Supabase credentials
-- `FRONTEND_URL`
-- secure cookie settings when serving browser traffic cross-origin
+- `APP_ENV=production`, `FRONTEND_URL=https://your-web-app.example` and `ALLOWED_HOSTS=your-api.example` (comma-separated values are accepted). The service refuses to boot without explicit production origins and hosts.
+- `AUTH_EXPOSE_ACCESS_TOKEN=false` for browser deployments. This keeps access and refresh tokens in Secure, HttpOnly cookies; browser refreshes use the CSRF-protected refresh cookie. Native-only deployments may set it to `true` and store the returned tokens with SecureStore.
+- `AUTH_REFRESH_COOKIE_MAX_AGE_SECONDS` when the default 30-day browser session lifetime is unsuitable.
+- `MAX_REQUEST_BODY_BYTES` to adjust the default 1 MiB API request limit.
 - `TRUST_PROXY=true` only behind a trusted reverse proxy
 - optional Redis URL for distributed rate limiting
 

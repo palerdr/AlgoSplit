@@ -1,7 +1,7 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { View, StyleSheet, PanResponder, Text, Platform, ActivityIndicator } from 'react-native';
 import { GLView, ExpoWebGLRenderingContext } from 'expo-gl';
-import { Renderer, THREE } from 'expo-three';
+import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Asset } from 'expo-asset';
 import {
@@ -20,6 +20,26 @@ interface InteractiveBodyProps {
   onRegionPress?: (regionId: string) => void;
   onDragStart?: () => void;
   onDragEnd?: () => void;
+}
+
+/**
+ * Minimal Expo GL adapter for three.js. This replaces expo-three, whose
+ * browser-polyfill dependency is unmaintained and incompatible with Expo 55.
+ */
+function createRenderer(gl: ExpoWebGLRenderingContext): THREE.WebGLRenderer {
+  const canvas = {
+    width: gl.drawingBufferWidth,
+    height: gl.drawingBufferHeight,
+    clientHeight: gl.drawingBufferHeight,
+    style: {},
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  } as unknown as HTMLCanvasElement;
+
+  return new THREE.WebGLRenderer({
+    canvas,
+    context: gl as unknown as WebGLRenderingContext,
+  });
 }
 
 // ─── Body model cache ───────────────────────────────────────────
@@ -290,7 +310,7 @@ function InteractiveBody({
       });
 
       try {
-        const renderer = new Renderer({ gl });
+        const renderer = createRenderer(gl);
         renderer.setSize(gl.drawingBufferWidth, gl.drawingBufferHeight);
         renderer.setClearColor(BODY_3D_CONFIG.render.clearColorHex, 1);
 

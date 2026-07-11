@@ -674,7 +674,7 @@ export default function SplitDetailScreen() {
   const handleStartWorkout = useCallback(
     (session: SessionResponse) => {
       const doStart = () => {
-        prefetchPreviousWorkoutData(queryClient, session.name);
+        prefetchPreviousWorkoutData(queryClient, session.name, split?.id);
         const exercises = session.exercises.map((ex) => ({
           name: ex.exercise_name,
           sets: ex.sets,

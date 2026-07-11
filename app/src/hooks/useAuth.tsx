@@ -3,7 +3,7 @@ import { AppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQueryClient } from '@tanstack/react-query';
 import * as authApi from '../api/auth.api';
-import { tokenStore, onAuthLogout, getErrorMessage } from '../api/client';
+import { tokenStore, onAuthLogout, isRecoverableAuthError } from '../api/client';
 import type { UserInfo } from '../types/api.types';
 
 // Refresh the token 5 minutes before it expires
@@ -65,8 +65,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refreshTimerRef.current = setTimeout(async () => {
       try {
         const rt = await tokenStore.getRefreshToken();
-        if (!rt) return;
-        const res = await authApi.refreshToken(rt);
+        if (!rt && Platform.OS !== 'web') return;
+        const res = await authApi.refreshToken(rt ?? undefined);
         if (res.access_token) await tokenStore.setToken(res.access_token);
         if (res.refresh_token) await tokenStore.setRefreshToken(res.refresh_token);
         scheduleRefresh(res.expires_in);
@@ -85,8 +85,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshNow = useCallback(async () => {
     try {
       const rt = await tokenStore.getRefreshToken();
-      if (!rt) return;
-      const res = await authApi.refreshToken(rt);
+      if (!rt && Platform.OS !== 'web') return;
+      const res = await authApi.refreshToken(rt ?? undefined);
       if (res.access_token) await tokenStore.setToken(res.access_token);
       if (res.refresh_token) await tokenStore.setRefreshToken(res.refresh_token);
       scheduleRefresh(res.expires_in);
@@ -100,6 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const cachedUser = await getCachedUser();
       try {
         // Native can skip the bootstrap user request when no token is stored.
         if (Platform.OS !== 'web') {
@@ -109,7 +110,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             return;
           }
 
-          const cachedUser = await getCachedUser();
           if (cachedUser && !cancelled) {
             setState({ user: cachedUser, isAuthenticated: true, isLoading: false });
           }
@@ -122,7 +122,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // Schedule proactive refresh on bootstrap so long sessions stay alive
           refreshNow();
         }
-      } catch {
+      } catch (error) {
+        // A transient API failure (including Render waking from idle) should
+        // not turn a cached session into a forced login. Requests will retry
+        // normally once the service is reachable again.
+        if (cachedUser && isRecoverableAuthError(error)) {
+          if (!cancelled) setState({ user: cachedUser, isAuthenticated: true, isLoading: false });
+          return;
+        }
         await clearCachedUser();
         if (!cancelled) setState({ user: null, isAuthenticated: false, isLoading: false });
       }
@@ -152,6 +159,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const res = await authApi.login({ email, password });
     const promises: Promise<void>[] = [setCachedUser(res.user)];
     if (res.access_token) promises.push(tokenStore.setToken(res.access_token));
+    else if (Platform.OS === 'web') promises.push(tokenStore.clearToken());
     if (res.refresh_token) promises.push(tokenStore.setRefreshToken(res.refresh_token));
     setState({ user: res.user, isAuthenticated: true, isLoading: false });
     queryClient.clear();
@@ -163,6 +171,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const res = await authApi.signup({ email, password });
     const promises: Promise<void>[] = [setCachedUser(res.user)];
     if (res.access_token) promises.push(tokenStore.setToken(res.access_token));
+    else if (Platform.OS === 'web') promises.push(tokenStore.clearToken());
     if (res.refresh_token) promises.push(tokenStore.setRefreshToken(res.refresh_token));
     setState({ user: res.user, isAuthenticated: true, isLoading: false });
     queryClient.clear();

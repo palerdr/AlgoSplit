@@ -12,7 +12,7 @@ import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useWorkoutStore } from '../src/stores/workoutStore';
+import { getPreviousExerciseData, useWorkoutStore } from '../src/stores/workoutStore';
 import { useLogWorkout, usePreviousWorkoutData } from '../src/hooks/useWorkouts';
 import WorkoutHeaderMobile from '../src/components/workout/WorkoutHeaderMobile';
 import ExerciseViewMobile from '../src/components/workout/ExerciseViewMobile';
@@ -50,7 +50,10 @@ export default function WorkoutScreen() {
   const logWorkoutMutation = useLogWorkout();
 
   // Fetch previous workout data for "last time" shadow values
-  const { data: fetchedPrevData } = usePreviousWorkoutData(activeWorkout?.sessionName);
+  const { data: fetchedPrevData } = usePreviousWorkoutData(
+    activeWorkout?.sessionName,
+    activeWorkout?.splitId,
+  );
 
   // Persist fetched previous data into the workout store so it survives
   // tab switches without waiting for a fresh query re-fetch.
@@ -278,7 +281,7 @@ export default function WorkoutScreen() {
                 <View style={styles.card}>
                   <ExerciseViewMobile
                     exercise={exercise}
-                    previousExerciseData={previousData?.[exercise.name]}
+                    previousExerciseData={getPreviousExerciseData(previousData, exercise.name)}
                     onAddAfter={() => { insertAfterIndex.current = index; setShowPicker(true); }}
                   />
                 </View>

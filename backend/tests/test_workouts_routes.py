@@ -144,3 +144,45 @@ def test_log_workout_marks_dropped_session_id_in_response(client, fake_supabase,
     assert body["session_id"] is None
     assert body["session_id_dropped"] is True
     assert "Dropping stale workout session_id" in caplog.text
+
+
+def test_workout_history_strips_legacy_unilateral_note_prefixes(client, fake_supabase, auth_user, monkeypatch):
+    monkeypatch.setattr(
+        workouts_routes,
+        "get_supabase_client_with_token",
+        lambda _token: fake_supabase,
+    )
+
+    workout = fake_supabase.table("workout_logs").insert({
+        "user_id": auth_user.id,
+        "session_name": "Leg Day",
+        "completed_at": "2026-03-10T10:00:00Z",
+    }).execute().data[0]
+    fake_supabase.table("workout_exercises").insert([
+        {
+            "workout_log_id": workout["id"],
+            "exercise_name": "Single-leg Curl",
+            "sets_completed": 1,
+            "reps": [10],
+            "weight": [45],
+            "order_index": 0,
+            "notes": "L | keep hips square",
+        },
+        {
+            "workout_log_id": workout["id"],
+            "exercise_name": "Single-leg Curl",
+            "sets_completed": 1,
+            "reps": [9],
+            "weight": [45],
+            "order_index": 1,
+            "notes": "R | keep hips square",
+        },
+    ]).execute()
+
+    response = client.get("/api/workouts")
+
+    assert response.status_code == 200
+    assert [exercise["notes"] for exercise in response.json()["workouts"][0]["exercises"]] == [
+        "keep hips square",
+        "keep hips square",
+    ]

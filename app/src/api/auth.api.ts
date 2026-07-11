@@ -21,8 +21,11 @@ export async function getCurrentUser(): Promise<UserInfo> {
   return response.data;
 }
 
-export async function refreshToken(refresh_token: string): Promise<AuthResponse> {
-  const response = await apiClient.post<AuthResponse>('/auth/refresh', { refresh_token });
+export async function refreshToken(refresh_token?: string): Promise<AuthResponse> {
+  const response = await apiClient.post<AuthResponse>(
+    '/auth/refresh',
+    refresh_token ? { refresh_token } : undefined,
+  );
   return response.data;
 }
 

@@ -4,7 +4,6 @@ FastAPI dependencies for authentication and authorization
 
 import os
 import logging
-import secrets
 import httpx
 from typing import Optional, Tuple
 from time import time
@@ -16,9 +15,7 @@ from dotenv import load_dotenv
 
 from api.security import (
     AUTH_COOKIE_NAME,
-    CSRF_COOKIE_NAME,
-    CSRF_HEADER_NAME,
-    CSRF_PROTECTED_METHODS,
+    validate_csrf_request,
 )
 
 logger = logging.getLogger("algosplit.auth")
@@ -157,31 +154,6 @@ def _extract_token(
     )
 
 
-def _validate_csrf(request: Request):
-    if request.method.upper() not in CSRF_PROTECTED_METHODS:
-        return
-    csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME)
-    csrf_header = request.headers.get(CSRF_HEADER_NAME)
-    if not csrf_cookie or not csrf_header:
-        logger.warning(
-            "CSRF validation failed: cookie_present=%s header_present=%s method=%s path=%s",
-            bool(csrf_cookie), bool(csrf_header), request.method, request.url.path,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"CSRF token required (cookie={'present' if csrf_cookie else 'missing'}, header={'present' if csrf_header else 'missing'})",
-        )
-    if not secrets.compare_digest(csrf_cookie, csrf_header):
-        logger.warning(
-            "CSRF validation failed: mismatch method=%s path=%s",
-            request.method, request.url.path,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid CSRF token (cookie and header do not match)",
-        )
-
-
 async def get_current_user(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
@@ -202,7 +174,7 @@ async def get_current_user(
     """
     token, from_cookie = _extract_token(request, credentials)
     if from_cookie:
-        _validate_csrf(request)
+        validate_csrf_request(request)
 
     try:
         payload = _decode_token(token)

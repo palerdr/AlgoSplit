@@ -75,7 +75,7 @@ describe('exerciseNotesByKey legacy fallback + forward migration', () => {
     const exerciseName = 'Bench Press';
     const templateExerciseId = 'tpl-1';
     const legacyKey = `${splitId}:${sessionId}:${templateExerciseId}`;
-    const newKey = `${splitId}:${sessionName}:${exerciseName}`;
+    const newKey = `${splitId}:bench press`;
     useWorkoutStore.setState({ exerciseNotesByKey: { [legacyKey]: 'cue: tuck elbows' } });
 
     useWorkoutStore.getState().startWorkoutFromSession(
@@ -98,7 +98,7 @@ describe('exerciseNotesByKey legacy fallback + forward migration', () => {
     const exerciseName = 'Bench Press';
     const templateExerciseId = 'tpl-1';
     const legacyKey = `${splitId}:${sessionId}:${templateExerciseId}`;
-    const newKey = `${splitId}:${sessionName}:${exerciseName}`;
+    const newKey = `${splitId}:bench press`;
     useWorkoutStore.setState({
       exerciseNotesByKey: {
         [legacyKey]: 'old stale note',
@@ -136,7 +136,7 @@ describe('exerciseNotesByKey legacy fallback + forward migration', () => {
       splitId,
     );
 
-    const newKey = `${splitId}:${sessionName}:${exerciseName}`;
+    const newKey = `${splitId}:bench press`;
     expect(useWorkoutStore.getState().activeWorkout?.exercises[0]?.notes).toBe('pause at chest');
     expect(useWorkoutStore.getState().exerciseNotesByKey[newKey]).toBe('pause at chest');
   });
@@ -145,7 +145,7 @@ describe('exerciseNotesByKey legacy fallback + forward migration', () => {
     const splitId = 'split-abc';
     const sessionName = 'Push';
     const exerciseName = 'Bench Press';
-    const newKey = `${splitId}:${sessionName}:${exerciseName}`;
+    const newKey = `${splitId}:bench press`;
     useWorkoutStore.setState({ exerciseNotesByKey: { [newKey]: 'current cue' } });
 
     useWorkoutStore.getState().startWorkoutFromSession(
@@ -164,6 +164,31 @@ describe('exerciseNotesByKey legacy fallback + forward migration', () => {
 
     expect(useWorkoutStore.getState().activeWorkout?.exercises[0]?.notes).toBe('current cue');
     expect(useWorkoutStore.getState().exerciseNotesByKey[newKey]).toBe('current cue');
+  });
+
+  it('shares a named exercise note across different days in the same split', () => {
+    const splitId = 'split-abc';
+    useWorkoutStore.getState().startWorkoutFromSession(
+      'Push A',
+      [{ name: 'Chest Press Machine', sets: 1, unilateral: false }],
+      undefined,
+      'session-a',
+      splitId,
+    );
+    const firstExerciseId = useWorkoutStore.getState().activeWorkout?.exercises[0]?.id!;
+    useWorkoutStore.getState().updateExerciseNotes(firstExerciseId, 'seat one notch lower');
+    useWorkoutStore.getState().cancelWorkout();
+
+    useWorkoutStore.getState().startWorkoutFromSession(
+      'Push B',
+      [{ name: '  chest   press machine ', sets: 1, unilateral: false }],
+      undefined,
+      'session-b',
+      splitId,
+    );
+
+    expect(useWorkoutStore.getState().activeWorkout?.exercises[0]?.notes).toBe('seat one notch lower');
+    expect(useWorkoutStore.getState().exerciseNotesByKey[`${splitId}:chest press machine`]).toBe('seat one notch lower');
   });
 
   it('applies late fetched previous data to blank notes without overwriting typed notes', () => {
@@ -234,6 +259,7 @@ describe('workoutStore unilateral serialization', () => {
     useWorkoutStore.getState().updateSet(exerciseId!, 1, { reps: 8, weight: 25, rir: 1 });
     useWorkoutStore.getState().updateSet(exerciseId!, 2, { reps: 9, weight: 30, rir: 2 });
     useWorkoutStore.getState().updateSet(exerciseId!, 3, { reps: 7, weight: 30, rir: 1 });
+    useWorkoutStore.getState().updateExerciseNotes(exerciseId!, 'keep hips square');
 
     const workoutData = useWorkoutStore.getState().getWorkoutData();
 
@@ -244,7 +270,7 @@ describe('workoutStore unilateral serialization', () => {
         reps: [10, 9],
         weight: [25, 30],
         rir: [2, 2],
-        notes: 'L',
+        notes: 'keep hips square',
       },
       {
         exercise_name: 'Bulgarian Split Squat',
@@ -252,7 +278,7 @@ describe('workoutStore unilateral serialization', () => {
         reps: [8, 7],
         weight: [25, 30],
         rir: [1, 1],
-        notes: 'R',
+        notes: 'keep hips square',
       },
     ]);
   });
