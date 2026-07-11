@@ -44,6 +44,10 @@ coverage/
 out/
 .turbo/
 
+# Rust
+target/
+backend/rust/**/dist/
+
 # Database
 *.db
 *.sqlite
