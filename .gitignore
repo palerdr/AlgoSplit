@@ -51,6 +51,7 @@ out/
 
 #misc
 .claude/
+graphify-out/
 tickets.md
 nul
 *.md
