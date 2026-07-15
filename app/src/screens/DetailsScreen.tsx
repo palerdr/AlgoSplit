@@ -22,6 +22,7 @@ import { HEAT_RAMP } from '../3d/regionColors';
 import { theme } from '../theme';
 import Glass from '../ui/Glass';
 import FadeIn from '../ui/FadeIn';
+import ServerTab from './ServerTab';
 
 interface DetailsScreenProps {
   onBack: () => void;
@@ -290,8 +291,81 @@ function SplitAnalysis({ template }: { template: WorkoutTemplate }) {
   );
 }
 
+// A/B comparison: two templates' steady-state nets side by side.
+function CompareBlock({ a, b }: { a: WorkoutTemplate; b: WorkoutTemplate }) {
+  const nets = useMemo(() => {
+    const toEntries = (t: WorkoutTemplate) =>
+      t.exercises
+        .map((te) => {
+          const exercise = getExercise(te.exerciseId);
+          return exercise ? { exercise, sets: te.sets } : null;
+        })
+        .filter((e): e is { exercise: Exercise; sets: number } => e !== null);
+    const netA = analyzeTemplate(toEntries(a), 2);
+    const netB = analyzeTemplate(toEntries(b), 2);
+    const regions = [...new Set([...Object.keys(netA), ...Object.keys(netB)])]
+      .map((region) => ({
+        region,
+        name: MUSCLE_REGIONS[region]?.displayName ?? region,
+        a: netA[region] ?? 0,
+        b: netB[region] ?? 0,
+      }))
+      .sort((x, y) => Math.max(y.a, y.b) - Math.max(x.a, x.b));
+    return { regions, scoreA: stimulusScore(netA), scoreB: stimulusScore(netB) };
+  }, [a, b]);
+
+  const max = Math.max(0.1, ...nets.regions.map((r) => Math.max(r.a, r.b)));
+
+  return (
+    <Glass style={styles.analysisCard}>
+      <View style={styles.scoreHeader}>
+        <Text style={styles.chartTitle}>
+          {a.name} vs {b.name}
+        </Text>
+        <Text style={styles.scoreValue}>
+          {nets.scoreA}<Text style={styles.progressBestDim}> / {nets.scoreB}</Text>
+        </Text>
+      </View>
+      {nets.regions.slice(0, 12).map((row) => (
+        <View key={row.region} style={styles.compareRow}>
+          <Text style={styles.muscleName} numberOfLines={1}>
+            {row.name}
+          </Text>
+          <View style={{ flex: 1, gap: 3 }}>
+            <View style={styles.muscleTrack}>
+              <View
+                style={[
+                  styles.muscleFill,
+                  {
+                    width: `${Math.max(2, (Math.max(0, row.a) / max) * 100)}%`,
+                    backgroundColor: HEAT_RAMP[Math.max(1, getStimulusLevel(row.a))],
+                  },
+                ]}
+              />
+            </View>
+            <View style={styles.muscleTrack}>
+              <View
+                style={[
+                  styles.muscleFill,
+                  {
+                    width: `${Math.max(2, (Math.max(0, row.b) / max) * 100)}%`,
+                    backgroundColor: HEAT_RAMP[Math.max(1, getStimulusLevel(row.b))],
+                    opacity: 0.55,
+                  },
+                ]}
+              />
+            </View>
+          </View>
+        </View>
+      ))}
+      <Text style={styles.scoreHint}>top bar = {a.name} · dim bar = {b.name} · 2×/week</Text>
+    </Glass>
+  );
+}
+
 function SplitsTab({ templates }: { templates: WorkoutTemplate[] }) {
   const [selected, setSelected] = useState<WorkoutTemplate | null>(templates[0] ?? null);
+  const [compareWith, setCompareWith] = useState<WorkoutTemplate | null>(null);
   return (
     <View>
       <View style={styles.splitPicker}>
@@ -301,6 +375,7 @@ function SplitsTab({ templates }: { templates: WorkoutTemplate[] }) {
             onPress={() => {
               tick();
               setSelected(t);
+              if (compareWith?.id === t.id) setCompareWith(null);
             }}
           >
             <View style={[styles.freqChip, selected?.id === t.id && styles.freqChipActive]}>
@@ -318,6 +393,37 @@ function SplitsTab({ templates }: { templates: WorkoutTemplate[] }) {
         <SplitAnalysis template={selected} />
       ) : (
         <Text style={styles.empty}>No workouts yet</Text>
+      )}
+
+      {selected && templates.length > 1 && (
+        <View>
+          <Text style={styles.sectionLabel}>Compare against</Text>
+          <View style={styles.splitPicker}>
+            {templates
+              .filter((t) => t.id !== selected.id)
+              .map((t) => (
+                <Pressable
+                  key={t.id}
+                  onPress={() => {
+                    tick();
+                    setCompareWith((prev) => (prev?.id === t.id ? null : t));
+                  }}
+                >
+                  <View
+                    style={[styles.freqChip, compareWith?.id === t.id && styles.freqChipActive]}
+                  >
+                    <Text
+                      style={[styles.freqText, compareWith?.id === t.id && styles.freqTextActive]}
+                      numberOfLines={1}
+                    >
+                      {t.name}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
+          </View>
+          {compareWith && <CompareBlock a={selected} b={compareWith} />}
+        </View>
       )}
     </View>
   );
@@ -375,7 +481,7 @@ function ProgressTab({ history }: { history: CompletedWorkout[] }) {
 }
 
 // ── Screen ────────────────────────────────────────────────────────
-type Tab = 'overview' | 'splits' | 'progress';
+type Tab = 'overview' | 'splits' | 'progress' | 'server';
 
 export default function DetailsScreen({ onBack }: DetailsScreenProps) {
   const { history, templates } = useAppState();
@@ -430,6 +536,7 @@ export default function DetailsScreen({ onBack }: DetailsScreenProps) {
             ['overview', 'Overview'],
             ['splits', 'Splits'],
             ['progress', 'Progress'],
+            ['server', 'Server'],
           ] as [Tab, string][]
         ).map(([key, label]) => (
           <Pressable
@@ -463,8 +570,10 @@ export default function DetailsScreen({ onBack }: DetailsScreenProps) {
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
           {tab === 'splits' ? (
             <SplitsTab templates={templates} />
-          ) : (
+          ) : tab === 'progress' ? (
             <ProgressTab history={history} />
+          ) : (
+            <ServerTab />
           )}
         </ScrollView>
       )}
@@ -797,6 +906,12 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     width: 28,
     textAlign: 'right',
+  },
+  compareRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 6,
   },
   // progress tab
   progressRowLine: {

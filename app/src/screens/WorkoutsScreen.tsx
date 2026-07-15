@@ -19,13 +19,25 @@ import FadeIn from '../ui/FadeIn';
 
 interface WorkoutsScreenProps {
   onBack: () => void;
+  /** One-shot: open directly in the New Workout builder */
+  startInBuilder?: boolean;
+  onBuilderHandled?: () => void;
 }
 
 const tick = () => Haptics.selectionAsync().catch(() => {});
 
-export default function WorkoutsScreen({ onBack }: WorkoutsScreenProps) {
+export default function WorkoutsScreen({
+  onBack,
+  startInBuilder,
+  onBuilderHandled,
+}: WorkoutsScreenProps) {
   const { templates, addTemplate, updateTemplate } = useAppState();
-  const [building, setBuilding] = useState(false);
+  const [building, setBuilding] = useState(startInBuilder === true);
+  useEffect(() => {
+    if (startInBuilder) onBuilderHandled?.();
+    // consume the one-shot on mount only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [items, setItems] = useState<TemplateExercise[]>([]);

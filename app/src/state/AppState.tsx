@@ -7,6 +7,7 @@ import React, {
   ReactNode,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { autoSyncWorkout } from '../api/sync';
 import { Exercise, getExercise } from '../data/exercises';
 import { TEMPLATES as SEED_TEMPLATES, TemplateExercise, WorkoutTemplate } from '../data/templates';
 import {
@@ -246,7 +247,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
     startFreeSession: () => {
       setSession({
-        name: 'Freestyle',
+        name: 'Freeball',
         planned: false,
         exercises: [],
         currentIndex: 0,
@@ -347,6 +348,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setLastCompleted(done);
       setHistory((h) => [done, ...h]);
       setSession(null);
+      autoSyncWorkout(done); // fire-and-forget when a backend is configured
     },
 
     discardSession: () => setSession(null),

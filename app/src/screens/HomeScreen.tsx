@@ -11,6 +11,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
 import BodyHeatmap from '../3d/BodyHeatmap';
 import Glass from '../ui/Glass';
 import { WorkoutTemplate } from '../data/templates';
@@ -26,6 +27,8 @@ interface HomeScreenProps {
   onStartSession: () => void;
   onDetails: () => void;
   onWorkouts: () => void;
+  /** Jump straight into the workout builder */
+  onNewWorkout: () => void;
 }
 
 // Sheet progress (0 pill → 1 open sheet) past which releasing opens it.
@@ -45,6 +48,7 @@ export default function HomeScreen({
   onStartSession,
   onDetails,
   onWorkouts,
+  onNewWorkout,
 }: HomeScreenProps) {
   const {
     recentStimulus,
@@ -299,7 +303,8 @@ export default function HomeScreen({
         <Glass style={styles.morphGlass} interactive>
           <View style={styles.morphClip}>
             {/* Week Effort: a wordless left-to-right shade under the glass
-                highlights — its reach IS the meter. Fades on interaction. */}
+                highlights — its reach IS the meter, its right edge blurring
+                into nothing. Fades on interaction. */}
             <Animated.View
               pointerEvents="none"
               style={[
@@ -312,7 +317,15 @@ export default function HomeScreen({
                   }),
                 },
               ]}
-            />
+            >
+              <LinearGradient
+                colors={['rgba(35,162,74,0.16)', 'rgba(35,162,74,0.14)', 'rgba(35,162,74,0)']}
+                locations={[0, 0.55, 1]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={StyleSheet.absoluteFill}
+              />
+            </Animated.View>
 
             {/* Handle — pill face when closed, sheet header when open */}
             <View style={styles.handleZone} {...(sheetLive ? sheetPan.panHandlers : {})}>
@@ -351,6 +364,17 @@ export default function HomeScreen({
                 scrollEnabled={sheetLive}
                 contentContainerStyle={styles.cardsScroll}
               >
+              {/* Clear weekly stimulus read inside the open sheet */}
+              <View style={styles.sheetStimRow}>
+                <Text style={styles.sheetStimLabel}>Weekly stimulus</Text>
+                <View style={styles.sheetStimTrack}>
+                  <View
+                    style={[styles.sheetStimFill, { width: `${Math.min(100, weekEffort)}%` }]}
+                  />
+                </View>
+                <Text style={styles.sheetStimValue}>{weekEffort}</Text>
+              </View>
+
               {templates.map((t) => (
                 <Pressable key={t.id} onPress={() => pick(t)}>
                   {({ pressed }) => (
@@ -367,14 +391,38 @@ export default function HomeScreen({
                 </Pressable>
               ))}
 
-              <Pressable onPress={pickFreestyle}>
-                {({ pressed }) => (
-                  <View style={[styles.sheetCard, styles.freeCard, pressed && styles.cardPressed]}>
-                    <Text style={styles.cardTitle}>Add as you go</Text>
-                    <Text style={styles.cardSub}>Pick exercises during the workout</Text>
-                  </View>
-                )}
-              </Pressable>
+              {/* Last row: Freeball + jump straight into the workout builder */}
+              <View style={styles.lastRow}>
+                <Pressable style={{ flex: 1 }} onPress={pickFreestyle}>
+                  {({ pressed }) => (
+                    <View
+                      style={[
+                        styles.sheetCard,
+                        styles.freeCard,
+                        styles.lastRowCard,
+                        pressed && styles.cardPressed,
+                      ]}
+                    >
+                      <Text style={styles.cardTitle}>Freeball</Text>
+                      <Text style={styles.cardSub}>Pick exercises as you go</Text>
+                    </View>
+                  )}
+                </Pressable>
+                <Pressable style={styles.plusPressable} onPress={() => { tick(); onNewWorkout(); }}>
+                  {({ pressed }) => (
+                    <View
+                      style={[
+                        styles.sheetCard,
+                        styles.plusCard,
+                        styles.lastRowCard,
+                        pressed && styles.cardPressed,
+                      ]}
+                    >
+                      <Text style={styles.plusText}>＋</Text>
+                    </View>
+                  )}
+                </Pressable>
+              </View>
             </ScrollView>
             </Animated.View>
           </View>
@@ -439,9 +487,58 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: 'rgba(35,162,74,0.15)',
-    borderTopRightRadius: 16,
-    borderBottomRightRadius: 16,
+    overflow: 'hidden',
+  },
+  sheetStimRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 4,
+    paddingBottom: 12,
+  },
+  sheetStimLabel: {
+    color: theme.textDim,
+    fontSize: 12,
+  },
+  sheetStimTrack: {
+    flex: 1,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    overflow: 'hidden',
+  },
+  sheetStimFill: {
+    height: '100%',
+    borderRadius: 2.5,
+    backgroundColor: theme.accent,
+  },
+  sheetStimValue: {
+    color: theme.text,
+    fontSize: 12,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  lastRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 10,
+  },
+  lastRowCard: {
+    marginBottom: 0,
+  },
+  plusPressable: {
+    alignSelf: 'stretch',
+  },
+  plusCard: {
+    flex: 1,
+    width: 74,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  plusText: {
+    color: theme.accent,
+    fontSize: 26,
+    fontWeight: '600',
   },
   morphWrap: {
     position: 'absolute',

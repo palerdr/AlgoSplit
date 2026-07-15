@@ -24,6 +24,8 @@ function Root() {
   // A one-shot flag (cleared by Home once handled) — NOT a persistent key, so
   // ordinary navigation back to Home never replays the celebration.
   const [celebratePending, setCelebratePending] = useState(false);
+  // One-shot: Home's "+" tile opens Workouts directly in the builder.
+  const [builderPending, setBuilderPending] = useState(false);
   const pendingRef = useRef<Screen | null>(null);
   const anim = useRef(new Animated.Value(1)).current;
 
@@ -65,6 +67,10 @@ function Root() {
             onStartSession={() => go('session')}
             onDetails={() => go('details')}
             onWorkouts={() => go('workouts')}
+            onNewWorkout={() => {
+              setBuilderPending(true);
+              go('workouts');
+            }}
           />
         );
       case 'session':
@@ -80,7 +86,13 @@ function Root() {
       case 'details':
         return <DetailsScreen onBack={() => go('home')} />;
       case 'workouts':
-        return <WorkoutsScreen onBack={() => go('home')} />;
+        return (
+          <WorkoutsScreen
+            onBack={() => go('home')}
+            startInBuilder={builderPending}
+            onBuilderHandled={() => setBuilderPending(false)}
+          />
+        );
     }
   })();
 
