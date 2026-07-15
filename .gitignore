@@ -65,3 +65,8 @@ sync/pids/
 worktrees/*
 !worktrees/.gitkeep
 
+
+# Refreshed-frontend docs (root *.md is ignored above)
+!MIGRATION.md
+!FEATURE_COVERAGE.md
+!app/README.md
