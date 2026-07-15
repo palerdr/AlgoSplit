@@ -30,7 +30,7 @@ interface HomeScreenProps {
 
 // Sheet progress (0 pill → 1 open sheet) past which releasing opens it.
 const ARM_AT = 0.42;
-const PILL_H = 102; // fits grabber + title + the Week Effort meter
+const PILL_H = 78;
 const RADIUS = 32;
 
 const tick = () => Haptics.selectionAsync().catch(() => {});
@@ -298,31 +298,26 @@ export default function HomeScreen({
       >
         <Glass style={styles.morphGlass} interactive>
           <View style={styles.morphClip}>
+            {/* Week Effort: a wordless left-to-right shade under the glass
+                highlights — its reach IS the meter. Fades on interaction. */}
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.effortShade,
+                {
+                  width: `${Math.min(100, Math.max(0, weekEffort))}%`,
+                  opacity: progress.interpolate({
+                    inputRange: [-0.05, 0, 0.12],
+                    outputRange: [0, 1, 0],
+                  }),
+                },
+              ]}
+            />
+
             {/* Handle — pill face when closed, sheet header when open */}
             <View style={styles.handleZone} {...(sheetLive ? sheetPan.panHandlers : {})}>
               <View style={styles.grabber} />
               <Text style={styles.startText}>Start Workout</Text>
-              {/* Week Effort lives in the pill; fades the moment you interact */}
-              <Animated.View
-                pointerEvents="none"
-                style={[
-                  styles.weekEffortRow,
-                  {
-                    opacity: progress.interpolate({
-                      inputRange: [-0.05, 0, 0.12],
-                      outputRange: [0, 1, 0],
-                    }),
-                  },
-                ]}
-              >
-                <Text style={styles.weekEffortLabel}>WEEK EFFORT</Text>
-                <View style={styles.weekEffortTrack}>
-                  <View
-                    style={[styles.weekEffortFill, { width: `${Math.min(100, weekEffort)}%` }]}
-                  />
-                </View>
-                <Text style={styles.weekEffortValue}>{weekEffort}</Text>
-              </Animated.View>
             </View>
 
             {/* Workout list, revealed as the glass stretches */}
@@ -439,36 +434,14 @@ const styles = StyleSheet.create({
   scrim: {
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
-  weekEffortRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    alignSelf: 'stretch',
-    paddingHorizontal: 26,
-    marginTop: 8,
-  },
-  weekEffortLabel: {
-    color: theme.textDim,
-    fontSize: 9,
-    letterSpacing: 1.2,
-  },
-  weekEffortTrack: {
-    flex: 1,
-    height: 3,
-    borderRadius: 1.5,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    overflow: 'hidden',
-  },
-  weekEffortFill: {
-    height: '100%',
-    borderRadius: 1.5,
-    backgroundColor: theme.accent,
-    opacity: 0.85,
-  },
-  weekEffortValue: {
-    color: theme.textDim,
-    fontSize: 9,
-    fontVariant: ['tabular-nums'],
+  effortShade: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(35,162,74,0.15)',
+    borderTopRightRadius: 16,
+    borderBottomRightRadius: 16,
   },
   morphWrap: {
     position: 'absolute',
