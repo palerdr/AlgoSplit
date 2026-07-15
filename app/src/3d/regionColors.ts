@@ -1,8 +1,7 @@
-// Stimulus heatmap scale (0–7). Cool gray (no recent work) deepening into
-// green (high stimulus). Level 0 stays near the body's neutral tone so an
-// untrained muscle blends into the figure instead of reading as data.
+// Canonical stimulus heatmap scale (0–7) — identical to main's
+// theme/colors.ts stimulus ramp so the two frontends read the same.
 export const HEAT_RAMP = [
-  '#e7e1d8', // 0 - untouched
+  '#3A3D44', // 0 - maintaining or below (cold / no growth)
   '#4A6076', // 1 - minimal
   '#3C9A91', // 2 - low
   '#6FE49A', // 3 - building
@@ -11,6 +10,9 @@ export const HEAT_RAMP = [
   '#147E36', // 6 - high
   '#0A5E27', // 7 - optimal
 ] as const;
+
+/** Level-0 body regions stay light so they blend with the figure (main's value) */
+export const UNTRAINED_BODY_HEX = '#f1ece4';
 
 /** Neutral color for decorative (non-region) body parts */
 export const NEUTRAL_HEX = '#e7e1d8';
@@ -45,7 +47,7 @@ export function getRegionHex(
 ): string {
   const raw = stimulusLevels[regionId];
   const level = Number.isFinite(raw) ? Math.min(7, Math.max(0, Math.round(raw))) : 0;
-  if (level === 0) return HEAT_RAMP[0];
+  if (level === 0) return UNTRAINED_BODY_HEX;
   return adjustHex(HEAT_RAMP[level], getRegionShadeOffset(regionId));
 }
 
