@@ -136,9 +136,20 @@ function TrainingGrid({ history }: { history: CompletedWorkout[] }) {
     return map;
   }, [history]);
 
+  // Walk calendar days (not fixed 24h ticks) so DST transitions don't shift
+  // a column of cells onto the wrong day.
+  const dayKeys = useMemo(() => {
+    const keys: string[] = [];
+    const d = new Date();
+    for (let i = 0; i < GRID_WEEKS * 7; i++) {
+      keys.push(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+      d.setDate(d.getDate() - 1);
+    }
+    return keys; // index = daysAgo
+  }, []);
+
   const cellFor = (daysAgo: number) => {
-    const d = new Date(Date.now() - daysAgo * DAY_MS);
-    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const key = dayKeys[daysAgo] ?? '';
     const volume = byDay.get(key) ?? 0;
     if (volume <= 0) return styles.gridCellEmpty;
     if (volume >= 14000) return styles.gridCellHigh;
@@ -438,7 +449,7 @@ function ProgressTab({ history }: { history: CompletedWorkout[] }) {
       const w = history[i];
       const t = new Date(w.date).getTime();
       for (const ex of w.exercises) {
-        const sessionBest = Math.max(0, ...ex.records.map((r) => e1rm(r.weight, r.reps)));
+        const sessionBest = Math.max(0, ...(ex.records ?? []).map((r) => e1rm(r.weight, r.reps)));
         if (sessionBest <= 0) continue;
         const prev = byExercise.get(ex.name);
         byExercise.set(ex.name, {

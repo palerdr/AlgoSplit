@@ -314,6 +314,7 @@ export default function HomeScreen({
                   opacity: progress.interpolate({
                     inputRange: [-0.05, 0, 0.12],
                     outputRange: [0, 1, 0],
+                    extrapolate: 'clamp',
                   }),
                 },
               ]}

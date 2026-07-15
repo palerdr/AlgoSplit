@@ -61,8 +61,17 @@ function Wheel({
   onChange: (v: number) => void;
 }) {
   // Start the animated offset AT the initial row so the selected value renders
-  // solid white immediately — no dimmed state until first touch.
-  const initialIdx = Math.max(0, values.indexOf(initial));
+  // solid white immediately — no dimmed state until first touch. Off-grid
+  // values (legacy/foreign data) snap to the nearest row instead of row 0.
+  const initialIdx = (() => {
+    const exact = values.indexOf(initial);
+    if (exact >= 0) return exact;
+    let best = 0;
+    for (let i = 1; i < values.length; i++) {
+      if (Math.abs(values[i] - initial) < Math.abs(values[best] - initial)) best = i;
+    }
+    return best;
+  })();
   const scrollY = useRef(new Animated.Value(initialIdx * ITEM_H)).current;
   const lastIdxRef = useRef(initialIdx);
   // A flick fires onScrollEndDrag with the UN-snapped offset, then momentum

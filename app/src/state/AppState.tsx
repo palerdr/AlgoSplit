@@ -69,8 +69,8 @@ interface AppState {
   addExercise: (exercise: Exercise, sets?: number) => void;
   /** Swap the exercise at an index mid-session (marks the workout edited) */
   editExercise: (index: number, exercise: Exercise) => void;
-  /** Records one set and advances. Returns true if the planned session just finished. */
-  completeSet: (record: SetRecord) => boolean;
+  /** Records one set and advances. */
+  completeSet: (record: SetRecord) => void;
   /** Finish the session; pass the final set's record to include it atomically. */
   finishSession: (finalRecord?: SetRecord) => void;
   discardSession: () => void;
@@ -188,7 +188,26 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       .then((raw) => {
         if (raw) {
           const stored = JSON.parse(raw) as Partial<PersistedState>;
-          if (Array.isArray(stored.history)) setHistory(stored.history);
+          if (Array.isArray(stored.history)) {
+            // Sanitize entries persisted by older schema versions — missing
+            // fields must never crash renders or the startup stimulus pass.
+            setHistory(
+              stored.history.map((w) => ({
+                ...w,
+                stimulus: w.stimulus && typeof w.stimulus === 'object' ? w.stimulus : {},
+                edited: w.edited === true,
+                totalSets: Number.isFinite(w.totalSets) ? w.totalSets : 0,
+                volume: Number.isFinite(w.volume) ? w.volume : 0,
+                durationMin: Number.isFinite(w.durationMin) ? w.durationMin : 0,
+                exercises: Array.isArray(w.exercises)
+                  ? w.exercises.map((e) => ({
+                      ...e,
+                      records: Array.isArray(e.records) ? e.records : [],
+                    }))
+                  : [],
+              }))
+            );
+          }
           if (Array.isArray(stored.templates) && stored.templates.length > 0) {
             setTemplates(stored.templates);
           }
@@ -210,6 +229,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   }, [hydrated, history, templates, lastUsed]);
 
   const recentStimulus = useMemo(() => computeRecentStimulus(history), [history]);
+
+  // Guards a double finish landing before React re-renders (would duplicate
+  // the history entry and double-fire sync). Keyed by the session start time.
+  const finishedSessionRef = React.useRef<number | null>(null);
 
   const value: AppState = {
     history,
@@ -271,17 +294,40 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     editExercise: (index, exercise) => {
       setSession((prev) => {
         if (!prev) return prev;
+        const target = prev.exercises[index];
+        if (!target) return prev;
+        const edited = prev.edited || prev.planned;
+        if (target.completedSets.length === 0) {
+          // Nothing logged yet — swap in place.
+          return {
+            ...prev,
+            edited,
+            exercises: prev.exercises.map((se, i) => (i === index ? { ...se, exercise } : se)),
+          };
+        }
+        // Sets were already logged against the old exercise: freeze it with
+        // what it earned and insert the new exercise for the remaining sets,
+        // so history/stimulus/e1RM never reattribute completed work.
+        const remaining = Math.max(1, target.targetSets - target.completedSets.length);
+        const frozen = { ...target, targetSets: target.completedSets.length };
+        const fresh = { exercise, targetSets: remaining, completedSets: [] };
+        const exercises = [
+          ...prev.exercises.slice(0, index),
+          frozen,
+          fresh,
+          ...prev.exercises.slice(index + 1),
+        ];
         return {
           ...prev,
-          // Swapping in a planned split is an edit; freestyle swaps are normal.
-          edited: prev.edited || prev.planned,
-          exercises: prev.exercises.map((se, i) => (i === index ? { ...se, exercise } : se)),
+          edited,
+          exercises,
+          currentIndex: prev.currentIndex === index ? index + 1 : prev.currentIndex,
         };
       });
     },
 
     completeSet: (record) => {
-      if (!session) return false;
+      if (!session) return;
       const currentBefore = session.exercises[session.currentIndex];
       if (currentBefore) {
         setLastUsed((prev) => ({ ...prev, [currentBefore.exercise.id]: record }));
@@ -300,10 +346,6 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           currentIndex: exerciseDone ? prev.currentIndex + 1 : prev.currentIndex,
         };
       });
-      const willAdvance =
-        currentBefore && currentBefore.completedSets.length + 1 >= currentBefore.targetSets;
-      const nextIndex = willAdvance ? session.currentIndex + 1 : session.currentIndex;
-      return session.planned && nextIndex >= session.exercises.length;
     },
 
     finishSession: (finalRecord) => {
@@ -312,6 +354,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       // instead of relying on a completeSet queued in the same batch.
       const prev = session;
       if (!prev) return;
+      if (finishedSessionRef.current === prev.startedAt) return; // already finished
+      finishedSessionRef.current = prev.startedAt;
       let exercises = prev.exercises;
       if (finalRecord) {
         exercises = exercises.map((se, i) =>
