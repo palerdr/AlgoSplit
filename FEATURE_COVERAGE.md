@@ -10,8 +10,8 @@ screen or shared app state consumes it. Nothing is omitted from the client.
 
 | Metric | Count |
 | --- | --- |
-| Total backend endpoints (method + path) | **89** |
-| Total client functions in `backend.ts` | **89** (1:1 with endpoints) |
+| Total backend endpoints (method + path) | **93** |
+| Total client functions in `backend.ts` | **93** (1:1 with endpoints) |
 | Endpoints without a client function | **0** |
 | Routers covered | 16 of 16 (misc/root, auth, splits, imports, workouts, overrides, custom exercises, comparisons, programs, session templates, program sessions, program diagnostics, periodization, meso templates, bodyweight, analysis) |
 
@@ -50,7 +50,9 @@ Notes:
 | GET | `/api/splits?include_exercises=` | api/routes/splits.py:401 | `splits.list(includeExercises?)` | wired (analysis, Workouts list, and Start Workout plans) |
 | GET | `/api/splits/{split_id}` | api/routes/splits.py:457 | `splits.get(splitId)` | client-only |
 | PUT | `/api/splits/{split_id}` | api/routes/splits.py:512 | `splits.update(splitId, update)` | client-only |
-| PUT | `/api/splits/{split_id}/full` | api/routes/splits.py:584 | `splits.replace(splitId, split)` | wired (new/edit workout day builder with drag order and resistance profiles) |
+| POST | `/api/splits/{split_id}/sessions` | api/routes/splits.py | `splits.createSession(splitId, session)` | wired (transactional new workout/rest day) |
+| PUT | `/api/splits/{split_id}/sessions/{session_id}` | api/routes/splits.py | `splits.updateSession(splitId, sessionId, session)` | wired (transactional workout-day editor) |
+| PUT | `/api/splits/{split_id}/full` | api/routes/splits.py:584 | `splits.replace(splitId, split)` | client-only (backward compatibility/import path) |
 | PUT | `/api/splits/{split_id}/exercises/batch` | api/routes/splits.py:734 | `splits.batchUpdateExercises(splitId, updates)` | client-only |
 | DELETE | `/api/splits/{split_id}` | api/routes/splits.py:832 | `splits.remove(splitId)` | client-only |
 | POST | `/api/splits/{split_id}/analyze?include_breakdowns=` | api/routes/splits.py:880 | `splits.analyze(splitId, includeBreakdowns?)` | client-only |
@@ -66,12 +68,14 @@ Notes:
 | Method | Path | Source | Client function | Status |
 | --- | --- | --- | --- | --- |
 | POST | `/api/workouts` | api/routes/workouts.py:152 | `workouts.create(payload)` | wired (validated logger, account-scoped durable outbox, visible idempotent retry) |
-| GET | `/api/workouts?limit=&offset=&days=` | api/routes/workouts.py:278 | `workouts.list(params?)` | wired (complete paginated History tab and Progress ranges) |
-| GET | `/api/workouts/summaries?limit=&offset=&days=` | api/routes/workouts.py:352 | `workouts.summaries(params?)` | client-only |
+| GET | `/api/workouts?limit=&offset=&days=` | api/routes/workouts.py:278 | `workouts.list(params?)` | wired (workout logger shadows and compatibility views) |
+| GET | `/api/workouts/summaries?limit=&offset=&days=` | api/routes/workouts.py:352 | `workouts.summaries(params?)` | wired (50-row History pages and recent exercise names) |
+| GET | `/api/workouts/overview?days=` | api/routes/workouts.py | `workouts.overview(days?)` | wired (compact Overview charts) |
+| GET | `/api/workouts/progress?exercise_name=&days=&limit=&offset=` | api/routes/workouts.py | `workouts.progress(params)` | wired (complete exercise-specific Progress spline data) |
 | GET | `/api/workouts/dates?days=` | api/routes/workouts.py:432 | `workouts.dates(days?)` | client-only |
 | DELETE | `/api/workouts/exercises/by-name/{exercise_name}` | api/routes/workouts.py:489 | `workouts.clearExerciseHistory(exerciseName)` | client-only |
 | PUT | `/api/workouts/{workout_id}` | api/routes/workouts.py:532 | `workouts.update(workoutId, payload)` | client-only |
-| GET | `/api/workouts/{workout_id}` | api/routes/workouts.py:623 | `workouts.get(workoutId)` | client-only |
+| GET | `/api/workouts/{workout_id}` | api/routes/workouts.py:623 | `workouts.get(workoutId)` | wired (lazy History expansion with session cache) |
 | GET | `/api/workouts/stats/summary?days=` | api/routes/workouts.py:676 | `workouts.stats(days?)` | client-only |
 | DELETE | `/api/workouts/{workout_id}` | api/routes/workouts.py:788 | `workouts.remove(workoutId)` | client-only |
 

@@ -8,12 +8,12 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { workoutRangeKey } from '../../api/accountData';
+import { workoutProgressKey } from '../../api/accountData';
 import { SplitResponse } from '../../api/backend';
 import { WorkoutTemplate } from '../../data/templates';
 import { getExercise } from '../../data/exercises';
 import { CompletedWorkout } from '../../state/AppState';
-import { emptyWorkoutResource, useAccountState } from '../../state/AccountState';
+import { emptyProgressResource, useAccountState } from '../../state/AccountState';
 import { theme } from '../../theme';
 import FadeIn from '../../ui/FadeIn';
 import Glass from '../../ui/Glass';
@@ -172,13 +172,21 @@ export default function ProgressTab({
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const days = timeRange === 'All' ? undefined : RANGE_DAYS[timeRange];
-  const rangeKey = workoutRangeKey(days);
-  const remote = account.workoutRanges[rangeKey] ?? emptyWorkoutResource();
+  const progressKey = selectedExercise ? workoutProgressKey(selectedExercise, days) : '';
+  const remote = selectedExercise
+    ? account.workoutProgress[progressKey] ?? emptyProgressResource()
+    : emptyProgressResource();
   const demoMode = account.status === 'signedOut' || account.status === 'unconfigured';
 
   useEffect(() => {
-    if (account.status === 'authenticated') account.refreshWorkouts(days);
-  }, [account.status, account.refreshWorkouts, days]);
+    if (account.status === 'authenticated') account.ensureWorkoutSummaries();
+  }, [account.status, account.ensureWorkoutSummaries]);
+
+  useEffect(() => {
+    if (account.status === 'authenticated' && selectedExercise) {
+      account.ensureWorkoutProgress(selectedExercise, days);
+    }
+  }, [account.status, account.ensureWorkoutProgress, selectedExercise, days]);
 
   const workouts = useMemo<ProgressWorkout[]>(() => {
     if (!demoMode) return remote.data;
@@ -193,7 +201,10 @@ export default function ProgressTab({
       ? demoExerciseItems(templates)
       : splitExerciseItems(account.splits.data);
     const seen = new Set(base.map((item) => item.name.toLocaleLowerCase()));
-    for (const name of getExerciseNamesFromWorkouts(workouts)) {
+    const recentNames = demoMode
+      ? getExerciseNamesFromWorkouts(workouts)
+      : account.workoutSummaries.data.workouts.flatMap((workout) => workout.exercise_names);
+    for (const name of recentNames) {
       const key = name.toLocaleLowerCase();
       if (!seen.has(key)) {
         seen.add(key);
@@ -201,14 +212,16 @@ export default function ProgressTab({
       }
     }
     return base;
-  }, [demoMode, templates, account.splits.data, workouts]);
+  }, [demoMode, templates, account.splits.data, account.workoutSummaries.data.workouts, workouts]);
 
   useEffect(() => {
     const available = new Set(exerciseItems.map((item) => item.name.toLocaleLowerCase()));
     if (selectedExercise && available.has(selectedExercise.toLocaleLowerCase())) return;
-    const recent = getExerciseNamesFromWorkouts(workouts)[0];
+    const recent = demoMode
+      ? getExerciseNamesFromWorkouts(workouts)[0]
+      : account.workoutSummaries.data.workouts[0]?.exercise_names[0];
     setSelectedExercise(recent ?? exerciseItems[0]?.name ?? null);
-  }, [exerciseItems, workouts, selectedExercise]);
+  }, [exerciseItems, workouts, selectedExercise, demoMode, account.workoutSummaries.data.workouts]);
 
   const points = useMemo(
     () => (selectedExercise ? extractSessionPoints(workouts, selectedExercise) : []),
@@ -248,7 +261,7 @@ export default function ProgressTab({
       {demoMode && (
         <Notice
           title="Demo data"
-          body="Sign in from History to replace these local examples with your account history."
+          body="Sign in from Account to replace these local examples with your account history."
         />
       )}
 
@@ -271,13 +284,13 @@ export default function ProgressTab({
           title="Progress could not load"
           body={`${remote.error} Your local demo history was not used.`}
           action="Retry"
-          onAction={() => account.refreshWorkouts(days)}
+          onAction={() => selectedExercise && account.refreshWorkoutProgress(selectedExercise, days)}
           delay={90}
         />
       ) : !demoMode && remote.loading && !remote.loaded ? (
         <Notice
           title="Loading progress"
-          body="Fetching your complete workout history…"
+          body="Fetching this exercise's progress history…"
           delay={90}
         />
       ) : (

@@ -215,8 +215,29 @@ def test_rust_engine_matches_python_response_for_representative_split(monkeypatc
                 ),
             ],
         ),
+        SplitRequest(
+            name="Explicit Rest Sentinel",
+            cycle_length=3,
+            stimulus_duration=48,
+            maintenance_volume=3,
+            dataset="average",
+            include_breakdowns=True,
+            sessions=[
+                SessionInput(
+                    name="Push",
+                    day=1,
+                    exercises=[ExerciseInput(name="Bench Press", sets=3)],
+                ),
+                SessionInput(name="Rest", day=2, exercises=[]),
+                SessionInput(
+                    name="Pull",
+                    day=3,
+                    exercises=[ExerciseInput(name="Barbell Row", sets=3)],
+                ),
+            ],
+        ),
     ],
-    ids=["breakdowns", "five-day", "duplicate-days"],
+    ids=["breakdowns", "five-day", "duplicate-days", "rest-sentinel"],
 )
 def test_rust_engine_matches_full_python_response_for_golden_cases(monkeypatch, split_request):
     monkeypatch.setenv("ANALYSIS_ENGINE", "python")
@@ -289,6 +310,7 @@ def test_rust_feature_flag_raises_when_fallback_disabled(monkeypatch):
 
 
 def test_shadow_mode_returns_python_response_and_records_match(monkeypatch, caplog):
+    monkeypatch.setenv("ANALYSIS_ENGINE", "python")
     expected = _run_split_analysis(_sample_request(), user_id=None)
 
     monkeypatch.setenv("ANALYSIS_ENGINE", "shadow")

@@ -214,6 +214,47 @@ class WorkoutSummaryListResponse(BaseModel):
     total: int = Field(..., description="Total number of workouts")
 
 
+class WorkoutOverviewPoint(BaseModel):
+    """Compact per-workout aggregate used by the Overview charts."""
+
+    id: str = Field(..., description="Workout log ID")
+    completed_at: datetime = Field(..., description="When workout was completed")
+    total_sets: int = Field(..., description="Number of paired rep/weight set entries")
+    total_volume: float = Field(..., description="Sum of reps multiplied by weight")
+
+
+class WorkoutOverviewResponse(BaseModel):
+    """Compact overview history without full exercise payloads."""
+
+    workouts: List[WorkoutOverviewPoint] = Field(..., description="Overview chart points")
+
+
+class WorkoutProgressExercise(BaseModel):
+    """One matching exercise row used by the Progress chart."""
+
+    exercise_name: str
+    reps: List[int]
+    weight: List[float]
+    rir: Optional[List[Optional[int]]] = None
+    order_index: int
+
+
+class WorkoutProgressWorkout(BaseModel):
+    """One workout containing the selected progress exercise."""
+
+    id: str
+    completed_at: datetime
+    session_name: str
+    exercises: List[WorkoutProgressExercise]
+
+
+class WorkoutProgressResponse(BaseModel):
+    """Paginated workouts relevant to one selected exercise."""
+
+    workouts: List[WorkoutProgressWorkout]
+    total: int = Field(..., description="Total matching workouts")
+
+
 # ============================================================================
 # Workout Stats Schemas
 # ============================================================================

@@ -1,11 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { splitToAnalysisRequest } from '../../api/accountData';
+import { loadSplitAnalysis } from '../../api/accountData';
 import {
   AnalysisResponse,
   BackendError,
   SplitResponse,
-  analysis as analysisApi,
 } from '../../api/backend';
 import { analyzeTemplate, getStimulusLevel, stimulusScore } from '../../analysis/stimulus';
 import { Exercise, getExercise } from '../../data/exercises';
@@ -51,8 +50,7 @@ function useRemoteAnalysis(split: SplitResponse | null, retryToken: number): Ana
       return;
     }
     setState({ data: null, loading: true, error: null });
-    analysisApi
-      .analyzeSplit(splitToAnalysisRequest(split))
+    loadSplitAnalysis(split)
       .then((data) => {
         if (!cancelled) setState({ data, loading: false, error: null });
       })
@@ -205,7 +203,7 @@ function DemoSplits({ templates }: { templates: WorkoutTemplate[] }) {
     <View>
       <Notice
         title="Demo analysis"
-        body="These local examples use a clearly labeled two-session week. Sign in from History to analyze your saved schedule."
+        body="These local examples use a clearly labeled two-session week. Sign in from Account to analyze your saved schedule."
       />
       <FadeIn delay={45}>
         <View style={styles.picker}>
@@ -372,8 +370,8 @@ export default function SplitsTab({ templates }: { templates: WorkoutTemplate[] 
   const comparisonAnalysis = useRemoteAnalysis(comparison, compareRetry);
 
   useEffect(() => {
-    if (account.status === 'authenticated') account.refreshSplits();
-  }, [account.status, account.refreshSplits]);
+    if (account.status === 'authenticated') account.ensureSplits();
+  }, [account.status, account.ensureSplits]);
 
   useEffect(() => {
     if (selected && selected.id !== selectedId) setSelectedId(selected.id);

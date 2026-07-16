@@ -256,3 +256,77 @@ def test_workout_history_strips_legacy_unilateral_note_prefixes(client, fake_sup
         "keep hips square",
         "keep hips square",
     ]
+
+
+def test_compact_overview_is_gzipped_and_no_store(client, fake_supabase, monkeypatch):
+    monkeypatch.setattr(workouts_routes, "get_supabase_client_with_token", lambda _token: fake_supabase)
+
+    def execute_rpc(name, params):
+        assert name == "get_workout_overview"
+        assert params == {"p_days": 180}
+        return [
+            {
+                "id": f"00000000-0000-0000-0000-{index:012d}",
+                "completed_at": f"2026-01-{(index % 28) + 1:02d}T10:00:00Z",
+                "total_sets": 3,
+                "total_volume": 2400,
+            }
+            for index in range(80)
+        ]
+
+    monkeypatch.setattr(fake_supabase, "execute_rpc", execute_rpc)
+    response = client.get("/api/workouts/overview?days=180", headers={"Accept-Encoding": "gzip"})
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["content-encoding"] == "gzip"
+    assert len(response.json()["workouts"]) == 80
+
+
+def test_progress_groups_duplicate_rows_and_preserves_rir(client, fake_supabase, monkeypatch):
+    monkeypatch.setattr(workouts_routes, "get_supabase_client_with_token", lambda _token: fake_supabase)
+
+    def execute_rpc(name, params):
+        assert name == "get_workout_progress"
+        assert params["p_exercise_name"] == "Bench Press"
+        return [
+            {
+                "workout_id": "00000000-0000-0000-0000-000000000001",
+                "completed_at": "2026-01-01T10:00:00Z",
+                "session_name": "Push",
+                "exercise_name": "Bench Press",
+                "reps": [8, 7],
+                "weight": [185, 185],
+                "rir": [2, 1],
+                "order_index": 0,
+                "total_count": 1,
+            },
+            {
+                "workout_id": "00000000-0000-0000-0000-000000000001",
+                "completed_at": "2026-01-01T10:00:00Z",
+                "session_name": "Push",
+                "exercise_name": "Bench Press",
+                "reps": [10],
+                "weight": [135],
+                "rir": None,
+                "order_index": 2,
+                "total_count": 1,
+            },
+        ]
+
+    monkeypatch.setattr(fake_supabase, "execute_rpc", execute_rpc)
+    response = client.get("/api/workouts/progress?exercise_name=Bench%20Press&days=30")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert len(body["workouts"]) == 1
+    assert body["workouts"][0]["exercises"][0]["rir"] == [2, 1]
+    assert len(body["workouts"][0]["exercises"]) == 2
+
+
+def test_missing_performance_rpc_returns_actionable_service_error(client, fake_supabase, monkeypatch):
+    monkeypatch.setattr(workouts_routes, "get_supabase_client_with_token", lambda _token: fake_supabase)
+    response = client.get("/api/workouts/overview")
+    assert response.status_code == 503
+    assert "migration 012" in response.json()["detail"]

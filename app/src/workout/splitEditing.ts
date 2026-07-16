@@ -79,14 +79,24 @@ export function workoutDraftFromSession(
   };
 }
 
-export function newWorkoutDraft(split: SplitResponse): WorkoutDraft {
+export function newWorkoutDraft(
+  split: SplitResponse,
+  preferredRestDay?: number
+): WorkoutDraft {
   const occupied = new Set(split.sessions.map((session) => session.day_number));
-  let dayNumber = 1;
-  while (occupied.has(dayNumber) && dayNumber < 7) dayNumber += 1;
+  const preferredIsOpen =
+    Number.isInteger(preferredRestDay) &&
+    preferredRestDay! >= 1 &&
+    preferredRestDay! <= 7 &&
+    !occupied.has(preferredRestDay!);
+  let dayNumber = preferredIsOpen ? preferredRestDay! : 1;
+  if (!preferredIsOpen) {
+    while (occupied.has(dayNumber) && dayNumber < 7) dayNumber += 1;
+  }
   return {
     splitId: split.id,
     sessionId: null,
-    name: '',
+    name: preferredIsOpen ? 'Rest' : '',
     dayNumber,
     exercises: [],
   };
@@ -121,7 +131,7 @@ function existingSessionCreate(session: SessionResponse): SessionCreate {
   };
 }
 
-function draftSessionCreate(draft: WorkoutDraft): SessionCreate {
+export function workoutDraftToSessionCreate(draft: WorkoutDraft): SessionCreate {
   return {
     name: draft.name.trim(),
     day_number: draft.dayNumber,
@@ -134,7 +144,7 @@ export function splitWithWorkoutDraft(
   split: SplitResponse,
   draft: WorkoutDraft
 ): SplitCreate {
-  const replacement = draftSessionCreate(draft);
+  const replacement = workoutDraftToSessionCreate(draft);
   const sessions = split.sessions.map((session) =>
     session.id === draft.sessionId ? replacement : existingSessionCreate(session)
   );
@@ -159,6 +169,5 @@ export function workoutDraftError(split: SplitResponse, draft: WorkoutDraft): st
     (session) => session.id !== draft.sessionId && session.day_number === draft.dayNumber
   );
   if (duplicateDay) return `Day ${draft.dayNumber} already has a workout in this split.`;
-  if (draft.exercises.length === 0) return 'Add at least one exercise.';
   return null;
 }

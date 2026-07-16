@@ -1,5 +1,8 @@
 import {
+  clearSplitAnalysisCache,
+  loadAllWorkoutProgress,
   loadAllWorkouts,
+  loadSplitAnalysis,
   localDateKey,
   splitToAnalysisRequest,
   workoutAnalysisNetStimulus,
@@ -121,6 +124,59 @@ describe('complete workout history', () => {
     expect(result.map((entry) => entry.id)).toEqual(['1', '2', '3', '4', '5']);
     expect(workoutRangeKey(undefined)).toBe('all');
     expect(workoutRangeKey(30)).toBe('30');
+  });
+});
+
+describe('optimized account resources', () => {
+  it('paginates exercise progress completely using normalized range requests', async () => {
+    const offsets: number[] = [];
+    const result = await loadAllWorkoutProgress('Bench Press', 30, async (params) => {
+      offsets.push(params.offset ?? 0);
+      expect(params.exerciseName).toBe('Bench Press');
+      expect(params.days).toBe(30);
+      const offset = params.offset ?? 0;
+      return {
+        workouts: offset === 0
+          ? [{ id: '1' }, { id: '2' }]
+          : [{ id: '3' }],
+        total: 3,
+      } as never;
+    });
+
+    expect(offsets).toEqual([0, 2]);
+    expect(result.map((entry) => entry.id)).toEqual(['1', '2', '3']);
+  });
+
+  it('deduplicates equivalent split analyses while the first request is in flight', async () => {
+    clearSplitAnalysisCache();
+    const split = {
+      id: 'split-1',
+      user_id: 'user-1',
+      name: 'Upper',
+      cycle_length: 7,
+      stimulus_duration: 48,
+      maintenance_volume: 4,
+      dataset: 'average',
+      sessions: [],
+      created_at: '',
+      updated_at: '',
+    } as SplitResponse;
+    let calls = 0;
+    let resolve!: (value: unknown) => void;
+    const pending = new Promise((done) => { resolve = done; });
+    const analyze = jest.fn(() => {
+      calls += 1;
+      return pending;
+    }) as never;
+
+    const first = loadSplitAnalysis(split, analyze);
+    const equivalent = loadSplitAnalysis({ ...split }, analyze);
+    expect(first).toBe(equivalent);
+    expect(calls).toBe(1);
+    resolve({ muscles: [] });
+    await first;
+    await loadSplitAnalysis({ ...split }, analyze);
+    expect(calls).toBe(1);
   });
 });
 

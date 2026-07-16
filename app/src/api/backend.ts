@@ -398,7 +398,7 @@ export interface SessionCreate {
   name: string;
   /** Day number in the weekly cycle, 1-7. */
   day_number: number;
-  /** At least one exercise. */
+  /** Empty means this session is a non-executable rest day. */
   exercises: ExerciseCreate[];
 }
 
@@ -820,6 +820,37 @@ export interface WorkoutSummaryResponse {
 /** schemas/workouts.py:204 — response of GET /api/workouts/summaries. */
 export interface WorkoutSummaryListResponse {
   workouts: WorkoutSummaryResponse[];
+  total: number;
+}
+
+export interface WorkoutOverviewPoint {
+  id: string;
+  completed_at: string;
+  total_sets: number;
+  total_volume: number;
+}
+
+export interface WorkoutOverviewResponse {
+  workouts: WorkoutOverviewPoint[];
+}
+
+export interface WorkoutProgressExercise {
+  exercise_name: string;
+  reps: number[];
+  weight: number[];
+  rir: Array<number | null> | null;
+  order_index: number;
+}
+
+export interface WorkoutProgressWorkout {
+  id: string;
+  completed_at: string;
+  session_name: string;
+  exercises: WorkoutProgressExercise[];
+}
+
+export interface WorkoutProgressResponse {
+  workouts: WorkoutProgressWorkout[];
   total: number;
 }
 
@@ -1678,6 +1709,26 @@ export const splits = {
     return request<SplitResponse>('GET', `/api/splits/${encodeURIComponent(splitId)}`);
   },
 
+  createSession(splitId: string, session: SessionCreate): Promise<SessionResponse> {
+    return request<SessionResponse>(
+      'POST',
+      `/api/splits/${encodeURIComponent(splitId)}/sessions`,
+      session
+    );
+  },
+
+  updateSession(
+    splitId: string,
+    sessionId: string,
+    session: SessionCreate
+  ): Promise<SessionResponse> {
+    return request<SessionResponse>(
+      'PUT',
+      `/api/splits/${encodeURIComponent(splitId)}/sessions/${encodeURIComponent(sessionId)}`,
+      session
+    );
+  },
+
   /** PUT /api/splits/{id} — update split metadata only (api/routes/splits.py:512). */
   update(splitId: string, update: SplitUpdate): Promise<SplitResponse> {
     return request<SplitResponse>('PUT', `/api/splits/${encodeURIComponent(splitId)}`, update);
@@ -1766,6 +1817,30 @@ export const workouts = {
         limit: params?.limit,
         offset: params?.offset,
         days: params?.days,
+      })}`
+    );
+  },
+
+  overview(days = 180): Promise<WorkoutOverviewResponse> {
+    return request<WorkoutOverviewResponse>(
+      'GET',
+      `/api/workouts/overview${qs({ days })}`
+    );
+  },
+
+  progress(params: {
+    exerciseName: string;
+    days?: number;
+    limit?: number;
+    offset?: number;
+  }): Promise<WorkoutProgressResponse> {
+    return request<WorkoutProgressResponse>(
+      'GET',
+      `/api/workouts/progress${qs({
+        exercise_name: params.exerciseName,
+        days: params.days,
+        limit: params.limit,
+        offset: params.offset,
       })}`
     );
   },

@@ -9,9 +9,9 @@ import {
 import * as Haptics from 'expo-haptics';
 import { useAccountState } from '../state/AccountState';
 import {
-  AccountWorkoutGroup,
-  AccountWorkoutPlan,
-  accountWorkoutGroups,
+  AccountWorkoutEditorEntry,
+  AccountWorkoutEditorGroup,
+  accountWorkoutEditorGroups,
 } from '../workout/splitSessions';
 import { theme } from '../theme';
 import Glass from '../ui/Glass';
@@ -26,25 +26,34 @@ export default function WorkoutsScreen({
   onBack,
 }: WorkoutsScreenProps) {
   const account = useAccountState();
-  const groups = useMemo(() => accountWorkoutGroups(account.splits.data), [account.splits.data]);
+  const groups = useMemo(
+    () => accountWorkoutEditorGroups(account.splits.data),
+    [account.splits.data]
+  );
   const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
   const [mode, setMode] = useState<'browse' | 'chooseSplit' | 'editor'>('browse');
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingRestDay, setEditingRestDay] = useState<number | undefined>(undefined);
   const selectedGroup = groups.find((group) => group.id === selectedSplitId) ?? null;
   const editingSplit = account.splits.data.find((split) => split.id === selectedSplitId) ?? null;
   const editingSession =
     editingSplit?.sessions.find((session) => session.id === editingSessionId) ?? undefined;
-  const items: Array<AccountWorkoutGroup | AccountWorkoutPlan> =
+  const items: Array<AccountWorkoutEditorGroup | AccountWorkoutEditorEntry> =
     mode === 'chooseSplit'
       ? groups
       : selectedGroup
     ? selectedGroup.sessions
     : groups;
 
-  const openEditor = (splitId: string, sessionId: string | null) => {
+  const openEditor = (
+    splitId: string,
+    sessionId: string | null,
+    restDay?: number
+  ) => {
     Haptics.selectionAsync().catch(() => {});
     setSelectedSplitId(splitId);
     setEditingSessionId(sessionId);
+    setEditingRestDay(restDay);
     setMode('editor');
   };
 
@@ -57,16 +66,19 @@ export default function WorkoutsScreen({
   if (mode === 'editor' && editingSplit) {
     return (
       <WorkoutEditor
-        key={`${editingSplit.id}:${editingSessionId ?? 'new'}`}
+        key={`${editingSplit.id}:${editingSessionId ?? `new:${editingRestDay ?? 'open'}`}`}
         split={editingSplit}
         session={editingSession}
+        initialRestDay={editingRestDay}
         onCancel={() => {
           setEditingSessionId(null);
+          setEditingRestDay(undefined);
           setMode('browse');
         }}
         onSaved={(saved) => {
           setSelectedSplitId(saved.id);
           setEditingSessionId(null);
+          setEditingRestDay(undefined);
           setMode('browse');
         }}
       />
@@ -184,10 +196,16 @@ export default function WorkoutsScreen({
                   <View style={styles.rowCopy}>
                     <Text style={styles.nameRowText}>{item.name}</Text>
                     <Text style={styles.rowMeta} numberOfLines={1}>
-                      {item.sessions.length} workout {item.sessions.length === 1 ? 'day' : 'days'}
+                      {item.sessions.filter((session) => session.kind === 'workout').length} workout{' '}
+                      {item.sessions.filter((session) => session.kind === 'workout').length === 1
+                        ? 'day'
+                        : 'days'}
                       {item.cycleLength ? ` · ${item.cycleLength}-day cycle` : ''}
-                      {item.sessions.length > 0
-                        ? ` · ${item.sessions.map((session) => session.name).join(' · ')}`
+                      {item.sessions.filter((session) => session.kind === 'workout').length > 0
+                        ? ` · ${item.sessions
+                            .filter((session) => session.kind === 'workout')
+                            .map((session) => session.name)
+                            .join(' · ')}`
                         : ''}
                     </Text>
                   </View>
@@ -195,16 +213,27 @@ export default function WorkoutsScreen({
                 </Glass>
               </Pressable>
             ) : (
-              <Pressable onPress={() => openEditor(item.splitId, item.sessionId)}>
+              <Pressable
+                onPress={() =>
+                  openEditor(
+                    item.splitId,
+                    item.sessionId,
+                    item.kind === 'rest' && item.synthetic ? item.dayNumber : undefined
+                  )
+                }
+              >
                 <Glass style={styles.nameRow} interactive>
                   <View style={styles.rowCopy}>
                     <View style={styles.rowTitleLine}>
                       <Text style={styles.dayLabel}>Day {item.dayNumber}</Text>
                       <Text style={styles.nameRowText}>{item.name}</Text>
                     </View>
-                    <Text style={styles.rowMeta}>
-                      {item.exercises.length} {item.exercises.length === 1 ? 'exercise' : 'exercises'}
-                    </Text>
+                    {item.kind === 'workout' && (
+                      <Text style={styles.rowMeta}>
+                        {item.exercises.length}{' '}
+                        {item.exercises.length === 1 ? 'exercise' : 'exercises'}
+                      </Text>
+                    )}
                   </View>
                   <Text style={styles.chevron}>›</Text>
                 </Glass>

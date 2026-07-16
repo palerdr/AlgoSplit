@@ -136,7 +136,18 @@ describe('workout split editing', () => {
     ]);
   });
 
-  it('rejects duplicate days and empty exercise lists', () => {
+  it('prefills an interior automatic rest sentinel for manual persistence', () => {
+    const draft = newWorkoutDraft(split(), 2);
+
+    expect(draft).toMatchObject({
+      name: 'Rest',
+      dayNumber: 2,
+      exercises: [],
+    });
+    expect(workoutDraftError(split(), draft)).toBeNull();
+  });
+
+  it('rejects duplicate days but permits empty rest sentinels', () => {
     const source = split();
     const draft = newWorkoutDraft(source);
     draft.name = 'Duplicate';
@@ -144,6 +155,6 @@ describe('workout split editing', () => {
 
     expect(workoutDraftError(source, draft)).toBe('Day 1 already has a workout in this split.');
     draft.dayNumber = 2;
-    expect(workoutDraftError(source, draft)).toBe('Add at least one exercise.');
+    expect(workoutDraftError(source, draft)).toBeNull();
   });
 });

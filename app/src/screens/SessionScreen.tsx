@@ -307,9 +307,9 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
       !remoteHistory?.loading &&
       !remoteHistory?.loaded
     ) {
-      account.refreshWorkouts();
+      account.ensureWorkouts();
     }
-  }, [account.status, account.refreshWorkouts, remoteHistory?.loaded, remoteHistory?.loading]);
+  }, [account.status, account.ensureWorkouts, remoteHistory?.loaded, remoteHistory?.loading]);
 
   // Authenticated shadows come only from account history. Demo/signed-out
   // shadows come only from local history, mirroring the account-data policy.

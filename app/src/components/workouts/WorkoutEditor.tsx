@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import {
   NestableDraggableFlatList,
@@ -18,7 +18,7 @@ import {
   newWorkoutDraft,
   parseWorkoutDayInput,
   reorderWorkoutDraftExercises,
-  splitWithWorkoutDraft,
+  workoutDraftToSessionCreate,
   workoutDraftError,
   workoutDraftFromSession,
 } from '../../workout/splitEditing';
@@ -26,6 +26,7 @@ import {
 interface WorkoutEditorProps {
   split: SplitResponse;
   session?: SessionResponse;
+  initialRestDay?: number;
   onCancel: () => void;
   onSaved: (split: SplitResponse) => void;
 }
@@ -40,13 +41,16 @@ const RESISTANCE_PROFILES = [
 export default function WorkoutEditor({
   split,
   session,
+  initialRestDay,
   onCancel,
   onSaved,
 }: WorkoutEditorProps) {
   const account = useAccountState();
   const nextKey = useRef(0);
   const [draft, setDraft] = useState<WorkoutDraft>(() =>
-    session ? workoutDraftFromSession(split.id, session) : newWorkoutDraft(split)
+    session
+      ? workoutDraftFromSession(split.id, session)
+      : newWorkoutDraft(split, initialRestDay)
   );
   const [dayText, setDayText] = useState(() => String(draft.dayNumber));
   const [search, setSearch] = useState('');
@@ -55,9 +59,29 @@ export default function WorkoutEditor({
 
   const catalog = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
-    if (!query) return EXERCISES;
+    if (!query) {
+      const recentNames = account.workoutSummaries.data.workouts
+        .flatMap((workout) => workout.exercise_names)
+        .concat(
+          account.splits.data.flatMap((savedSplit) =>
+            savedSplit.sessions.flatMap((savedSession) =>
+              savedSession.exercises.map((exercise) => exercise.exercise_name)
+            )
+          )
+        );
+      const byName = new Map(EXERCISES.map((exercise) => [exercise.name.toLocaleLowerCase(), exercise]));
+      const seen = new Set<string>();
+      return recentNames
+        .map((name) => byName.get(name.toLocaleLowerCase()))
+        .filter((exercise): exercise is Exercise => {
+          if (!exercise || seen.has(exercise.id)) return false;
+          seen.add(exercise.id);
+          return true;
+        })
+        .slice(0, 20);
+    }
     return EXERCISES.filter((exercise) => exercise.name.toLocaleLowerCase().includes(query));
-  }, [search]);
+  }, [account.splits.data, account.workoutSummaries.data.workouts, search]);
 
   const updateExercise = (index: number, update: Partial<WorkoutDraftExercise>) => {
     setDraft((previous) => ({
@@ -182,7 +206,11 @@ export default function WorkoutEditor({
     setSaving(true);
     setError(null);
     try {
-      const saved = await account.replaceSplit(split.id, splitWithWorkoutDraft(split, draft));
+      const saved = await account.saveSplitSession(
+        split.id,
+        draft.sessionId,
+        workoutDraftToSessionCreate(draft)
+      );
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       onSaved(saved);
     } catch (cause) {
@@ -250,6 +278,11 @@ export default function WorkoutEditor({
         </View>
 
         <Text style={styles.sectionLabel}>Exercises</Text>
+        {draft.exercises.length === 0 && (
+          <Glass style={styles.restNotice}>
+            <Text style={styles.restNoticeTitle}>Rest</Text>
+          </Glass>
+        )}
         <NestableDraggableFlatList
           data={draft.exercises}
           keyExtractor={(exercise) => exercise.key}
@@ -278,12 +311,26 @@ export default function WorkoutEditor({
             style={styles.input}
           />
         </Glass>
-        {catalog.map((item) => (
-          <Pressable key={item.id} style={styles.catalogRow} onPress={() => addExercise(item)}>
-            <Text style={styles.catalogName}>{item.name}</Text>
-            <Text style={styles.catalogAdd}>+</Text>
-          </Pressable>
-        ))}
+        {!search.trim() && catalog.length === 0 && (
+          <Text style={styles.catalogHint}>Search the exercise catalog to add your first movement.</Text>
+        )}
+        <FlatList
+          data={catalog}
+          keyExtractor={(item) => item.id}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
+          initialNumToRender={20}
+          maxToRenderPerBatch={20}
+          windowSize={5}
+          style={search.trim() ? styles.catalogList : undefined}
+          scrollEnabled={Boolean(search.trim())}
+          renderItem={({ item }) => (
+            <Pressable style={styles.catalogRow} onPress={() => addExercise(item)}>
+              <Text style={styles.catalogName}>{item.name}</Text>
+              <Text style={styles.catalogAdd}>+</Text>
+            </Pressable>
+          )}
+        />
       </NestableScrollContainer>
     </View>
   );
@@ -328,6 +375,17 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
     marginBottom: 9,
+  },
+  restNotice: {
+    borderRadius: 14,
+    paddingVertical: 11,
+    paddingHorizontal: 13,
+    marginBottom: 10,
+  },
+  restNoticeTitle: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: '700',
   },
   pickedRow: {
     backgroundColor: 'rgba(255,255,255,0.07)',
@@ -378,5 +436,7 @@ const styles = StyleSheet.create({
   },
   catalogName: { color: theme.text, fontSize: 15 },
   catalogAdd: { color: theme.accent, fontSize: 20, fontWeight: '600' },
+  catalogList: { maxHeight: 360 },
+  catalogHint: { color: theme.textDim, fontSize: 12, lineHeight: 17, paddingVertical: 12 },
   listContent: { paddingBottom: 40 },
 });

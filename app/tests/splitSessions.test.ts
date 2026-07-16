@@ -1,5 +1,6 @@
 import type { ExerciseResponse, SplitResponse } from '../src/api/backend';
 import {
+  accountWorkoutEditorGroups,
   accountWorkoutGroups,
   accountWorkoutPlans,
   resolveSavedExercise,
@@ -110,5 +111,55 @@ describe('account workout plans', () => {
       resistanceProfile: 'ascending',
       muscles: [],
     });
+  });
+
+  it('adds only interior rest sentinels and excludes them from the start registry', () => {
+    const source = split();
+    source.cycle_length = 4;
+    source.sessions.find((session) => session.day_number === 4)!.day_number = 3;
+
+    const editorDays = accountWorkoutEditorGroups([source])[0].sessions;
+    expect(editorDays.map((entry) => [entry.dayNumber, entry.kind])).toEqual([
+      [1, 'workout'],
+      [2, 'rest'],
+      [3, 'workout'],
+    ]);
+    expect(editorDays.some((entry) => entry.dayNumber === 4)).toBe(false);
+    expect(editorDays[1]).toMatchObject({
+      sessionId: null,
+      name: 'Rest',
+      synthetic: true,
+    });
+
+    expect(accountWorkoutGroups([source])[0].sessions.map((entry) => entry.dayNumber)).toEqual([
+      1,
+      3,
+    ]);
+  });
+
+  it('keeps a persisted empty rest day editable but never executable', () => {
+    const source = split();
+    source.sessions.splice(1, 0, {
+      id: 'rest-2',
+      split_id: source.id,
+      name: 'Rest',
+      day_number: 2,
+      exercises: [],
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    });
+
+    const rest = accountWorkoutEditorGroups([source])[0].sessions.find(
+      (entry) => entry.dayNumber === 2
+    );
+    expect(rest).toMatchObject({
+      kind: 'rest',
+      sessionId: 'rest-2',
+      synthetic: false,
+    });
+    expect(accountWorkoutGroups([source])[0].sessions.map((entry) => entry.dayNumber)).toEqual([
+      1,
+      4,
+    ]);
   });
 });

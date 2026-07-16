@@ -4,6 +4,9 @@ import {
   SplitRequest,
   SplitResponse,
   WorkoutLogResponse,
+  WorkoutProgressWorkout,
+  AnalysisResponse,
+  analysis,
   workouts,
 } from './backend';
 
@@ -78,4 +81,69 @@ export async function loadAllWorkouts(
 
 export function workoutRangeKey(days?: number): string {
   return days === undefined ? 'all' : String(days);
+}
+
+export function workoutProgressKey(exerciseName: string, days?: number): string {
+  return `${exerciseName.trim().toLocaleLowerCase()}::${workoutRangeKey(days)}`;
+}
+
+export async function loadAllWorkoutProgress(
+  exerciseName: string,
+  days?: number,
+  loadPage: typeof workouts.progress = workouts.progress
+): Promise<WorkoutProgressWorkout[]> {
+  const pageSize = 100;
+  const collected: WorkoutProgressWorkout[] = [];
+  let offset = 0;
+  let total = 0;
+  do {
+    const page = await loadPage({
+      exerciseName,
+      days,
+      limit: pageSize,
+      offset,
+    });
+    collected.push(...page.workouts);
+    total = page.total;
+    if (page.workouts.length === 0) break;
+    offset += page.workouts.length;
+  } while (offset < total);
+  return collected;
+}
+
+const SPLIT_ANALYSIS_TTL_MS = 10 * 60_000;
+const splitAnalysisCache = new Map<
+  string,
+  { data?: AnalysisResponse; fetchedAt?: number; promise?: Promise<AnalysisResponse> }
+>();
+
+function splitAnalysisKey(split: SplitResponse): string {
+  return JSON.stringify(splitToAnalysisRequest(split));
+}
+
+export function loadSplitAnalysis(
+  split: SplitResponse,
+  analyze: typeof analysis.analyzeSplit = analysis.analyzeSplit
+): Promise<AnalysisResponse> {
+  const key = splitAnalysisKey(split);
+  const cached = splitAnalysisCache.get(key);
+  if (cached?.data && cached.fetchedAt && Date.now() - cached.fetchedAt < SPLIT_ANALYSIS_TTL_MS) {
+    return Promise.resolve(cached.data);
+  }
+  if (cached?.promise) return cached.promise;
+  const promise = analyze(splitToAnalysisRequest(split))
+    .then((data) => {
+      splitAnalysisCache.set(key, { data, fetchedAt: Date.now() });
+      return data;
+    })
+    .catch((error) => {
+      splitAnalysisCache.delete(key);
+      throw error;
+    });
+  splitAnalysisCache.set(key, { ...cached, promise });
+  return promise;
+}
+
+export function clearSplitAnalysisCache(): void {
+  splitAnalysisCache.clear();
 }

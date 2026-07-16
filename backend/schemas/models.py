@@ -43,7 +43,10 @@ class SessionInput(BaseModel):
     """A single training session (e.g., Monday's workout)"""
     name: str = Field(..., description="Session name (e.g., 'Push Day', 'Monday')")
     day: int = Field(..., ge=1, le=14, description="Day number in the split (1-14)")
-    exercises: List[ExerciseInput] = Field(..., min_length=1, description="List of exercises")
+    exercises: List[ExerciseInput] = Field(
+        default_factory=list,
+        description="List of exercises; empty sessions are rest days",
+    )
 
     class Config:
         json_schema_extra = {

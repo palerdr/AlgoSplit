@@ -15,6 +15,7 @@ from schemas.splits import (
     SplitUpdate,
     SplitResponse,
     SplitListResponse,
+    SessionCreate,
     SessionResponse,
     ExerciseResponse,
     ExerciseBatchUpdateRequest,
@@ -22,7 +23,8 @@ from schemas.splits import (
 )
 from schemas.auth import ErrorResponse
 from api.dependencies import get_current_user, AuthUser
-from core.exerciseMatching import move_match_with_overrides
+from core.exerciseMatching import move_match_with_overrides, preload_user_exercise_maps
+from core.movementMatching import move_match as default_move_match
 
 router = APIRouter(prefix="/api/splits", tags=["Splits"])
 
@@ -31,7 +33,7 @@ router = APIRouter(prefix="/api/splits", tags=["Splits"])
 # Helper Functions
 # ============================================================================
 
-def validate_exercises(exercises: List[dict], user_id: str) -> List[str]:
+def validate_exercises(exercises: List[dict], user_id: str, supabase=None) -> List[str]:
     """
     Validate that all exercises can be classified
 
@@ -41,10 +43,39 @@ def validate_exercises(exercises: List[dict], user_id: str) -> List[str]:
     Returns:
         List of unrecognized exercise names (empty if all valid)
     """
-    unrecognized = []
+    unique_names: dict[str, str] = {}
     for exercise in exercises:
-        name = exercise["name"]
-        result = move_match_with_overrides(name, user_id)
+        name = exercise["name"].strip()
+        unique_names.setdefault(name.lower(), name)
+
+    # Standard catalog exercises require no database access. Only names that
+    # fail the local matcher need the user's custom/override maps.
+    unresolved = [name for name in unique_names.values() if default_move_match(name) is None]
+    if not unresolved:
+        return []
+
+    try:
+        user_maps = preload_user_exercise_maps(
+            user_id,
+            supabase=supabase,
+            strict=True,
+        )
+    except Exception as exc:
+        logger.exception("Could not load custom exercise maps for validation")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Exercise validation is temporarily unavailable. Please retry.",
+        ) from exc
+
+    movement_cache = {}
+    unrecognized = []
+    for name in unresolved:
+        result = move_match_with_overrides(
+            name,
+            user_id,
+            user_maps=user_maps,
+            movement_cache=movement_cache,
+        )
         if result is None:
             logger.debug("Unrecognized exercise: %s", name)
             unrecognized.append(name)
@@ -120,9 +151,12 @@ def sync_linked_templates(supabase, split_id: str, new_sessions: List[dict]) -> 
     if not templates_result.data:
         return stats
 
-    # Build name → new session lookup
+    # Stable session IDs are preferred for single-session edits; name matching
+    # remains for legacy full replacements that recreate session IDs.
+    session_by_id = {}
     session_by_name = {}
     for s in new_sessions:
+        session_by_id[s["id"]] = s
         session_by_name[s["name"]] = s
 
     for template in templates_result.data:
@@ -131,7 +165,9 @@ def sync_linked_templates(supabase, split_id: str, new_sessions: List[dict]) -> 
 
         try:
             # Match template to new session by name
-            matched_session = session_by_name.get(template_name)
+            matched_session = session_by_id.get(template.get("source_session_id"))
+            if not matched_session:
+                matched_session = session_by_name.get(template_name)
             if not matched_session:
                 # Session was renamed or removed — skip this template
                 continue
@@ -272,6 +308,35 @@ def build_split_response(split_data: dict, sessions_data: List[dict]) -> SplitRe
     )
 
 
+def _rpc_payload(result, function_name: str):
+    """Normalize PostgREST JSON-returning RPC responses."""
+    data = result.data
+    if isinstance(data, list) and len(data) == 1:
+        candidate = data[0]
+        if isinstance(candidate, dict) and function_name in candidate:
+            return candidate[function_name]
+        return candidate
+    return data
+
+
+def _raise_rpc_http_error(exc: Exception, resource: str) -> None:
+    code = str(getattr(exc, "code", ""))
+    message = str(getattr(exc, "message", exc)).lower()
+    if code == "23505" or "duplicate key" in message:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Another workout already uses that day.",
+        ) from exc
+    if code in {"P0002", "42501"} or "not_found" in message:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{resource} not found") from exc
+    if code in {"42883", "PGRST202"} or "schema cache" in message:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database performance migration 012 is required before using this endpoint.",
+        ) from exc
+    raise exc
+
+
 # ============================================================================
 # Split CRUD Endpoints
 # ============================================================================
@@ -288,7 +353,7 @@ def build_split_response(split_data: dict, sessions_data: List[dict]) -> SplitRe
     summary="Create a new split",
     description="Create a new training split with sessions and exercises",
 )
-async def create_split(
+def create_split(
     split: SplitCreate,
     current_user: AuthUser = Depends(get_current_user),
 ):
@@ -308,7 +373,7 @@ async def create_split(
             for exercise in session.exercises:
                 all_exercises.append({"name": exercise.name})
 
-        unrecognized = validate_exercises(all_exercises, current_user.id)
+        unrecognized = validate_exercises(all_exercises, current_user.id, supabase)
         if unrecognized:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -398,6 +463,100 @@ async def create_split(
         )
 
 
+@router.post(
+    "/{split_id}/sessions",
+    response_model=SessionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create one split session",
+)
+def create_split_session(
+    split_id: str,
+    session: SessionCreate,
+    background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """Create one workout/rest day without replacing the rest of the split."""
+    supabase = get_supabase_client_with_token(current_user.access_token)
+    unrecognized = validate_exercises(
+        [{"name": exercise.name} for exercise in session.exercises],
+        current_user.id,
+        supabase,
+    )
+    if unrecognized:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unrecognized exercises: {', '.join(unrecognized)}",
+        )
+    try:
+        result = supabase.rpc(
+            "save_split_session",
+            {
+                "p_split_id": split_id,
+                "p_session_id": None,
+                "p_name": session.name,
+                "p_day_number": session.day_number,
+                "p_exercises": [exercise.model_dump(mode="json") for exercise in session.exercises],
+            },
+        ).execute()
+        payload = _rpc_payload(result, "save_split_session")
+        saved = SessionResponse.model_validate(payload)
+        return saved
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_rpc_http_error(exc, "Split")
+
+
+@router.put(
+    "/{split_id}/sessions/{session_id}",
+    response_model=SessionResponse,
+    summary="Update one split session",
+)
+def update_split_session(
+    split_id: str,
+    session_id: str,
+    session: SessionCreate,
+    background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """Transactionally update one workout/rest day while preserving its ID."""
+    supabase = get_supabase_client_with_token(current_user.access_token)
+    unrecognized = validate_exercises(
+        [{"name": exercise.name} for exercise in session.exercises],
+        current_user.id,
+        supabase,
+    )
+    if unrecognized:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unrecognized exercises: {', '.join(unrecognized)}",
+        )
+    try:
+        result = supabase.rpc(
+            "save_split_session",
+            {
+                "p_split_id": split_id,
+                "p_session_id": session_id,
+                "p_name": session.name,
+                "p_day_number": session.day_number,
+                "p_exercises": [exercise.model_dump(mode="json") for exercise in session.exercises],
+            },
+        ).execute()
+        payload = _rpc_payload(result, "save_split_session")
+        saved = SessionResponse.model_validate(payload)
+        background_tasks.add_task(
+            _sync_linked_templates_background,
+            current_user.access_token,
+            split_id,
+            [saved.model_dump(mode="json")],
+        )
+        return saved
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_rpc_http_error(exc, "Session")
+
+
 @router.get(
     "",
     response_model=SplitListResponse,
@@ -407,7 +566,7 @@ async def create_split(
     summary="List all splits",
     description="Get all splits for the authenticated user",
 )
-async def list_splits(
+def list_splits(
     include_exercises: bool = Query(True, description="Include nested exercises in each split session"),
     current_user: AuthUser = Depends(get_current_user),
 ):
@@ -464,7 +623,7 @@ async def list_splits(
     summary="Get a specific split",
     description="Get details of a specific split by ID",
 )
-async def get_split(
+def get_split(
     split_id: str,
     current_user: AuthUser = Depends(get_current_user),
 ):
@@ -519,7 +678,7 @@ async def get_split(
     summary="Update a split",
     description="Update split metadata (name, settings). To modify sessions/exercises, delete and recreate.",
 )
-async def update_split(
+def update_split(
     split_id: str,
     split_update: SplitUpdate,
     current_user: AuthUser = Depends(get_current_user),
@@ -570,7 +729,7 @@ async def update_split(
             )
 
         # Fetch complete split to return
-        return await get_split(split_id, current_user)
+        return get_split(split_id, current_user)
 
     except HTTPException:
         raise
@@ -592,7 +751,7 @@ async def update_split(
     summary="Replace a split completely",
     description="Replace a split's metadata, sessions, and exercises entirely",
 )
-async def replace_split(
+def replace_split(
     split_id: str,
     split: SplitCreate,
     background_tasks: BackgroundTasks,
@@ -616,7 +775,7 @@ async def replace_split(
             for exercise in session.exercises:
                 all_exercises.append({"name": exercise.name})
 
-        unrecognized = validate_exercises(all_exercises, current_user.id)
+        unrecognized = validate_exercises(all_exercises, current_user.id, supabase)
         if unrecognized:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -624,106 +783,41 @@ async def replace_split(
                        f"Use /api/parse-exercise to check exercise names.",
             )
         t_prep = perf_counter()
-
-        # Update split metadata (always include cycle_length so null can clear old values)
-        split_update_data = {
-            "name": split.name,
-            "cycle_length": split.cycle_length,
-            "stimulus_duration": split.stimulus_duration,
-            "maintenance_volume": split.maintenance_volume,
-            "dataset": split.dataset,
-        }
-        update_result = supabase.table("splits").update(split_update_data).eq("id", split_id).execute()
-        t_update = perf_counter()
-        if not update_result.data:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Split not found",
-            )
-        split_record = update_result.data[0]
-
-        # Delete existing sessions (exercises cascade delete)
-        supabase.table("sessions").delete().eq("split_id", split_id).execute()
-        t_delete = perf_counter()
-
-        # Batch insert all sessions at once
-        session_rows = [
-            {"split_id": split_id, "name": s.name, "day_number": s.day_number}
-            for s in split.sessions
-        ]
-        sessions_result = supabase.table("sessions").insert(session_rows).execute()
-        t_insert_sessions = perf_counter()
-
-        if not sessions_result.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create sessions",
-            )
-
-        # Batch insert all exercises at once
-        exercise_rows = []
-        for session_idx, session in enumerate(split.sessions):
-            session_id = sessions_result.data[session_idx]["id"]
-            for ex_idx, exercise in enumerate(session.exercises):
-                exercise_rows.append({
-                    "session_id": session_id,
-                    "exercise_name": exercise.name,
-                    "sets": exercise.sets,
-                    "order_index": ex_idx,
-                    "unilateral": exercise.unilateral,
-                    "resistance_profile": exercise.resistance_profile,
-                })
-
-        exercises_result = supabase.table("exercises").insert(exercise_rows).execute() if exercise_rows else None
-        t_insert_exercises = perf_counter()
-
-        # Map exercises back to sessions
-        exercise_map = {}
-        if exercises_result and exercises_result.data:
-            for ex in exercises_result.data:
-                sid = ex["session_id"]
-                if sid not in exercise_map:
-                    exercise_map[sid] = []
-                exercise_map[sid].append(ex)
-
-        sessions_data = []
-        for session_record in sessions_result.data:
-            sd = dict(session_record)
-            sd["exercises"] = exercise_map.get(session_record["id"], [])
-            sessions_data.append(sd)
-
-        # Cascade exercise changes to linked session templates out-of-band.
-        # Sync failure should NOT fail split save.
-        sessions_with_exercises = [
+        result = supabase.rpc(
+            "replace_split_full",
             {
-                "id": sessions_result.data[idx]["id"],
-                "name": sessions_result.data[idx]["name"],
-                "exercises": exercise_map.get(sessions_result.data[idx]["id"], []),
-            }
-            for idx in range(len(sessions_result.data))
-        ]
+                "p_split_id": split_id,
+                "p_split": split.model_dump(mode="json"),
+            },
+        ).execute()
+        saved = SplitResponse.model_validate(_rpc_payload(result, "replace_split_full"))
+        t_rpc = perf_counter()
+
         background_tasks.add_task(
             _sync_linked_templates_background,
             current_user.access_token,
             split_id,
-            sessions_with_exercises,
+            [session.model_dump(mode="json") for session in saved.sessions],
         )
 
         logger.info(
-            "replace_split timings split_id=%s validate+prep=%.1fms update=%.1fms delete_sessions=%.1fms insert_sessions=%.1fms insert_exercises=%.1fms total=%.1fms",
+            "replace_split timings split_id=%s validate+prep=%.1fms rpc=%.1fms total=%.1fms",
             split_id,
             (t_prep - t0) * 1000,
-            (t_update - t_prep) * 1000,
-            (t_delete - t_update) * 1000,
-            (t_insert_sessions - t_delete) * 1000,
-            (t_insert_exercises - t_insert_sessions) * 1000,
-            (t_insert_exercises - t0) * 1000,
+            (t_rpc - t_prep) * 1000,
+            (t_rpc - t0) * 1000,
         )
-        return build_split_response(split_record, sessions_data)
+        return saved
 
     except HTTPException:
         raise
     except Exception as e:
+        try:
+            _raise_rpc_http_error(e, "Split")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
         logger.exception("Failed to replace split %s for user %s", split_id, current_user.id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -742,7 +836,7 @@ async def replace_split(
     summary="Batch update exercises in a split",
     description="Update sets/unilateral/resistance_profile/name for one or more existing exercises.",
 )
-async def batch_update_exercises(
+def batch_update_exercises(
     split_id: str,
     request: ExerciseBatchUpdateRequest,
     current_user: AuthUser = Depends(get_current_user),
@@ -839,7 +933,7 @@ async def batch_update_exercises(
     summary="Delete a split",
     description="Delete a split and all its sessions/exercises (cascade delete)",
 )
-async def delete_split(
+def delete_split(
     split_id: str,
     current_user: AuthUser = Depends(get_current_user),
 ):
@@ -886,7 +980,7 @@ async def delete_split(
     summary="Analyze a saved split",
     description="Run the stimulus analysis on a saved split",
 )
-async def analyze_split(
+def analyze_split(
     split_id: str,
     include_breakdowns: bool = False,
     current_user: AuthUser = Depends(get_current_user),
@@ -899,7 +993,7 @@ async def analyze_split(
     """
     try:
         # Get the split
-        split = await get_split(split_id, current_user)
+        split = get_split(split_id, current_user)
 
         # Convert to analysis format (using correct model names)
         from schemas.models import SplitRequest, SessionInput, ExerciseInput
@@ -939,7 +1033,8 @@ async def analyze_split(
         # Run analysis using existing endpoint logic, but include the current
         # user so custom exercises created in mobile/web both resolve through
         # move_match_with_overrides during stimulus calculation.
-        return _run_split_analysis(split_request, current_user.id)
+        supabase = get_supabase_client_with_token(current_user.access_token)
+        return _run_split_analysis(split_request, current_user.id, supabase)
 
     except HTTPException:
         raise

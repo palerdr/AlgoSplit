@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   Easing,
   PanResponder,
@@ -82,6 +83,12 @@ export default function HomeScreen({
     () => stimulusScore(account.recentStimulus.data?.muscles ?? []),
     [account.recentStimulus.data]
   );
+  const loadedWeekEffort =
+    account.status === 'authenticated' &&
+    account.recentStimulus.loaded &&
+    account.recentStimulus.data
+      ? weekEffort
+      : null;
 
   const SHEET_HEIGHT = Math.min(height * 0.64, 580);
   const OPEN_DRAG = SHEET_HEIGHT * 0.5; // finger travel that maps to fully open
@@ -93,6 +100,12 @@ export default function HomeScreen({
   // JS-driven and transform-only (no opacity over glass).
   const [celebrating, setCelebrating] = useState(false);
   const [bodySource, setBodySource] = useState<'recent' | 'session'>('recent');
+  const accountStimulusPending =
+    bodySource === 'recent' &&
+    (account.status === 'checking' ||
+      (account.status === 'authenticated' &&
+        !account.recentStimulus.loaded &&
+        !account.recentStimulus.error));
   const [spinNonce, setSpinNonce] = useState(0);
   const uiAnim = useRef(new Animated.Value(1)).current; // 0 = controls offscreen
   const zoomAnim = useRef(new Animated.Value(1)).current; // body scale
@@ -261,6 +274,15 @@ export default function HomeScreen({
           />
         </Animated.View>
       </Animated.View>
+
+      {accountStimulusPending && (
+        <View pointerEvents="none" style={styles.stimulusLoadingWrap}>
+          <Glass style={styles.stimulusLoadingPill}>
+            <ActivityIndicator size="small" color={theme.accent} />
+            <Text style={styles.stimulusLoadingText}>Loading account stimulus…</Text>
+          </Glass>
+        </View>
+      )}
 
       <Animated.View
         style={[
@@ -436,10 +458,13 @@ export default function HomeScreen({
                 <Text style={styles.sheetStimLabel}>Weekly stimulus</Text>
                 <View style={styles.sheetStimTrack}>
                   <View
-                    style={[styles.sheetStimFill, { width: `${Math.min(100, weekEffort)}%` }]}
+                    style={[
+                      styles.sheetStimFill,
+                      { width: `${Math.min(100, loadedWeekEffort ?? 0)}%` },
+                    ]}
                   />
                 </View>
-                <Text style={styles.sheetStimValue}>{weekEffort}</Text>
+                <Text style={styles.sheetStimValue}>{loadedWeekEffort ?? '—'}</Text>
               </View>
 
               {account.splits.loading && !account.splits.loaded ? (
@@ -593,6 +618,26 @@ const styles = StyleSheet.create({
     left: 24,
     right: 24,
     alignItems: 'center',
+  },
+  stimulusLoadingWrap: {
+    position: 'absolute',
+    top: 124,
+    left: 24,
+    right: 24,
+    alignItems: 'center',
+  },
+  stimulusLoadingPill: {
+    borderRadius: 18,
+    paddingVertical: 9,
+    paddingHorizontal: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  stimulusLoadingText: {
+    color: theme.textDim,
+    fontSize: 12,
+    fontWeight: '600',
   },
   syncBanner: {
     borderRadius: 18,

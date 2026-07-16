@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { useAppState, CompletedWorkout } from '../state/AppState';
+import { useAppState } from '../state/AppState';
 import { rollingNet, stimulusScore } from '../analysis/stimulus';
+import { useAccountState } from '../state/AccountState';
 import { theme } from '../theme';
 import Glass from '../ui/Glass';
 import FadeIn from '../ui/FadeIn';
@@ -16,6 +17,13 @@ interface DetailsScreenProps {
 
 const DAY_MS = 86_400_000;
 const tick = () => Haptics.selectionAsync().catch(() => {});
+
+interface OverviewWorkout {
+  id: string;
+  date: string;
+  totalSets: number;
+  volume: number;
+}
 
 function fmtVolume(v: number): string {
   if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
@@ -34,7 +42,7 @@ function StatTile({ value, label, delay }: { value: string; label: string; delay
 }
 
 // ── Weekly volume bars (last 4 weeks, subtle accent) ──────────────
-function VolumeChart({ history }: { history: CompletedWorkout[] }) {
+function VolumeChart({ history }: { history: OverviewWorkout[] }) {
   const weeks = useMemo(() => {
     const buckets = [0, 0, 0, 0]; // 3w ago … this week
     const now = Date.now();
@@ -73,29 +81,19 @@ function VolumeChart({ history }: { history: CompletedWorkout[] }) {
 }
 
 // ── Stimulus score (mean adequacy across trained muscles) ─────────
-function ScoreBar({ history }: { history: CompletedWorkout[] }) {
-  const score = useMemo(() => {
-    const now = Date.now();
-    return stimulusScore(
-      rollingNet(
-        history.map((w) => ({
-          stimulus: w.stimulus,
-          daysAgo: (now - new Date(w.date).getTime()) / DAY_MS,
-        }))
-      )
-    );
-  }, [history]);
-
+function ScoreBar({ score, loading }: { score: number | null; loading: boolean }) {
   return (
     <Glass style={styles.scoreCard}>
       <View style={styles.scoreHeader}>
         <Text style={styles.chartTitle}>Stimulus score</Text>
-        <Text style={styles.scoreValue}>{score}</Text>
+        <Text style={styles.scoreValue}>{score ?? '—'}</Text>
       </View>
       <View style={styles.scoreTrack}>
-        <View style={[styles.scoreFill, { width: `${Math.min(100, score)}%` }]} />
+        <View style={[styles.scoreFill, { width: `${Math.min(100, score ?? 0)}%` }]} />
       </View>
-      <Text style={styles.scoreHint}>trained muscles at a productive weekly dose</Text>
+      <Text style={styles.scoreHint}>
+        {loading ? 'Loading account stimulus…' : 'trained muscles at a productive weekly dose'}
+      </Text>
     </Glass>
   );
 }
@@ -103,7 +101,7 @@ function ScoreBar({ history }: { history: CompletedWorkout[] }) {
 // ── GitHub-style training grid (last 15 weeks) ────────────────────
 const GRID_WEEKS = 15;
 
-function TrainingGrid({ history }: { history: CompletedWorkout[] }) {
+function TrainingGrid({ history }: { history: OverviewWorkout[] }) {
   const byDay = useMemo(() => {
     const map = new Map<string, number>();
     for (const w of history) {
@@ -149,20 +147,138 @@ function TrainingGrid({ history }: { history: CompletedWorkout[] }) {
   );
 }
 
+function OverviewNotice({
+  title,
+  body,
+  action,
+  onAction,
+}: {
+  title: string;
+  body: string;
+  action?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <FadeIn>
+      <Glass style={styles.notice}>
+        <Text style={styles.noticeTitle}>{title}</Text>
+        <Text style={styles.noticeBody}>{body}</Text>
+        {action && onAction && (
+          <Pressable onPress={onAction} hitSlop={8}>
+            <Text style={styles.noticeAction}>{action}</Text>
+          </Pressable>
+        )}
+      </Glass>
+    </FadeIn>
+  );
+}
+
 // ── Screen ────────────────────────────────────────────────────────
 type Tab = 'overview' | 'splits' | 'progress' | 'history';
 
 export default function DetailsScreen({ onBack }: DetailsScreenProps) {
   const { history, templates } = useAppState();
+  const account = useAccountState();
   const [tab, setTab] = useState<Tab>('overview');
+  const overviewRange = account.workoutOverview;
+  const accountMode = account.status === 'authenticated';
+  const demoMode = account.status === 'signedOut' || account.status === 'unconfigured';
+
+  useEffect(() => {
+    if (account.status === 'authenticated') account.ensureWorkoutOverview();
+  }, [account.status, account.ensureWorkoutOverview]);
+
+  const remoteOverviewHistory = useMemo<OverviewWorkout[]>(
+    () =>
+      overviewRange.data.map((workout) => ({
+        id: workout.id,
+        date: workout.completed_at,
+        totalSets: workout.total_sets,
+        volume: workout.total_volume,
+      })),
+    [overviewRange.data]
+  );
+  const localOverviewHistory = useMemo<OverviewWorkout[]>(
+    () =>
+      history.map((workout, index) => ({
+        id: workout.localId ?? workout.remoteId ?? `${workout.date}-${index}`,
+        date: workout.date,
+        totalSets: workout.totalSets,
+        volume: workout.volume,
+      })),
+    [history]
+  );
+  const overviewHistory = accountMode
+    ? remoteOverviewHistory
+    : demoMode
+      ? localOverviewHistory
+      : [];
+
+  const overviewScore = useMemo(() => {
+    if (accountMode) {
+      return account.recentStimulus.loaded && account.recentStimulus.data
+        ? stimulusScore(account.recentStimulus.data.muscles)
+        : null;
+    }
+    if (!demoMode) return null;
+    const now = Date.now();
+    return stimulusScore(
+      rollingNet(
+        history.map((workout) => ({
+          stimulus: workout.stimulus,
+          daysAgo: (now - new Date(workout.date).getTime()) / DAY_MS,
+        }))
+      )
+    );
+  }, [accountMode, account.recentStimulus, demoMode, history]);
 
   const weekAgo = Date.now() - 7 * DAY_MS;
-  const thisWeek = history.filter((w) => new Date(w.date).getTime() >= weekAgo);
+  const thisWeek = overviewHistory.filter((w) => new Date(w.date).getTime() >= weekAgo);
   const weekSets = thisWeek.reduce((n, w) => n + w.totalSets, 0);
   const weekVolume = thisWeek.reduce((n, w) => n + w.volume, 0);
 
-  const overview = (
+  const overviewLoading =
+    account.status === 'checking' ||
+    (accountMode && !overviewRange.loaded && !overviewRange.error);
+  const overviewError =
+    account.status === 'error'
+      ? account.sessionError ?? 'Could not verify your account.'
+      : accountMode
+        ? overviewRange.error
+        : null;
+  const stimulusLoading =
+    accountMode && !account.recentStimulus.loaded && !account.recentStimulus.error;
+
+  const overviewContent = overviewLoading ? (
+    <OverviewNotice
+      title="Loading overview"
+      body="Fetching your account workout history and stimulus analysis…"
+    />
+  ) : overviewError ? (
+    <OverviewNotice
+      title="Overview could not load"
+      body={`${overviewError} Local workout history was not substituted.`}
+      action="Retry"
+      onAction={
+        account.status === 'error'
+          ? account.refreshSession
+          : account.refreshWorkoutOverview
+      }
+    />
+  ) : (
     <View>
+      {demoMode && (
+        <OverviewNotice
+          title="Demo overview"
+          body="Sign in to replace device-local sessions with your account workout history."
+        />
+      )}
+      {accountMode && overviewRange.loaded && overviewHistory.length === 0 && (
+        <OverviewNotice
+          title="No account workouts yet"
+          body="Finish a workout and it will appear in these overview visuals."
+        />
+      )}
       <Text style={styles.sectionLabel}>This week</Text>
       <View style={styles.statsRow}>
         <StatTile value={`${thisWeek.length}`} label="workouts" delay={0} />
@@ -170,18 +286,26 @@ export default function DetailsScreen({ onBack }: DetailsScreenProps) {
         <StatTile value={fmtVolume(weekVolume)} label="lbs moved" delay={90} />
       </View>
 
+      {accountMode && account.recentStimulus.error && (
+        <OverviewNotice
+          title="Stimulus score could not load"
+          body={account.recentStimulus.error}
+          action="Retry"
+          onAction={account.refreshStimulus}
+        />
+      )}
       <FadeIn delay={135}>
-        <ScoreBar history={history} />
+        <ScoreBar score={overviewScore} loading={stimulusLoading} />
       </FadeIn>
 
       <FadeIn delay={180}>
-        <VolumeChart history={history} />
+        <VolumeChart history={overviewHistory} />
       </FadeIn>
 
       <Text style={styles.sectionLabel}>Training days</Text>
       <FadeIn delay={225}>
         <Glass style={styles.gridCard}>
-          <TrainingGrid history={history} />
+          <TrainingGrid history={overviewHistory} />
         </Glass>
       </FadeIn>
     </View>
@@ -223,7 +347,7 @@ export default function DetailsScreen({ onBack }: DetailsScreenProps) {
 
       {tab === 'overview' ? (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
-          {overview}
+          {overviewContent}
         </ScrollView>
       ) : tab === 'history' ? (
         <HistoryTab />
@@ -285,6 +409,28 @@ const styles = StyleSheet.create({
   },
   tabTextActive: {
     color: theme.accent,
+  },
+  notice: {
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 14,
+  },
+  noticeTitle: {
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 5,
+  },
+  noticeBody: {
+    color: theme.textDim,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  noticeAction: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 10,
   },
   sectionLabel: {
     color: theme.textDim,

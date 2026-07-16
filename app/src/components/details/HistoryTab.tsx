@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import type { WorkoutLogResponse } from '../../api/backend';
-import { emptyWorkoutResource, useAccountState } from '../../state/AccountState';
+import type { WorkoutSummaryResponse } from '../../api/backend';
+import { useAccountState } from '../../state/AccountState';
 import { theme } from '../../theme';
 import FadeIn from '../../ui/FadeIn';
 import Glass from '../../ui/Glass';
-import { formatLoggedSet, sortWorkoutHistory, workoutTotals } from './historyTransforms';
+import { formatLoggedSet, workoutTotals } from './historyTransforms';
 
 const DAY_MS = 86_400_000;
 
@@ -53,13 +53,22 @@ function Notice({
   );
 }
 
-function WorkoutCard({ workout, delay }: { workout: WorkoutLogResponse; delay: number }) {
+function WorkoutCard({ workout, delay }: { workout: WorkoutSummaryResponse; delay: number }) {
+  const account = useAccountState();
   const [expanded, setExpanded] = useState(false);
-  const totals = workoutTotals(workout);
+  const detailResource = account.workoutDetails[workout.id];
+  const detail = detailResource?.data ?? null;
+  const totals = detail ? workoutTotals(detail) : null;
+
+  const toggle = () => {
+    const opening = !expanded;
+    setExpanded(opening);
+    if (opening) account.ensureWorkoutDetail(workout.id);
+  };
 
   return (
     <FadeIn delay={delay}>
-      <Pressable onPress={() => setExpanded((value) => !value)}>
+      <Pressable onPress={toggle}>
         <Glass style={styles.card} interactive>
           <View style={styles.cardHeader}>
             <View style={styles.cardTitleBlock}>
@@ -70,14 +79,14 @@ function WorkoutCard({ workout, delay }: { workout: WorkoutLogResponse; delay: n
           </View>
           <View style={styles.statRow}>
             <Text style={styles.stat}>
-              <Text style={styles.statValue}>{totals.sets}</Text> sets
+              <Text style={styles.statValue}>{workout.total_sets}</Text> sets
             </Text>
             <Text style={styles.stat}>
-              <Text style={styles.statValue}>{workout.exercises.length}</Text> exercises
+              <Text style={styles.statValue}>{workout.exercise_count}</Text> exercises
             </Text>
-            <Text style={styles.stat}>
+            {totals && <Text style={styles.stat}>
               <Text style={styles.statValue}>{formatVolume(totals.volume)}</Text> lb
-            </Text>
+            </Text>}
             {workout.duration_minutes != null && (
               <Text style={styles.stat}>
                 <Text style={styles.statValue}>{workout.duration_minutes}</Text> min
@@ -85,10 +94,18 @@ function WorkoutCard({ workout, delay }: { workout: WorkoutLogResponse; delay: n
             )}
           </View>
 
-          {expanded && (
+          {expanded && detailResource?.loading && !detail && (
+            <Text style={styles.exerciseNotes}>Loading workout details…</Text>
+          )}
+          {expanded && detailResource?.error && (
+            <Pressable onPress={() => account.ensureWorkoutDetail(workout.id)}>
+              <Text style={styles.action}>{detailResource.error} · Retry</Text>
+            </Pressable>
+          )}
+          {expanded && detail && (
             <View style={styles.details}>
-              {workout.notes && <Text style={styles.workoutNotes}>{workout.notes}</Text>}
-              {workout.exercises.map((exercise, exerciseIndex) => (
+              {detail.notes && <Text style={styles.workoutNotes}>{detail.notes}</Text>}
+              {detail.exercises.map((exercise, exerciseIndex) => (
                 <View
                   key={exercise.id || `${exercise.exercise_name}-${exerciseIndex}`}
                   style={[styles.exercise, exerciseIndex > 0 && styles.exerciseBorder]}
@@ -116,13 +133,13 @@ function WorkoutCard({ workout, delay }: { workout: WorkoutLogResponse; delay: n
 
 export default function HistoryTab() {
   const account = useAccountState();
-  const remote = account.workoutRanges.all ?? emptyWorkoutResource();
+  const remote = account.workoutSummaries;
 
   useEffect(() => {
-    if (account.status === 'authenticated') account.refreshWorkouts();
-  }, [account.status, account.refreshWorkouts]);
+    if (account.status === 'authenticated') account.ensureWorkoutSummaries();
+  }, [account.status, account.ensureWorkoutSummaries]);
 
-  const workouts = useMemo(() => sortWorkoutHistory(remote.data), [remote.data]);
+  const workouts = remote.data.workouts;
 
   if (account.status === 'unconfigured') {
     return (
@@ -159,7 +176,7 @@ export default function HistoryTab() {
               {account.user?.email ?? 'Authenticated'}
             </Text>
           </View>
-          <Pressable onPress={() => account.refreshWorkouts()} hitSlop={8}>
+          <Pressable onPress={account.refreshWorkoutSummaries} hitSlop={8}>
             <Text style={styles.accountAction}>Refresh</Text>
           </Pressable>
           <Pressable onPress={() => account.logout()} hitSlop={8}>
@@ -173,7 +190,7 @@ export default function HistoryTab() {
           title="History could not load"
           body={`${remote.error} Local demo workouts were not substituted.`}
           action="Retry"
-          onAction={() => account.refreshWorkouts()}
+          onAction={account.refreshWorkoutSummaries}
         />
       ) : remote.loading && !remote.loaded ? (
         <Notice title="Loading history" body="Fetching your complete workout history…" />
@@ -188,6 +205,11 @@ export default function HistoryTab() {
             <WorkoutCard workout={item} delay={45 + Math.min(index, 6) * 45} />
           )}
           contentContainerStyle={styles.listContent}
+          onEndReached={() => account.loadMoreWorkoutSummaries()}
+          onEndReachedThreshold={0.35}
+          ListFooterComponent={
+            remote.loading && remote.loaded ? <Text style={styles.exerciseNotes}>Loading more…</Text> : null
+          }
         />
       )}
     </View>

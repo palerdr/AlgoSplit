@@ -4,6 +4,8 @@ Wrapper around movementMatching that supports database-backed user overrides
 """
 
 from typing import Optional, Dict, Any, Tuple, cast
+from threading import Lock
+from time import monotonic
 from core.movementMatching import (
     move_match as default_move_match,
     move_match_detailed as default_move_match_detailed,
@@ -15,6 +17,10 @@ from core.granular_patterns import GRANULAR_PATTERNS
 from db.supabase import get_supabase_client
 
 UserExerciseMaps = Dict[str, Dict[str, Any]]
+
+_USER_MAP_CACHE_TTL_SECONDS = 10 * 60
+_user_map_cache: Dict[str, Tuple[UserExerciseMaps, float]] = {}
+_user_map_cache_lock = Lock()
 
 
 def _as_dict(value: Any) -> Optional[Dict[str, Any]]:
@@ -79,7 +85,18 @@ def _build_movement_from_custom(custom: Dict[str, Any], exercise_name: str) -> M
     )
 
 
-def preload_user_exercise_maps(user_id: str) -> UserExerciseMaps:
+def invalidate_user_exercise_maps(user_id: str) -> None:
+    """Drop cached custom exercises and overrides after a user mutation."""
+    with _user_map_cache_lock:
+        _user_map_cache.pop(user_id, None)
+
+
+def preload_user_exercise_maps(
+    user_id: str,
+    supabase=None,
+    *,
+    strict: bool = False,
+) -> UserExerciseMaps:
     """
     Load all user custom exercises and overrides once.
 
@@ -89,14 +106,20 @@ def preload_user_exercise_maps(user_id: str) -> UserExerciseMaps:
             "overrides": {normalized_exercise_name: pattern_override}
         }
     """
+    now = monotonic()
+    with _user_map_cache_lock:
+        cached = _user_map_cache.get(user_id)
+        if cached is not None and now - cached[1] < _USER_MAP_CACHE_TTL_SECONDS:
+            return cached[0]
+
     custom_map: Dict[str, Dict[str, Any]] = {}
     override_map: Dict[str, str] = {}
 
     try:
-        supabase = get_supabase_client()
+        db = supabase if supabase is not None else get_supabase_client()
 
         custom_result = (
-            supabase.table("custom_exercises")
+            db.table("custom_exercises")
             .select("*")
             .eq("user_id", user_id)
             .execute()
@@ -111,7 +134,7 @@ def preload_user_exercise_maps(user_id: str) -> UserExerciseMaps:
                 custom_map[exercise_name] = row_dict
 
         override_result = (
-            supabase.table("exercise_overrides")
+            db.table("exercise_overrides")
             .select("exercise_name, pattern_override")
             .eq("user_id", user_id)
             .execute()
@@ -126,12 +149,17 @@ def preload_user_exercise_maps(user_id: str) -> UserExerciseMaps:
             if exercise_name and isinstance(pattern_override, str):
                 override_map[exercise_name] = pattern_override
     except Exception as e:
+        if strict:
+            raise
         print(f"Error preloading user exercise maps: {e}")
 
-    return {
+    maps = {
         "custom": custom_map,
         "overrides": {k: v for k, v in override_map.items()},
     }
+    with _user_map_cache_lock:
+        _user_map_cache[user_id] = (maps, monotonic())
+    return maps
 
 
 def move_match_with_overrides(

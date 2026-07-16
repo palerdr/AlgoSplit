@@ -243,7 +243,7 @@ def _run_analysis_engine(
 # ============================================================================
 
 @router.post("/analyze-split", response_model=AnalysisResponse)
-async def analyze_split(
+def analyze_split(
     request: SplitRequest,
     current_user: AuthUser = Depends(get_current_user),
 ):
@@ -254,12 +254,17 @@ async def analyze_split(
     (prime/secondary/tertiary movers).
     """
     try:
-        return _run_split_analysis(request, current_user.id)
+        supabase = get_supabase_client_with_token(current_user.access_token)
+        return _run_split_analysis(request, current_user.id, supabase)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error analyzing split: {str(e)}")
 
 
-def _run_split_analysis(request: SplitRequest, user_id: Optional[str] = None) -> AnalysisResponse:
+def _run_split_analysis(
+    request: SplitRequest,
+    user_id: Optional[str] = None,
+    supabase=None,
+) -> AnalysisResponse:
     if user_id:
         cache_key = _split_analysis_cache_key(user_id, request)
         now_mono = _time.monotonic()
@@ -282,7 +287,7 @@ def _run_split_analysis(request: SplitRequest, user_id: Optional[str] = None) ->
 
     user_exercise_maps = None
     if user_id:
-        user_exercise_maps = preload_user_exercise_maps(user_id)
+        user_exercise_maps = preload_user_exercise_maps(user_id, supabase=supabase)
 
     response = _run_analysis_engine(
         request,
@@ -299,7 +304,7 @@ def _run_split_analysis(request: SplitRequest, user_id: Optional[str] = None) ->
 
 
 @router.post("/analyze-workouts", response_model=AnalysisResponse)
-async def analyze_workouts(
+def analyze_workouts(
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
     end_date: Optional[date] = Query(None, description="Inclusive end date for the workout window"),
     timezone_offset_minutes: int = Query(0, ge=-840, le=840, description="Client local offset from UTC in minutes"),
@@ -364,6 +369,10 @@ async def analyze_workouts(
             .execute()
         )
 
+        user_exercise_maps = preload_user_exercise_maps(
+            current_user.id,
+            supabase=supabase,
+        )
         result = _build_workout_analysis(
             workouts_result.data,
             exercises_result.data or [],
@@ -373,6 +382,7 @@ async def analyze_workouts(
             dataset=dataset,
             now=window_end,
             user_id=current_user.id,
+            user_exercise_maps=user_exercise_maps,
         )
 
         # Store in cache
@@ -422,6 +432,7 @@ def _build_workout_analysis(
     dataset: str = "schoenfeld",
     now: Optional[datetime] = None,
     user_id: Optional[str] = None,
+    user_exercise_maps=None,
 ) -> AnalysisResponse:
     """Pure transform: workout + exercise rows → AnalysisResponse.
 
@@ -481,8 +492,7 @@ def _build_workout_analysis(
     # engine correctly models atrophy for the gap between sessions and now.
     effective_cycle = days
 
-    user_exercise_maps = None
-    if user_id:
+    if user_id and user_exercise_maps is None:
         user_exercise_maps = preload_user_exercise_maps(user_id)
 
     synthetic_request = SplitRequest.model_construct(
