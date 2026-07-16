@@ -68,6 +68,19 @@ export default function NewSplitEditor({ onCancel, onSaved }: NewSplitEditorProp
           setEditingSessionId(null);
           setWorkoutEditorOpen(false);
         }}
+        onDelete={
+          editingSessionId
+            ? () => {
+                tick();
+                setDraft((previous) =>
+                  removeNewSplitDraftSession(previous, editingSessionId)
+                );
+                setError(null);
+                setEditingSessionId(null);
+                setWorkoutEditorOpen(false);
+              }
+            : undefined
+        }
       />
     );
   }
@@ -192,19 +205,6 @@ export default function NewSplitEditor({ onCancel, onSaved }: NewSplitEditorProp
                 </View>
                 <Text style={styles.chevron}>›</Text>
               </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Remove ${session.name}`}
-                onPress={() => {
-                  tick();
-                  setDraft((previous) => removeNewSplitDraftSession(previous, id));
-                  setError(null);
-                }}
-                hitSlop={8}
-                style={styles.removeWrap}
-              >
-                <Text style={styles.remove}>✕</Text>
-              </Pressable>
             </Glass>
           </FadeIn>
         ))}
@@ -270,6 +270,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 17,
     paddingLeft: 18,
+    paddingRight: 18,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -283,6 +284,4 @@ const styles = StyleSheet.create({
   workoutName: { color: theme.text, fontSize: 16, fontWeight: '600', flex: 1 },
   meta: { color: theme.textDim, fontSize: 11.5, lineHeight: 17, marginTop: 5 },
   chevron: { color: theme.textDim, fontSize: 20 },
-  removeWrap: { paddingVertical: 20, paddingHorizontal: 17 },
-  remove: { color: theme.textDim, fontSize: 13 },
 });

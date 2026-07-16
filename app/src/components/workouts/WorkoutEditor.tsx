@@ -28,6 +28,7 @@ interface WorkoutEditorBaseProps {
   session?: SessionResponse;
   initialRestDay?: number;
   onCancel: () => void;
+  onDelete?: () => Promise<void> | void;
 }
 
 type WorkoutEditorProps = WorkoutEditorBaseProps &
@@ -56,6 +57,7 @@ export default function WorkoutEditor({
   onCancel,
   onSaved,
   onDraftSaved,
+  onDelete,
 }: WorkoutEditorProps) {
   const account = useAccountState();
   const nextKey = useRef(0);
@@ -68,6 +70,8 @@ export default function WorkoutEditor({
   const [dayText, setDayText] = useState(() => String(draft.dayNumber));
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const catalog = useMemo(() => {
@@ -243,19 +247,52 @@ export default function WorkoutEditor({
     }
   };
 
+  const confirmDelete = async () => {
+    if (!onDelete || deleting) return;
+    setDeleting(true);
+    setError(null);
+    try {
+      await onDelete();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Workout day could not be deleted.');
+      setDeleteConfirmOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-        <Pressable onPress={onCancel} hitSlop={12}>
+        <Pressable onPress={onCancel} hitSlop={12} disabled={saving || deleting}>
           <Text style={styles.cancel}>Cancel</Text>
         </Pressable>
-        <Pressable onPress={save} disabled={saving}>
-          <Glass style={styles.saveButton} interactive>
-            <Text style={[styles.saveText, saving && styles.disabled]}>
-              {saving ? 'Saving…' : 'Save'}
-            </Text>
-          </Glass>
-        </Pressable>
+        <View style={styles.headerActions}>
+          {onDelete && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Delete ${draft.name || 'workout day'}`}
+              onPress={() => {
+                tick();
+                setError(null);
+                setDeleteConfirmOpen(true);
+              }}
+              disabled={saving || deleting}
+            >
+              <Glass style={styles.deleteButton} interactive>
+                <Text style={styles.deleteText}>Delete</Text>
+              </Glass>
+            </Pressable>
+          )}
+          <Pressable onPress={save} disabled={saving || deleting}>
+            <Glass style={styles.saveButton} interactive>
+              <Text style={[styles.saveText, (saving || deleting) && styles.disabled]}>
+                {saving ? 'Saving…' : 'Save'}
+              </Text>
+            </Glass>
+          </Pressable>
+        </View>
       </View>
 
       <Text style={styles.title}>{session ? 'Edit Workout' : 'New Workout'}</Text>
@@ -267,6 +304,28 @@ export default function WorkoutEditor({
         contentContainerStyle={styles.listContent}
       >
         {error && <Text style={styles.error}>{error}</Text>}
+        {deleteConfirmOpen && (
+          <Glass style={styles.deleteConfirm}>
+            <Text style={styles.deleteConfirmTitle}>Delete workout day?</Text>
+            <Text style={styles.deleteConfirmCopy}>
+              “{draft.name || 'This workout day'}” will be permanently deleted.
+            </Text>
+            <View style={styles.deleteConfirmActions}>
+              <Pressable
+                onPress={() => setDeleteConfirmOpen(false)}
+                disabled={deleting}
+                hitSlop={8}
+              >
+                <Text style={styles.deleteCancel}>Cancel</Text>
+              </Pressable>
+              <Pressable onPress={confirmDelete} disabled={deleting} hitSlop={8}>
+                <Text style={styles.deleteConfirmText}>
+                  {deleting ? 'Deleting…' : 'Delete'}
+                </Text>
+              </Pressable>
+            </View>
+          </Glass>
+        )}
 
         <View style={styles.fieldRow}>
           <Glass style={styles.nameField}>
@@ -373,12 +432,32 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   cancel: { color: theme.textDim, fontSize: 14 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  deleteButton: { borderRadius: 17, paddingVertical: 9, paddingHorizontal: 14 },
+  deleteText: { color: '#E27878', fontSize: 13, fontWeight: '700' },
   saveButton: { borderRadius: 17, paddingVertical: 9, paddingHorizontal: 18 },
   saveText: { color: theme.accent, fontSize: 14, fontWeight: '700' },
   disabled: { opacity: 0.35 },
   title: { color: theme.text, fontSize: 28, fontWeight: '700' },
   splitName: { color: theme.accent, fontSize: 12, fontWeight: '700', marginTop: 5, marginBottom: 20 },
   error: { color: '#E27878', fontSize: 12, lineHeight: 17, marginBottom: 12 },
+  deleteConfirm: { borderRadius: 16, padding: 15, marginBottom: 16 },
+  deleteConfirmTitle: { color: theme.text, fontSize: 14, fontWeight: '700' },
+  deleteConfirmCopy: {
+    color: theme.textDim,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  deleteConfirmActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 22,
+  },
+  deleteCancel: { color: theme.textDim, fontSize: 13, fontWeight: '700' },
+  deleteConfirmText: { color: '#E27878', fontSize: 13, fontWeight: '800' },
   fieldRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
   nameField: { flex: 1, borderRadius: 16, paddingHorizontal: 14 },
   dayField: {

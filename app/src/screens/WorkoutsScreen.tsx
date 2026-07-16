@@ -24,9 +24,7 @@ interface WorkoutsScreenProps {
   onBack: () => void;
 }
 
-type DeleteTarget =
-  | { kind: 'split'; splitId: string; name: string }
-  | { kind: 'session'; splitId: string; sessionId: string; name: string };
+type DeleteTarget = { splitId: string; name: string };
 
 export default function WorkoutsScreen({
   onBack,
@@ -74,12 +72,8 @@ export default function WorkoutsScreen({
     setDeleting(true);
     setActionError(null);
     try {
-      if (deleteTarget.kind === 'split') {
-        await account.deleteSplit(deleteTarget.splitId);
-        setSelectedSplitId(null);
-      } else {
-        await account.deleteSplitSession(deleteTarget.splitId, deleteTarget.sessionId);
-      }
+      await account.deleteSplit(deleteTarget.splitId);
+      setSelectedSplitId(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       setDeleteTarget(null);
     } catch (cause) {
@@ -119,30 +113,60 @@ export default function WorkoutsScreen({
           setEditingRestDay(undefined);
           setMode('browse');
         }}
+        onDelete={
+          editingSession
+            ? async () => {
+                await account.deleteSplitSession(editingSplit.id, editingSession.id);
+                setEditingSessionId(null);
+                setEditingRestDay(undefined);
+                setMode('browse');
+              }
+            : undefined
+        }
       />
     );
   }
 
   return (
     <View style={styles.container}>
-      <Pressable
-        onPress={() => {
-          if (selectedGroup) {
-            Haptics.selectionAsync().catch(() => {});
-            setSelectedSplitId(null);
-          } else {
-            onBack();
-          }
-        }}
-        hitSlop={8}
-        style={styles.backWrap}
-      >
-        <Glass style={styles.backChip} interactive>
-          <Text style={styles.backText}>
-            {selectedGroup ? '‹ Workouts' : '‹ Home'}
-          </Text>
-        </Glass>
-      </Pressable>
+      <View style={styles.topRow}>
+        <Pressable
+          onPress={() => {
+            if (selectedGroup) {
+              Haptics.selectionAsync().catch(() => {});
+              setDeleteTarget(null);
+              setActionError(null);
+              setSelectedSplitId(null);
+            } else {
+              onBack();
+            }
+          }}
+          hitSlop={8}
+          style={styles.backWrap}
+        >
+          <Glass style={styles.backChip} interactive>
+            <Text style={styles.backText}>
+              {selectedGroup ? '‹ Workouts' : '‹ Home'}
+            </Text>
+          </Glass>
+        </Pressable>
+        {selectedGroup && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${selectedGroup.name} split`}
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              setActionError(null);
+              setDeleteTarget({ splitId: selectedGroup.id, name: selectedGroup.name });
+            }}
+            disabled={deleting}
+          >
+            <Glass style={styles.headerDeleteButton} interactive>
+              <Text style={styles.headerDeleteText}>Delete</Text>
+            </Glass>
+          </Pressable>
+        )}
+      </View>
       <Text style={styles.title}>{selectedGroup?.name ?? 'Workouts'}</Text>
 
       <FlatList
@@ -191,30 +215,9 @@ export default function WorkoutsScreen({
                 </Pressable>
               </FadeIn>
             )}
-            {selectedGroup && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Delete ${selectedGroup.name} split`}
-                onPress={() => {
-                  Haptics.selectionAsync().catch(() => {});
-                  setActionError(null);
-                  setDeleteTarget({
-                    kind: 'split',
-                    splitId: selectedGroup.id,
-                    name: selectedGroup.name,
-                  });
-                }}
-                disabled={deleting}
-                style={styles.deleteSplitWrap}
-              >
-                <Text style={styles.deleteSplitText}>Delete split</Text>
-              </Pressable>
-            )}
             {deleteTarget && (
               <Glass style={styles.deleteConfirm}>
-                <Text style={styles.deleteConfirmTitle}>
-                  Delete {deleteTarget.kind === 'split' ? 'split' : 'workout day'}?
-                </Text>
+                <Text style={styles.deleteConfirmTitle}>Delete split?</Text>
                 <Text style={styles.deleteConfirmCopy}>
                   “{deleteTarget.name}” will be permanently deleted.
                 </Text>
@@ -295,19 +298,6 @@ export default function WorkoutsScreen({
                   </View>
                   <Text style={styles.chevron}>›</Text>
                 </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Delete ${item.name} split`}
-                  onPress={() => {
-                    Haptics.selectionAsync().catch(() => {});
-                    setActionError(null);
-                    setDeleteTarget({ kind: 'split', splitId: item.id, name: item.name });
-                  }}
-                  hitSlop={8}
-                  style={styles.removeWrap}
-                >
-                  <Text style={styles.remove}>✕</Text>
-                </Pressable>
               </Glass>
             ) : (
               <Glass style={styles.nameRow} interactive>
@@ -337,26 +327,6 @@ export default function WorkoutsScreen({
                   </View>
                   <Text style={styles.chevron}>›</Text>
                 </Pressable>
-                {item.sessionId && (item.kind === 'workout' || !item.synthetic) && (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`Delete ${item.name}`}
-                    onPress={() => {
-                      Haptics.selectionAsync().catch(() => {});
-                      setActionError(null);
-                      setDeleteTarget({
-                        kind: 'session',
-                        splitId: item.splitId,
-                        sessionId: item.sessionId!,
-                        name: item.name,
-                      });
-                    }}
-                    hitSlop={8}
-                    style={styles.removeWrap}
-                  >
-                    <Text style={styles.remove}>✕</Text>
-                  </Pressable>
-                )}
               </Glass>
             )}
           </FadeIn>
@@ -387,6 +357,11 @@ const styles = StyleSheet.create({
   },
   backWrap: {
     alignSelf: 'flex-start',
+  },
+  topRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 18,
   },
   backChip: {
@@ -439,28 +414,14 @@ const styles = StyleSheet.create({
     color: theme.textDim,
     fontSize: 20,
   },
-  removeWrap: {
-    marginLeft: 12,
-    paddingLeft: 14,
+  headerDeleteButton: {
+    borderRadius: 17,
     paddingVertical: 8,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderLeftColor: theme.border,
+    paddingHorizontal: 16,
   },
-  remove: {
+  headerDeleteText: {
     color: '#E27878',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  deleteSplitWrap: {
-    alignSelf: 'center',
-    marginTop: -3,
-    marginBottom: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-  },
-  deleteSplitText: {
-    color: '#E27878',
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
   },
   deleteConfirm: {
