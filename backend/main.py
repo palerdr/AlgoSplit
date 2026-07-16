@@ -42,6 +42,7 @@ AUTH_VALIDATION_MESSAGES = {
     "/auth/forgot-password": "Enter a valid email address.",
     "/auth/reset-password": "Use a valid reset link and a password of at least 8 characters.",
     "/auth/refresh": "Invalid or expired refresh token.",
+    "/auth/oauth/complete": "Could not validate social sign-in. Try again.",
 }
 
 
@@ -96,6 +97,8 @@ async def safe_request_validation_handler(request: Request, exc: RequestValidati
     auth_message = AUTH_VALIDATION_MESSAGES.get(request.url.path)
     if auth_message:
         return JSONResponse(status_code=422, content={"detail": auth_message})
+    if request.url.path.startswith("/auth/identities/"):
+        return JSONResponse(status_code=422, content={"detail": "Choose a supported account connection."})
     return await request_validation_exception_handler(request, exc)
 
 
@@ -288,6 +291,8 @@ def read_root():
                 "login": "/auth/login",
                 "user": "/auth/user",
                 "csrf": "/auth/csrf",
+                "oauth_complete": "/auth/oauth/complete",
+                "identities": "/auth/identities",
                 "logout": "/auth/logout",
                 "logout_all": "/auth/logout-all",
             },

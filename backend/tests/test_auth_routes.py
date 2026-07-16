@@ -1,3 +1,6 @@
+import api.routes.auth as auth_routes
+
+
 def test_signup_sets_auth_and_csrf_cookies(client):
     response = client.post(
         "/auth/signup",
@@ -323,6 +326,193 @@ def test_browser_origin_cannot_spoof_native_token_response(client):
     assert response.status_code == 200
     assert response.json()["access_token"] == ""
     assert response.json()["refresh_token"] == ""
+
+
+def test_oauth_complete_adopts_social_session_as_browser_cookies(client, fake_supabase, monkeypatch):
+    monkeypatch.setattr(
+        auth_routes,
+        "_decode_token",
+        lambda _token: {
+            "sub": "user-123",
+            "role": "authenticated",
+            "exp": int(__import__("time").time()) + 1800,
+        },
+    )
+
+    response = client.post(
+        "/auth/oauth/complete",
+        json={
+            "access_token": "social-access-token-which-is-long-enough",
+            "refresh_token": "social-refresh-token-which-is-long-enough",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user"] == {"id": "user-123", "email": "tester@example.com"}
+    assert response.json()["access_token"] == ""
+    assert response.json()["refresh_token"] == ""
+    assert "algosplit_access_token" in response.cookies
+    assert "algosplit_refresh_token" in response.cookies
+    assert response.cookies.get("algosplit_access_token") == "token-social-rotated"
+    assert response.cookies.get("algosplit_refresh_token") == "refresh-token-social-rotated"
+    assert fake_supabase.auth.get_user("anything").user.id == "user-123"
+
+
+def test_oauth_complete_returns_native_session_credentials(client, monkeypatch):
+    monkeypatch.setattr(
+        auth_routes,
+        "_decode_token",
+        lambda _token: {
+            "sub": "user-123",
+            "role": "authenticated",
+            "exp": int(__import__("time").time()) + 1800,
+        },
+    )
+    payload = {
+        "access_token": "social-access-token-which-is-long-enough",
+        "refresh_token": "social-refresh-token-which-is-long-enough",
+    }
+
+    response = client.post(
+        "/auth/oauth/complete",
+        json=payload,
+        headers={"X-AlgoSplit-Client": "native"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["access_token"] == "token-social-rotated"
+    assert response.json()["refresh_token"] == "refresh-token-social-rotated"
+
+
+def test_oauth_complete_rejects_invalid_social_session_without_echoing_tokens(client, monkeypatch):
+    monkeypatch.setattr(auth_routes, "_decode_token", lambda _token: {"sub": "user-123"})
+    response = client.post(
+        "/auth/oauth/complete",
+        json={
+            "access_token": "social-access-token-which-is-long-enough",
+            "refresh_token": "social-refresh-token-which-is-long-enough",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Could not validate social sign-in. Try again."}
+    assert "social-access-token" not in response.text
+
+
+def test_oauth_complete_rejects_refresh_token_for_a_different_account(
+    client, fake_supabase, monkeypatch
+):
+    monkeypatch.setattr(
+        auth_routes,
+        "_decode_token",
+        lambda _token: {
+            "sub": "user-123",
+            "role": "authenticated",
+            "exp": int(__import__("time").time()) + 1800,
+        },
+    )
+    fake_supabase.auth.refresh_session = lambda _token: type(
+        "ProviderResponse",
+        (),
+        {
+            "user": type("User", (), {"id": "other-user", "email": "other@example.com"})(),
+            "session": type(
+                "Session",
+                (),
+                {
+                    "access_token": "rotated-access-token",
+                    "refresh_token": "rotated-refresh-token",
+                    "expires_in": 3600,
+                },
+            )(),
+        },
+    )()
+
+    response = client.post(
+        "/auth/oauth/complete",
+        json={
+            "access_token": "social-access-token-which-is-long-enough",
+            "refresh_token": "social-refresh-token-which-is-long-enough",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Could not validate social sign-in. Try again."}
+
+
+def _fake_identity(provider: str, email: str | None = None):
+    from datetime import datetime, timezone
+
+    return type(
+        "Identity",
+        (),
+        {
+            "provider": provider,
+            "identity_data": {"email": email} if email else {},
+            "created_at": datetime.now(timezone.utc),
+            "identity_id": f"identity-{provider}",
+        },
+    )()
+
+
+def test_connected_identities_lists_methods_and_brokers_trusted_link_url(client, fake_supabase):
+    listed = client.get("/auth/identities")
+    assert listed.status_code == 200
+    assert listed.json()["identities"] == [
+        {
+            "provider": "email",
+            "email": "tester@example.com",
+            "created_at": listed.json()["identities"][0]["created_at"],
+            "can_disconnect": False,
+        }
+    ]
+
+    linked = client.post("/auth/identities/google/link", json={"platform": "web"})
+
+    assert linked.status_code == 200
+    assert linked.json()["url"].startswith("http://localhost:54321/auth/v1/authorize")
+    assert fake_supabase.auth.link_identity_calls == [
+        {
+            "provider": "google",
+            "options": {"redirect_to": "http://localhost:8081/identity/callback"},
+        }
+    ]
+    assert fake_supabase.auth.set_session_calls == [("token-user-123", "")]
+
+
+def test_identity_link_rejects_existing_provider_and_untrusted_callback(client, fake_supabase, monkeypatch):
+    fake_supabase.auth.current_user.identities.append(_fake_identity("google", "tester@example.com"))
+    existing = client.post("/auth/identities/google/link", json={"platform": "native"})
+    assert existing.status_code == 409
+    assert existing.json()["detail"] == "Google is already connected to this account."
+
+    fake_supabase.auth.current_user.identities.pop()
+    monkeypatch.setenv(
+        "AUTH_IDENTITY_WEB_CALLBACK_URL",
+        "https://untrusted.example/identity/callback",
+    )
+    untrusted = client.post("/auth/identities/google/link", json={"platform": "web"})
+    assert untrusted.status_code == 503
+    assert untrusted.json()["detail"] == "Account service is temporarily unavailable. Please try again later."
+
+
+def test_identity_unlink_requires_another_method_and_removes_link(client, fake_supabase):
+    fake_supabase.auth.current_user.identities = [_fake_identity("google", "relay@privaterelay.appleid.com")]
+    rejected = client.delete("/auth/identities/google")
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"] == "Connect another sign-in method before disconnecting this one."
+
+    google = _fake_identity("google", "tester@example.com")
+    fake_supabase.auth.current_user.identities = [_fake_identity("email", "tester@example.com"), google]
+    removed = client.delete("/auth/identities/google")
+    assert removed.status_code == 204
+    assert fake_supabase.auth.unlink_identity_calls == [google]
+
+
+def test_identity_routes_reject_unsupported_provider(client):
+    response = client.post("/auth/identities/email/link", json={"platform": "web"})
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Choose a supported account connection."}
 
 
 def test_api_responses_include_baseline_security_headers(client):

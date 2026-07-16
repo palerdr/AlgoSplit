@@ -9,6 +9,8 @@ The project is no longer an API-only prototype. It now includes authentication, 
 - Web app: [algo-split.vercel.app](https://algo-split.vercel.app)
 - API health: [algosplit-api-staging.vercel.app/health](https://algosplit-api-staging.vercel.app/health)
 
+Google and Apple sign-in setup, fixed callback URLs, and provider-secret handling are documented in [SOCIAL_AUTH_SETUP.md](SOCIAL_AUTH_SETUP.md).
+
 The frontend and backend are separate Vercel projects deployed from `main`,
 with Supabase providing authentication and persistent account data.
 

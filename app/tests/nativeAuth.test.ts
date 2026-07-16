@@ -63,6 +63,28 @@ describe('native authentication lifecycle', () => {
     });
   });
 
+  it('persists the native session returned after social OAuth handoff', async () => {
+    const fetchMock = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(200, session('social-access', 'social-refresh')));
+
+    await auth.oauthComplete({
+      access_token: 'supabase-social-access-token',
+      refresh_token: 'supabase-social-refresh-token',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/auth/oauth/complete');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      body: JSON.stringify({
+        access_token: 'supabase-social-access-token',
+        refresh_token: 'supabase-social-refresh-token',
+      }),
+      headers: expect.objectContaining({ 'X-AlgoSplit-Client': 'native' }),
+    });
+    expect(await nativeTokenStore.getAccessToken()).toBe('social-access');
+    expect(await nativeTokenStore.getRefreshToken()).toBe('social-refresh');
+  });
+
   it('rotates native credentials once after a 401 and retries the request', async () => {
     await nativeTokenStore.save('expired-access', 'refresh-1');
     const fetchMock = jest

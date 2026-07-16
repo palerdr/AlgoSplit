@@ -2,8 +2,32 @@
 Pydantic schemas for authentication
 """
 
+from datetime import datetime
+from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, EmailStr, Field
+
+
+class SocialProvider(str, Enum):
+    """Social providers supported by AlgoSplit account sign-in and linking."""
+
+    GOOGLE = "google"
+    APPLE = "apple"
+
+
+class SignInProvider(str, Enum):
+    """All sign-in methods that can be displayed in connected accounts."""
+
+    EMAIL = "email"
+    GOOGLE = "google"
+    APPLE = "apple"
+
+
+class AuthClientPlatform(str, Enum):
+    """Client family used to choose a server-controlled callback URL."""
+
+    WEB = "web"
+    NATIVE = "native"
 
 
 class SignUpRequest(BaseModel):
@@ -46,6 +70,40 @@ class RefreshRequest(BaseModel):
     """Optional request body for native-client token refresh."""
 
     refresh_token: Optional[str] = Field(None, description="Supabase refresh token")
+
+
+class OAuthSessionCompleteRequest(BaseModel):
+    """Short-lived Supabase session handed to the API after a social OAuth flow."""
+
+    access_token: str = Field(..., min_length=20, max_length=8192)
+    refresh_token: str = Field(..., min_length=10, max_length=8192)
+
+
+class IdentityLinkRequest(BaseModel):
+    """Request a server-brokered social identity linking URL."""
+
+    platform: AuthClientPlatform
+
+
+class IdentitySummary(BaseModel):
+    """A safe, display-oriented view of one Supabase Auth identity."""
+
+    provider: SignInProvider
+    email: Optional[str] = None
+    created_at: Optional[datetime] = None
+    can_disconnect: bool = False
+
+
+class IdentityListResponse(BaseModel):
+    """Connected sign-in methods for the current account."""
+
+    identities: list[IdentitySummary]
+
+
+class IdentityLinkResponse(BaseModel):
+    """A trusted Supabase authorization URL for a social identity link."""
+
+    url: str
 
 
 class AuthResponse(BaseModel):

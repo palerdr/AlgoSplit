@@ -4,16 +4,27 @@ Handles user signup, login, and user info retrieval
 """
 
 import logging
-from time import perf_counter
+import os
+from time import perf_counter, time
+from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException, Depends, status, Request, Response
 from fastapi.responses import JSONResponse
+from jose import JWTError
 
 logger = logging.getLogger("algosplit.auth")
-from db.supabase import get_supabase_auth_client, get_supabase_admin
+from db.supabase import SUPABASE_URL, get_supabase_auth_client, get_supabase_admin
 from schemas.auth import (
+    AuthClientPlatform,
     SignUpRequest,
     LoginRequest,
     RefreshRequest,
+    OAuthSessionCompleteRequest,
+    SocialProvider,
+    SignInProvider,
+    IdentityLinkRequest,
+    IdentityLinkResponse,
+    IdentityListResponse,
+    IdentitySummary,
     ForgotPasswordRequest,
     ResetPasswordRequest,
     AuthResponse,
@@ -28,6 +39,7 @@ from api.security import (
     set_csrf_cookie,
     should_expose_auth_tokens,
     validate_csrf_request,
+    IS_PRODUCTION,
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -35,6 +47,274 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 AUTH_SERVICE_UNAVAILABLE = "Account service is temporarily unavailable. Please try again later."
 AUTH_RATE_LIMITED = "Too many authentication attempts. Wait a minute and try again."
+SOCIAL_SESSION_INVALID = "Could not validate social sign-in. Try again."
+
+_SOCIAL_PROVIDER_VALUES = {provider.value for provider in SocialProvider}
+_DISPLAY_PROVIDER_MAP = {
+    "email": SignInProvider.EMAIL,
+    "google": SignInProvider.GOOGLE,
+    "apple": SignInProvider.APPLE,
+}
+_IDENTITY_CALLBACK_ENV_NAMES = {
+    AuthClientPlatform.WEB: "AUTH_IDENTITY_WEB_CALLBACK_URL",
+    AuthClientPlatform.NATIVE: "AUTH_IDENTITY_NATIVE_CALLBACK_URL",
+}
+_IDENTITY_CALLBACK_PATH = "/identity/callback"
+
+
+def _provider_user_for_access_token(access_token: str):
+    """Ask Supabase Auth for the user represented by an access token."""
+    user_response = get_supabase_auth_client().get_user(access_token)
+    user = getattr(user_response, "user", None)
+    if not user or not getattr(user, "id", None):
+        raise ValueError("Supabase did not return a user")
+    return user
+
+
+def _validated_social_session(
+    access_token: str,
+    refresh_token: str,
+) -> tuple[object, str, str, int]:
+    """Validate a short-lived Supabase session before adopting it locally.
+
+    The JWT check enforces issuer/audience/expiry as it does for normal API
+    requests, while Supabase's /user lookup proves the session is still known
+    to Auth. The two results must identify the same account.
+    """
+    try:
+        payload = _decode_token(access_token)
+        user_id = payload.get("sub")
+        expires_at = int(payload.get("exp") or 0)
+        if (
+            not user_id
+            or expires_at <= int(time())
+            or payload.get("role") != "authenticated"
+            or payload.get("type") == "recovery"
+        ):
+            raise ValueError("Invalid social session claims")
+        user = _provider_user_for_access_token(access_token)
+        if str(getattr(user, "id", "")) != str(user_id):
+            raise ValueError("Social session user did not match token")
+        # Rotate the supplied refresh token before storing it. This verifies it
+        # belongs to the same social session and means the temporary client
+        # credentials are never the long-lived API session credentials.
+        refreshed = get_supabase_auth_client().refresh_session(refresh_token)
+        refreshed_user = getattr(refreshed, "user", None)
+        refreshed_session = getattr(refreshed, "session", None)
+        refreshed_expires_in = int(getattr(refreshed_session, "expires_in", 0) or 0)
+        if (
+            not refreshed_user
+            or not refreshed_session
+            or str(getattr(refreshed_user, "id", "")) != str(user_id)
+            or not getattr(refreshed_session, "access_token", None)
+            or not getattr(refreshed_session, "refresh_token", None)
+            or refreshed_expires_in <= 0
+        ):
+            raise ValueError("Social session refresh did not match token")
+        return (
+            refreshed_user,
+            refreshed_session.access_token,
+            refreshed_session.refresh_token,
+            refreshed_expires_in,
+        )
+    except HTTPException as error:
+        if error.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+            logger.warning(
+                "auth_event=oauth_complete result=validation_unavailable error_type=%s",
+                type(error).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=AUTH_SERVICE_UNAVAILABLE,
+            )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=SOCIAL_SESSION_INVALID)
+    except Exception as error:
+        error_text = _provider_error_text(error)
+        if not isinstance(error, (ValueError, JWTError)) and not any(
+            marker in error_text
+            for marker in ("invalid", "expired", "jwt", "token", "session_not_found")
+        ):
+            logger.warning(
+                "auth_event=oauth_complete result=provider_error provider_error_type=%s",
+                type(error).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=AUTH_SERVICE_UNAVAILABLE,
+            )
+        logger.info(
+            "auth_event=oauth_complete result=invalid_session provider_error_type=%s",
+            type(error).__name__,
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=SOCIAL_SESSION_INVALID)
+
+
+def _provider_user_for_current_account(current_user: AuthUser):
+    """Load the canonical Supabase Auth user for a validated API session."""
+    try:
+        user = _provider_user_for_access_token(current_user.access_token or "")
+    except Exception as error:
+        logger.warning(
+            "auth_event=identities result=provider_error provider_error_type=%s",
+            type(error).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=AUTH_SERVICE_UNAVAILABLE,
+        )
+    if str(getattr(user, "id", "")) != current_user.id:
+        logger.warning("auth_event=identities result=user_mismatch")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+    return user
+
+
+def _user_identities(user: object) -> list[object]:
+    return list(getattr(user, "identities", None) or [])
+
+
+def _identity_provider(identity: object) -> str:
+    return str(getattr(identity, "provider", "") or "").lower()
+
+
+def _identity_for_provider(identities: list[object], provider: SocialProvider) -> object | None:
+    return next(
+        (identity for identity in identities if _identity_provider(identity) == provider.value),
+        None,
+    )
+
+
+def _identity_summaries(user: object) -> list[IdentitySummary]:
+    identities = _user_identities(user)
+    can_disconnect_social = len(identities) > 1
+    summaries: list[IdentitySummary] = []
+    for identity in identities:
+        provider = _identity_provider(identity)
+        display_provider = _DISPLAY_PROVIDER_MAP.get(provider)
+        if not display_provider:
+            continue
+        identity_data = getattr(identity, "identity_data", None) or {}
+        email = identity_data.get("email") if isinstance(identity_data, dict) else None
+        summaries.append(
+            IdentitySummary(
+                provider=display_provider,
+                email=str(email) if email else None,
+                created_at=getattr(identity, "created_at", None),
+                can_disconnect=(
+                    provider in _SOCIAL_PROVIDER_VALUES and can_disconnect_social
+                ),
+            )
+        )
+    order = {"email": 0, "google": 1, "apple": 2}
+    return sorted(summaries, key=lambda item: order[item.provider.value])
+
+
+def _configured_frontend_origins() -> set[str]:
+    configured = [item.strip() for item in os.getenv("FRONTEND_URL", "").split(",") if item.strip()]
+    if not IS_PRODUCTION:
+        configured.extend(
+            [
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "http://localhost:8000",
+                "http://localhost:8081",
+            ]
+        )
+    origins: set[str] = set()
+    for candidate in configured:
+        parsed = urlparse(candidate)
+        if parsed.scheme in {"http", "https"} and parsed.netloc and parsed.path in {"", "/"}:
+            origins.add(f"{parsed.scheme}://{parsed.netloc}")
+    return origins
+
+
+def _server_controlled_identity_callback(platform: AuthClientPlatform) -> str:
+    """Return a validated fixed callback, never a caller-supplied redirect URL."""
+    env_name = _IDENTITY_CALLBACK_ENV_NAMES[platform]
+    default = (
+        f"http://localhost:8081{_IDENTITY_CALLBACK_PATH}"
+        if platform == AuthClientPlatform.WEB
+        else "algosplit://identity/callback"
+    )
+    callback_url = os.getenv(env_name, "").strip()
+    if not callback_url:
+        if IS_PRODUCTION:
+            logger.error("auth_event=identity_link result=missing_callback_config callback=%s", env_name)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=AUTH_SERVICE_UNAVAILABLE,
+            )
+        callback_url = default
+
+    parsed = urlparse(callback_url)
+    if (
+        parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or parsed.params
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=AUTH_SERVICE_UNAVAILABLE,
+        )
+
+    if platform == AuthClientPlatform.WEB:
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or parsed.path != _IDENTITY_CALLBACK_PATH
+            or origin not in _configured_frontend_origins()
+            or (IS_PRODUCTION and parsed.scheme != "https")
+        ):
+            logger.error("auth_event=identity_link result=untrusted_web_callback")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=AUTH_SERVICE_UNAVAILABLE,
+            )
+        return callback_url
+
+    if (
+        parsed.scheme != "algosplit"
+        or parsed.netloc != "identity"
+        or parsed.path != "/callback"
+    ):
+        logger.error("auth_event=identity_link result=untrusted_native_callback")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=AUTH_SERVICE_UNAVAILABLE,
+        )
+    return callback_url
+
+
+def _auth_client_for_identity_change(current_user: AuthUser):
+    """Put a validated access token into an isolated GoTrue client instance."""
+    auth_client = get_supabase_auth_client()
+    try:
+        session_response = auth_client.set_session(current_user.access_token or "", "")
+        session_user = getattr(session_response, "user", None)
+        if not session_user or str(getattr(session_user, "id", "")) != current_user.id:
+            raise ValueError("Unable to establish the account session")
+    except Exception as error:
+        logger.warning(
+            "auth_event=identities result=session_unavailable provider_error_type=%s",
+            type(error).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=AUTH_SERVICE_UNAVAILABLE,
+        )
+    return auth_client
+
+
+def _is_trusted_provider_authorization_url(value: str) -> bool:
+    expected = urlparse(SUPABASE_URL)
+    candidate = urlparse(value)
+    if candidate.netloc != expected.netloc or not candidate.path.startswith("/auth/v1/"):
+        return False
+    if candidate.scheme == "https":
+        return True
+    return not IS_PRODUCTION and candidate.scheme == expected.scheme == "http"
 
 
 def _provider_error_text(error: Exception) -> str:
@@ -313,6 +593,51 @@ def login(request: LoginRequest, http_request: Request, http_response: Response)
         raise HTTPException(status_code=provider_status, detail=public_message)
 
 
+@router.post(
+    "/oauth/complete",
+    response_model=AuthResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "Invalid or expired social session"},
+        503: {"model": ErrorResponse, "description": "Authentication provider unavailable"},
+    },
+    summary="Adopt a verified social OAuth session",
+    description=(
+        "Validate a short-lived Supabase social session, then issue the normal "
+        "AlgoSplit cookie or native-token session."
+    ),
+)
+def complete_oauth_session(
+    request: OAuthSessionCompleteRequest,
+    http_request: Request,
+    http_response: Response,
+):
+    """Move a Supabase OAuth session into the existing API session boundary."""
+    started = perf_counter()
+    user, access_token, refresh_token, expires_in = _validated_social_session(
+        request.access_token,
+        request.refresh_token,
+    )
+    set_auth_cookies(
+        http_response,
+        access_token,
+        refresh_token,
+        expires_in,
+    )
+    expose_tokens = should_expose_auth_tokens(http_request)
+    logger.info(
+        "auth_event=oauth_complete result=success client=%s latency_ms=%.1f",
+        _client_kind(http_request),
+        (perf_counter() - started) * 1000,
+    )
+    return AuthResponse(
+        access_token=access_token if expose_tokens else "",
+        refresh_token=refresh_token if expose_tokens else "",
+        token_type="bearer",
+        expires_in=expires_in,
+        user=UserInfo(id=user.id, email=getattr(user, "email", None)),
+    )
+
+
 @router.get(
     "/user",
     response_model=UserInfo,
@@ -336,6 +661,131 @@ async def get_user(current_user: AuthUser = Depends(get_current_user)):
         id=current_user.id,
         email=current_user.email,
     )
+
+
+@router.get(
+    "/identities",
+    response_model=IdentityListResponse,
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+        503: {"model": ErrorResponse, "description": "Authentication provider unavailable"},
+    },
+    summary="List connected sign-in methods",
+)
+def list_identities(current_user: AuthUser = Depends(get_current_user)):
+    user = _provider_user_for_current_account(current_user)
+    return IdentityListResponse(identities=_identity_summaries(user))
+
+
+@router.post(
+    "/identities/{provider}/link",
+    response_model=IdentityLinkResponse,
+    responses={
+        400: {"model": ErrorResponse, "description": "Invalid callback configuration"},
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+        409: {"model": ErrorResponse, "description": "Provider is already linked"},
+        503: {"model": ErrorResponse, "description": "Authentication provider unavailable"},
+    },
+    summary="Create a server-brokered social identity link",
+)
+def link_identity(
+    provider: SocialProvider,
+    request: IdentityLinkRequest,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """Start identity linking without ever exposing a cookie session to web JS."""
+    user = _provider_user_for_current_account(current_user)
+    if _identity_for_provider(_user_identities(user), provider):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{provider.value.title()} is already connected to this account.",
+        )
+
+    callback_url = _server_controlled_identity_callback(request.platform)
+    auth_client = _auth_client_for_identity_change(current_user)
+    try:
+        response = auth_client.link_identity(
+            {
+                "provider": provider.value,
+                "options": {"redirect_to": callback_url},
+            }
+        )
+        authorization_url = str(getattr(response, "url", "") or "")
+    except Exception as error:
+        error_text = _provider_error_text(error)
+        if "already linked" in error_text or "identity already exists" in error_text:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{provider.value.title()} is already connected to this account.",
+            )
+        logger.warning(
+            "auth_event=identity_link result=provider_error provider=%s provider_error_type=%s",
+            provider.value,
+            type(error).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=AUTH_SERVICE_UNAVAILABLE,
+        )
+
+    if not _is_trusted_provider_authorization_url(authorization_url):
+        logger.error(
+            "auth_event=identity_link result=untrusted_provider_url provider=%s",
+            provider.value,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=AUTH_SERVICE_UNAVAILABLE,
+        )
+
+    logger.info("auth_event=identity_link result=started provider=%s", provider.value)
+    return IdentityLinkResponse(url=authorization_url)
+
+
+@router.delete(
+    "/identities/{provider}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        400: {"model": ErrorResponse, "description": "Cannot remove the final sign-in method"},
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+        404: {"model": ErrorResponse, "description": "Provider is not linked"},
+        503: {"model": ErrorResponse, "description": "Authentication provider unavailable"},
+    },
+    summary="Disconnect a linked social identity",
+)
+def unlink_identity(
+    provider: SocialProvider,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    user = _provider_user_for_current_account(current_user)
+    identities = _user_identities(user)
+    identity = _identity_for_provider(identities, provider)
+    if not identity:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{provider.value.title()} is not connected to this account.",
+        )
+    if len(identities) <= 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Connect another sign-in method before disconnecting this one.",
+        )
+
+    auth_client = _auth_client_for_identity_change(current_user)
+    try:
+        auth_client.unlink_identity(identity)
+    except Exception as error:
+        logger.warning(
+            "auth_event=identity_unlink result=provider_error provider=%s provider_error_type=%s",
+            provider.value,
+            type(error).__name__,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=AUTH_SERVICE_UNAVAILABLE,
+        )
+    logger.info("auth_event=identity_unlink result=success provider=%s", provider.value)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

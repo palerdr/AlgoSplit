@@ -11,6 +11,7 @@
     "scheme": "algosplit",
     "ios": {
       "supportsTablet": true,
+      "usesAppleSignIn": true,
       "bundleIdentifier": "com.algosplit.app",
       "buildNumber": "1",
       "infoPlist": {
@@ -89,7 +90,9 @@
     },
     "plugins": [
       "expo-secure-store",
-      "expo-asset"
+      "expo-asset",
+      "expo-web-browser",
+      "expo-apple-authentication"
     ]
   }
 }

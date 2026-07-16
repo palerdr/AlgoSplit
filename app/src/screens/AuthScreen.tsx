@@ -14,7 +14,8 @@ import { theme } from '../theme';
 import FadeIn from '../ui/FadeIn';
 import Glass from '../ui/Glass';
 import PrivacyScreen from './PrivacyScreen';
-import { authErrorMessageForDisplay } from '../api/backend';
+import { authErrorMessageForDisplay, type SocialProvider } from '../api/backend';
+import { isSocialAuthCancellation, socialProviderVisible } from '../auth/socialAuth';
 
 export default function AuthScreen() {
   const account = useAccountState();
@@ -24,6 +25,7 @@ export default function AuthScreen() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [showPrivacy, setShowPrivacy] = useState(false);
+  const [socialBusy, setSocialBusy] = useState<SocialProvider | null>(null);
 
   const submit = async () => {
     if (!email.trim() || (mode !== 'forgot' && !password)) {
@@ -59,6 +61,21 @@ export default function AuthScreen() {
             ? 'Could not send a reset link. Try again.'
             : 'Could not sign in. Try again.';
       setError(authErrorMessageForDisplay(cause, fallback));
+    }
+  };
+
+  const submitSocial = async (provider: SocialProvider) => {
+    setError(null);
+    setMessage(null);
+    setSocialBusy(provider);
+    try {
+      await account.signInWithProvider(provider);
+    } catch (cause) {
+      if (!isSocialAuthCancellation(cause)) {
+        setError(authErrorMessageForDisplay(cause, 'Could not sign in. Try again.'));
+      }
+    } finally {
+      setSocialBusy(null);
     }
   };
 
@@ -177,6 +194,44 @@ export default function AuthScreen() {
             </Glass>
           </Pressable>
 
+          {mode !== 'forgot' && (
+            <View style={styles.socialSection}>
+              <View style={styles.dividerRow}>
+                <View style={styles.divider} />
+                <Text style={styles.dividerText}>or continue with</Text>
+                <View style={styles.divider} />
+              </View>
+              <Pressable
+                accessibilityLabel="Continue with Google"
+                onPress={() => submitSocial('google')}
+                disabled={socialBusy !== null}
+              >
+                <Glass style={styles.socialButton} interactive>
+                  {socialBusy === 'google' ? (
+                    <ActivityIndicator color={theme.accent} />
+                  ) : (
+                    <Text style={styles.socialText}>Continue with Google</Text>
+                  )}
+                </Glass>
+              </Pressable>
+              {socialProviderVisible('apple') && (
+                <Pressable
+                  accessibilityLabel="Continue with Apple"
+                  onPress={() => submitSocial('apple')}
+                  disabled={socialBusy !== null}
+                >
+                  <Glass style={styles.socialButton} interactive>
+                    {socialBusy === 'apple' ? (
+                      <ActivityIndicator color={theme.accent} />
+                    ) : (
+                      <Text style={styles.socialText}>Continue with Apple</Text>
+                    )}
+                  </Glass>
+                </Pressable>
+              )}
+            </View>
+          )}
+
           {mode === 'login' && (
             <Pressable
               onPress={() => {
@@ -287,6 +342,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
+  socialSection: { marginTop: 18, gap: 9 },
+  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 2 },
+  divider: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.13)' },
+  dividerText: { color: theme.textDim, fontSize: 11 },
+  socialButton: { borderRadius: 16, paddingVertical: 12, alignItems: 'center' },
+  socialText: { color: theme.text, fontSize: 14, fontWeight: '700' },
   switchText: {
     color: theme.textDim,
     fontSize: 12,
