@@ -20,6 +20,7 @@ import {
   WorkoutProgressWorkout,
   WorkoutSummaryListResponse,
   auth,
+  authErrorMessageForDisplay,
   analysis,
   backendConfigured,
   splits as splitsApi,
@@ -74,7 +75,7 @@ interface AccountState {
   analysisPreferencesReady: boolean;
   refreshSession: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string) => Promise<void>;
+  signup: (email: string, password: string) => Promise<string | null>;
   forgotPassword: (email: string) => Promise<string>;
   resetPassword: (accessToken: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -239,7 +240,9 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       if (isSignedOutError(error)) return markSignedOut();
       setUser(null);
       setStatus('error');
-      setSessionError(messageFromError(error));
+      setSessionError(
+        authErrorMessageForDisplay(error, 'Could not connect to your account. Try again.')
+      );
       clearRemoteData();
     }
   }, [clearRemoteData, markSignedOut]);
@@ -677,7 +680,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       setStatus('signedOut');
       setUser(null);
-      setSessionError(messageFromError(error));
+      setSessionError(authErrorMessageForDisplay(error, 'Could not sign in. Try again.'));
       throw error;
     }
   }, []);
@@ -687,15 +690,20 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     setSessionError(null);
     try {
       const response = await auth.signup(email, password);
+      if (response.email_confirmation_required) {
+        markSignedOut();
+        return 'Check your email to confirm your account, then sign in.';
+      }
       setUser(response.user);
       setStatus('authenticated');
+      return null;
     } catch (error) {
       setStatus('signedOut');
       setUser(null);
-      setSessionError(messageFromError(error));
+      setSessionError(authErrorMessageForDisplay(error, 'Could not create account. Try again.'));
       throw error;
     }
-  }, []);
+  }, [markSignedOut]);
 
   const forgotPassword = useCallback(async (email: string) => {
     const response = await auth.forgotPassword(email);

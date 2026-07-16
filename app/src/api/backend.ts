@@ -65,6 +65,65 @@ export class BackendError extends Error {
   }
 }
 
+const AUTH_SERVICE_UNAVAILABLE =
+  'Account service is temporarily unavailable. Please try again later.';
+
+const PUBLIC_AUTH_DETAILS = new Set([
+  'Could not create account with those details',
+  'Enter a valid email address',
+  'Password does not meet security requirements',
+  'Invalid email or password',
+  'Please check your email and confirm your account before signing in',
+  'Invalid or expired refresh token',
+  'Unable to reset password. Request a new link and try again.',
+  'Enter a valid email and a password of at least 8 characters.',
+  'Enter a valid email and password.',
+  'Use a valid reset link and a password of at least 8 characters.',
+]);
+
+function responseDetail(detail: unknown): string | null {
+  if (typeof detail === 'string') return detail;
+  if (detail && typeof detail === 'object' && 'detail' in detail) {
+    const value = (detail as { detail?: unknown }).detail;
+    return typeof value === 'string' ? value : null;
+  }
+  return null;
+}
+
+/** Convert every auth transport/provider failure into a deliberately public message. */
+export function safeAuthErrorMessage(status: number, path: string, detail?: unknown): string {
+  if (status === 0 || status === 404 || status >= 500) return AUTH_SERVICE_UNAVAILABLE;
+  if (status === 429) return 'Too many authentication attempts. Wait a minute and try again.';
+
+  const publicDetail = responseDetail(detail);
+  if (publicDetail && PUBLIC_AUTH_DETAILS.has(publicDetail)) return publicDetail;
+
+  if (status === 422) {
+    if (path === '/auth/signup') {
+      return 'Enter a valid email and a password of at least 8 characters.';
+    }
+    if (path === '/auth/forgot-password') return 'Enter a valid email address.';
+    if (path === '/auth/reset-password') {
+      return 'Use a valid reset link and a password of at least 8 characters.';
+    }
+    return 'Enter a valid email and password.';
+  }
+  if (path === '/auth/login' && status === 401) return 'Invalid email or password';
+  if (path === '/auth/signup') return 'Could not create account with those details';
+  if (path === '/auth/reset-password') {
+    return 'Unable to reset password. Request a new link and try again.';
+  }
+  if (path === '/auth/user' || path === '/auth/refresh') {
+    return 'Your session has expired. Please sign in again.';
+  }
+  return 'Authentication failed. Please try again.';
+}
+
+/** Keep unexpected runtime/provider errors out of authentication screens. */
+export function authErrorMessageForDisplay(error: unknown, fallback: string): string {
+  return error instanceof BackendError ? error.message : fallback;
+}
+
 /** CSRF cookie/header names — defaults in backend/api/security.py:24-25. */
 const CSRF_COOKIE_NAME = 'algosplit_csrf_token';
 const CSRF_HEADER_NAME = 'X-CSRF-Token';
@@ -167,7 +226,14 @@ async function storeNativeAuthResponse(response: AuthResponse): Promise<void> {
       'The backend did not return native session credentials. Enable native token responses and try again.'
     );
   }
-  await nativeTokenStore.save(response.access_token, response.refresh_token);
+  try {
+    await nativeTokenStore.save(response.access_token, response.refresh_token);
+  } catch {
+    throw new BackendError(
+      0,
+      'Could not store the account session securely on this device. Try again.'
+    );
+  }
 }
 
 async function parseResponse<T>(res: Response, method: HttpMethod, path: string): Promise<T> {
@@ -176,19 +242,26 @@ async function parseResponse<T>(res: Response, method: HttpMethod, path: string)
     let message = `${method} ${path} → HTTP ${res.status}`;
     try {
       detail = await res.json();
-      if (detail && typeof detail === 'object' && 'detail' in detail) {
-        const d = (detail as { detail?: unknown }).detail;
-        if (typeof d === 'string') message = d;
-      }
+      const parsedDetail = responseDetail(detail);
+      if (parsedDetail) message = parsedDetail;
     } catch {
       // Non-JSON error body; keep the status-only message.
     }
+    if (path.startsWith('/auth/')) message = safeAuthErrorMessage(res.status, path, detail);
     throw new BackendError(res.status, message, detail);
   }
 
   if (res.status === 204) return undefined as T;
   const text = await res.text();
-  return (text.length > 0 ? JSON.parse(text) : undefined) as T;
+  try {
+    if (text.length === 0) throw new Error('Empty response');
+    return JSON.parse(text) as T;
+  } catch {
+    const message = path.startsWith('/auth/')
+      ? safeAuthErrorMessage(502, path)
+      : 'The server returned an invalid response. Please try again.';
+    throw new BackendError(502, message);
+  }
 }
 
 type RefreshOutcome = 'refreshed' | 'invalid';
@@ -217,11 +290,8 @@ async function refreshCredentials(): Promise<RefreshOutcome> {
       credentials: IS_WEB ? 'include' : 'omit',
       body: !IS_WEB ? JSON.stringify({ refresh_token: refreshToken }) : undefined,
     });
-  } catch (error) {
-    throw new BackendError(
-      0,
-      error instanceof Error ? error.message : 'Could not refresh the account session'
-    );
+  } catch {
+    throw new BackendError(0, safeAuthErrorMessage(0, '/auth/refresh'));
   }
 
   if ([400, 401, 403].includes(res.status)) {
@@ -265,10 +335,12 @@ async function request<T>(
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch (error) {
-    throw new BackendError(
-      0,
-      error instanceof Error ? error.message : 'Could not reach the AlgoSplit backend'
-    );
+    const message = path.startsWith('/auth/')
+      ? safeAuthErrorMessage(0, path)
+      : error instanceof Error
+        ? error.message
+        : 'Could not reach the AlgoSplit backend';
+    throw new BackendError(0, message);
   }
 
   if (
@@ -367,6 +439,7 @@ export interface AuthResponse {
   token_type: string;
   expires_in: number;
   user: UserInfo;
+  email_confirmation_required?: boolean;
 }
 
 /** schemas/auth.py:109 — error body shape ({ detail }). */
@@ -1632,7 +1705,7 @@ export const auth = {
   async signup(email: string, password: string): Promise<AuthResponse> {
     const body: SignUpRequest = { email, password };
     const response = await request<AuthResponse>('POST', '/auth/signup', body);
-    await storeNativeAuthResponse(response);
+    if (!response.email_confirmation_required) await storeNativeAuthResponse(response);
     return response;
   },
 

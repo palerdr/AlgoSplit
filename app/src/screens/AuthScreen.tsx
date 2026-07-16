@@ -14,6 +14,7 @@ import { theme } from '../theme';
 import FadeIn from '../ui/FadeIn';
 import Glass from '../ui/Glass';
 import PrivacyScreen from './PrivacyScreen';
+import { authErrorMessageForDisplay } from '../api/backend';
 
 export default function AuthScreen() {
   const account = useAccountState();
@@ -37,14 +38,27 @@ export default function AuthScreen() {
     setMessage(null);
     try {
       if (mode === 'login') await account.login(email.trim(), password);
-      else if (mode === 'signup') await account.signup(email.trim(), password);
+      else if (mode === 'signup') {
+        const signupMessage = await account.signup(email.trim(), password);
+        if (signupMessage) {
+          setMessage(signupMessage);
+          setPassword('');
+          return;
+        }
+      }
       else {
         setMessage(await account.forgotPassword(email.trim()));
         return;
       }
       setPassword('');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Authentication failed.');
+      const fallback =
+        mode === 'signup'
+          ? 'Could not create account. Try again.'
+          : mode === 'forgot'
+            ? 'Could not send a reset link. Try again.'
+            : 'Could not sign in. Try again.';
+      setError(authErrorMessageForDisplay(cause, fallback));
     }
   };
 

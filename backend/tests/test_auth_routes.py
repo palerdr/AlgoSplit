@@ -10,9 +10,92 @@ def test_signup_sets_auth_and_csrf_cookies(client):
     assert body["user"]["email"] == "new-user@example.com"
     assert body["token_type"] == "bearer"
     assert body["access_token"].startswith("token-")
+    assert body["email_confirmation_required"] is False
     assert "algosplit_access_token" in response.cookies
     assert "algosplit_refresh_token" in response.cookies
     assert "algosplit_csrf_token" in response.cookies
+
+
+def test_signup_without_provider_session_requires_email_confirmation(client, fake_supabase):
+    provider_response = type(
+        "ProviderResponse",
+        (),
+        {
+            "user": type(
+                "User",
+                (),
+                {"id": "user-awaiting-confirmation", "email": "confirm@example.com"},
+            )(),
+            "session": None,
+        },
+    )()
+    fake_supabase.auth.sign_up = lambda _payload: provider_response
+
+    response = client.post(
+        "/auth/signup",
+        json={"email": "confirm@example.com", "password": "StrongPass123!"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["email_confirmation_required"] is True
+    assert response.json()["access_token"] == ""
+    assert "algosplit_access_token" not in response.cookies
+
+
+def test_signup_validation_does_not_echo_password(client):
+    response = client.post(
+        "/auth/signup",
+        json={"email": "not-an-email", "password": "secret"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Enter a valid email and a password of at least 8 characters."
+    }
+    assert "secret" not in response.text
+
+
+def test_reset_validation_does_not_echo_recovery_token(client):
+    response = client.post(
+        "/auth/reset-password",
+        json={"access_token": "private-recovery-token", "new_password": "short"},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Use a valid reset link and a password of at least 8 characters."
+    }
+    assert "private-recovery-token" not in response.text
+
+
+def test_signup_provider_errors_do_not_leak_details(client, fake_supabase):
+    fake_supabase.auth.raise_on_signup = Exception(
+        "upstream failure using service_role=do-not-return-this"
+    )
+
+    response = client.post(
+        "/auth/signup",
+        json={"email": "new-user@example.com", "password": "StrongPass123!"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Account service is temporarily unavailable. Please try again later."
+    }
+    assert "service_role" not in response.text
+
+
+def test_signup_provider_validation_uses_public_messages(client, fake_supabase):
+    fake_supabase.auth.raise_on_signup = Exception("Password is too weak: internal policy v3")
+
+    response = client.post(
+        "/auth/signup",
+        json={"email": "new-user@example.com", "password": "StrongPass123!"},
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Password does not meet security requirements"}
+    assert "internal policy" not in response.text
 
 
 def test_login_with_invalid_credentials_returns_401(client, fake_supabase):
@@ -25,6 +108,21 @@ def test_login_with_invalid_credentials_returns_401(client, fake_supabase):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid email or password"
+
+
+def test_login_provider_errors_do_not_leak_details(client, fake_supabase):
+    fake_supabase.auth.raise_on_login = Exception("database key abc123 was rejected")
+
+    response = client.post(
+        "/auth/login",
+        json={"email": "user@example.com", "password": "StrongPass123!"},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "detail": "Account service is temporarily unavailable. Please try again later."
+    }
+    assert "abc123" not in response.text
 
 
 def test_browser_login_keeps_tokens_out_of_json(client):

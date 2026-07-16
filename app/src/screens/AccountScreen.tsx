@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useAccountState } from '../state/AccountState';
+import { authErrorMessageForDisplay } from '../api/backend';
 import { useAppState } from '../state/AppState';
 import { theme } from '../theme';
 import FadeIn from '../ui/FadeIn';
@@ -36,7 +37,7 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
     try {
       await account.logout();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not sign out.');
+      setError(authErrorMessageForDisplay(cause, 'Could not sign out.'));
       setBusy(null);
     }
   };
@@ -48,7 +49,7 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
     try {
       await account.deleteAccount();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not delete the account.');
+      setError(authErrorMessageForDisplay(cause, 'Could not delete the account.'));
       setBusy(null);
     }
   };

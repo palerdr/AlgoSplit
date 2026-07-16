@@ -56,6 +56,10 @@ class AuthResponse(BaseModel):
     token_type: str = Field(default="bearer", description="Token type")
     expires_in: int = Field(..., description="Token expiration time in seconds")
     user: "UserInfo" = Field(..., description="User information")
+    email_confirmation_required: bool = Field(
+        default=False,
+        description="Whether signup succeeded but requires email confirmation before login",
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -65,6 +69,7 @@ class AuthResponse(BaseModel):
                     "refresh_token": "v1.refresh-token-string...",
                     "token_type": "bearer",
                     "expires_in": 3600,
+                    "email_confirmation_required": False,
                     "user": {
                         "id": "123e4567-e89b-12d3-a456-426614174000",
                         "email": "user@example.com",

@@ -30,13 +30,37 @@ from api.security import (
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
+AUTH_SERVICE_UNAVAILABLE = "Account service is temporarily unavailable. Please try again later."
+AUTH_RATE_LIMITED = "Too many authentication attempts. Wait a minute and try again."
+
+
+def _provider_error_text(error: Exception) -> str:
+    """Normalize provider errors for classification only; never return this text to clients."""
+    parts = [str(error), str(getattr(error, "code", "")), str(getattr(error, "message", ""))]
+    return " ".join(parts).lower()
+
+
+def _is_rate_limited(error_text: str) -> bool:
+    return any(
+        marker in error_text
+        for marker in ("rate limit", "too many requests", "over_email_send_rate_limit")
+    )
+
+
+def _provider_failure_status(error_text: str) -> tuple[int, str]:
+    if _is_rate_limited(error_text):
+        return status.HTTP_429_TOO_MANY_REQUESTS, AUTH_RATE_LIMITED
+    return status.HTTP_503_SERVICE_UNAVAILABLE, AUTH_SERVICE_UNAVAILABLE
+
+
 @router.post(
     "/signup",
     response_model=AuthResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
         400: {"model": ErrorResponse, "description": "Invalid request or user already exists"},
-        500: {"model": ErrorResponse, "description": "Server error"},
+        429: {"model": ErrorResponse, "description": "Too many attempts"},
+        503: {"model": ErrorResponse, "description": "Authentication provider unavailable"},
     },
     summary="Sign up a new user",
     description="Create a new user account with email and password",
@@ -83,6 +107,7 @@ async def signup(request: SignUpRequest, http_request: Request, http_response: R
             refresh_token=refresh_token if expose_tokens else "",
             token_type="bearer",
             expires_in=expires_in,
+            email_confirmation_required=not bool(access_token),
             user=UserInfo(
                 id=sign_up_response.user.id,
                 email=sign_up_response.user.email,
@@ -91,35 +116,42 @@ async def signup(request: SignUpRequest, http_request: Request, http_response: R
 
     except HTTPException:
         raise
-    except Exception as e:
-        # Check for specific Supabase errors
-        error_message = str(e).lower()
+    except Exception as error:
+        # Provider exception text is useful for classification and server logs,
+        # but can contain implementation details and must never reach clients.
+        error_message = _provider_error_text(error)
         if "already registered" in error_message or "already exists" in error_message:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User with this email already exists",
+                detail="Could not create account with those details",
             )
-        elif "email not confirmed" in error_message:
+        if "signups not allowed" in error_message or "signup is disabled" in error_message:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=AUTH_SERVICE_UNAVAILABLE,
+            )
+        if "invalid email" in error_message or "email address is invalid" in error_message:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Please check your email and confirm your account before signing in",
+                detail="Enter a valid email address",
             )
-        elif "signups not allowed" in error_message or "signup is disabled" in error_message:
+        if any(
+            marker in error_message
+            for marker in (
+                "weak password",
+                "password is too",
+                "password should",
+                "password must",
+                "password not strong",
+            )
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Signups are currently disabled",
+                detail="Password does not meet security requirements",
             )
-        elif "invalid" in error_message or "weak" in error_message:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid request: {str(e)}",
-            )
-        else:
-            logger.exception("Signup failed with unexpected error")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Failed to create account: {str(e)}",
-            )
+        provider_status, public_message = _provider_failure_status(error_message)
+        logger.exception("Signup provider failure")
+        raise HTTPException(status_code=provider_status, detail=public_message)
 
 
 @router.post(
@@ -127,7 +159,8 @@ async def signup(request: SignUpRequest, http_request: Request, http_response: R
     response_model=AuthResponse,
     responses={
         401: {"model": ErrorResponse, "description": "Invalid credentials"},
-        500: {"model": ErrorResponse, "description": "Server error"},
+        429: {"model": ErrorResponse, "description": "Too many attempts"},
+        503: {"model": ErrorResponse, "description": "Authentication provider unavailable"},
     },
     summary="Log in a user",
     description="Authenticate a user with email and password",
@@ -183,29 +216,21 @@ async def login(request: LoginRequest, http_request: Request, http_response: Res
 
     except HTTPException:
         raise
-    except Exception as e:
-        error_message = str(e).lower()
-        if "invalid" in error_message or "credentials" in error_message:
+    except Exception as error:
+        error_message = _provider_error_text(error)
+        if "invalid login credentials" in error_message or "invalid credentials" in error_message:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password",
             )
-        elif "email not confirmed" in error_message:
+        if "email not confirmed" in error_message:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Please check your email and confirm your account before signing in",
             )
-        elif "signups not allowed" in error_message or "signup is disabled" in error_message:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Signups are currently disabled",
-            )
-        else:
-            logger.exception("Login failed with unexpected error")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Login failed: {str(e)}",
-            )
+        provider_status, public_message = _provider_failure_status(error_message)
+        logger.exception("Login provider failure")
+        raise HTTPException(status_code=provider_status, detail=public_message)
 
 
 @router.get(
@@ -293,11 +318,11 @@ async def refresh(
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.warning("Token refresh failed: %s", str(e))
+    except Exception:
+        logger.exception("Token refresh provider failure")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Failed to refresh token",
+            detail="Invalid or expired refresh token",
         )
 
 
@@ -334,7 +359,8 @@ async def forgot_password(request: ForgotPasswordRequest):
     status_code=status.HTTP_200_OK,
     responses={
         400: {"model": ErrorResponse, "description": "Invalid or expired token"},
-        500: {"model": ErrorResponse, "description": "Server error"},
+        429: {"model": ErrorResponse, "description": "Too many attempts"},
+        503: {"model": ErrorResponse, "description": "Authentication provider unavailable"},
     },
     summary="Reset password with token",
     description="Set a new password using the access token from the reset email link",
@@ -376,12 +402,16 @@ async def reset_password(request: ResetPasswordRequest):
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.exception("Password reset failed")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to reset password: {str(e)}",
-        )
+    except Exception as error:
+        error_message = _provider_error_text(error)
+        logger.exception("Password reset provider failure")
+        if any(marker in error_message for marker in ("invalid", "expired", "jwt")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unable to reset password. Request a new link and try again.",
+            )
+        provider_status, public_message = _provider_failure_status(error_message)
+        raise HTTPException(status_code=provider_status, detail=public_message)
 
 
 @router.post(

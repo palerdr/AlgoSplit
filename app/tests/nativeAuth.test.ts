@@ -83,8 +83,34 @@ describe('native authentication lifecycle', () => {
     await nativeTokenStore.save('access-1', 'refresh-1');
     jest.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('offline'));
 
-    await expect(auth.logout()).rejects.toThrow('offline');
+    await expect(auth.logout()).rejects.toThrow(
+      'Account service is temporarily unavailable. Please try again later.'
+    );
     expect(await nativeTokenStore.getAccessToken()).toBeNull();
     expect(await nativeTokenStore.getRefreshToken()).toBeNull();
+  });
+
+  it('does not expose a missing signup route or its response body', async () => {
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(404, '<html>VERCEL_DEPLOYMENT_NOT_FOUND</html>'));
+
+    await expect(auth.signup('new@example.com', 'StrongPass123!')).rejects.toThrow(
+      'Account service is temporarily unavailable. Please try again later.'
+    );
+  });
+
+  it('accepts signup pending email confirmation without requiring native tokens', async () => {
+    jest.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      response(201, {
+        ...session('', ''),
+        email_confirmation_required: true,
+      })
+    );
+
+    await expect(auth.signup('new@example.com', 'StrongPass123!')).resolves.toMatchObject({
+      email_confirmation_required: true,
+    });
+    expect(await nativeTokenStore.getAccessToken()).toBeNull();
   });
 });

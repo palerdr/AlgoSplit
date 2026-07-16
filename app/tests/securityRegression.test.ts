@@ -1,4 +1,8 @@
-import { resolveBackendUrl } from '../src/api/backend';
+import {
+  authErrorMessageForDisplay,
+  resolveBackendUrl,
+  safeAuthErrorMessage,
+} from '../src/api/backend';
 import {
   accountStorageKey,
   analysisPreferencesKey,
@@ -20,6 +24,49 @@ describe('deployment API routing', () => {
     expect(resolveBackendUrl('https://algosplit.onrender.com/', 'native', false)).toBe(
       'https://algosplit.onrender.com'
     );
+  });
+});
+
+describe('public authentication errors', () => {
+  it('turns missing rewrites and provider outages into a safe service message', () => {
+    expect(
+      safeAuthErrorMessage(404, '/auth/signup', '<html>deployment not found</html>')
+    ).toBe('Account service is temporarily unavailable. Please try again later.');
+    expect(
+      safeAuthErrorMessage(503, '/auth/login', {
+        detail: 'upstream service_role key was rejected',
+      })
+    ).toBe('Account service is temporarily unavailable. Please try again later.');
+  });
+
+  it('keeps useful allowlisted messages and rejects arbitrary provider details', () => {
+    expect(
+      safeAuthErrorMessage(400, '/auth/signup', {
+        detail: 'Password does not meet security requirements',
+      })
+    ).toBe('Password does not meet security requirements');
+    expect(
+      safeAuthErrorMessage(400, '/auth/signup', {
+        detail: 'Supabase internal project id abc123',
+      })
+    ).toBe('Could not create account with those details');
+  });
+
+  it('uses route-specific validation messages without echoing rejected input', () => {
+    expect(
+      safeAuthErrorMessage(422, '/auth/signup', {
+        detail: [{ input: 'plaintext-password' }],
+      })
+    ).toBe('Enter a valid email and a password of at least 8 characters.');
+  });
+
+  it('does not render unexpected runtime error text', () => {
+    expect(
+      authErrorMessageForDisplay(
+        new Error('SecureStore internal keychain details'),
+        'Could not sign in. Try again.'
+      )
+    ).toBe('Could not sign in. Try again.');
   });
 });
 

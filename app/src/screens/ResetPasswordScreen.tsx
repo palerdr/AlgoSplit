@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { useAccountState } from '../state/AccountState';
+import { authErrorMessageForDisplay } from '../api/backend';
 import { theme } from '../theme';
 import FadeIn from '../ui/FadeIn';
 import Glass from '../ui/Glass';
@@ -44,7 +45,9 @@ export default function ResetPasswordScreen({ token, onDone }: ResetPasswordScre
       setPassword('');
       setConfirmation('');
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'The reset link is invalid or expired.');
+      setError(
+        authErrorMessageForDisplay(cause, 'The reset link is invalid or expired.')
+      );
     } finally {
       setLoading(false);
     }

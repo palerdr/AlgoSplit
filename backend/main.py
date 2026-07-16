@@ -1,4 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.gzip import GZipMiddleware
@@ -31,6 +33,16 @@ app = FastAPI(
 )
 
 logger = logging.getLogger("algosplit.api")
+
+AUTH_SERVICE_UNAVAILABLE = "Account service is temporarily unavailable. Please try again later."
+
+AUTH_VALIDATION_MESSAGES = {
+    "/auth/signup": "Enter a valid email and a password of at least 8 characters.",
+    "/auth/login": "Enter a valid email and password.",
+    "/auth/forgot-password": "Enter a valid email address.",
+    "/auth/reset-password": "Use a valid reset link and a password of at least 8 characters.",
+    "/auth/refresh": "Invalid or expired refresh token.",
+}
 
 
 def _parse_csv_env(name: str) -> list[str]:
@@ -76,12 +88,24 @@ async def security_headers_middleware(request: Request, call_next):
     return response
 
 
+@app.exception_handler(RequestValidationError)
+async def safe_request_validation_handler(request: Request, exc: RequestValidationError):
+    # FastAPI's default validation payload echoes rejected input. That is
+    # useful for ordinary API data, but auth bodies can contain passwords and
+    # refresh/recovery tokens, so return a fixed message for every auth route.
+    auth_message = AUTH_VALIDATION_MESSAGES.get(request.url.path)
+    if auth_message:
+        return JSONResponse(status_code=422, content={"detail": auth_message})
+    return await request_validation_exception_handler(request, exc)
+
+
 @app.exception_handler(HTTPException)
 async def safe_http_exception_handler(_: Request, exc: HTTPException):
     if exc.status_code >= 500:
         safe_service_messages = {
             "Database performance migration 012 is required before using this endpoint.",
             "Exercise validation is temporarily unavailable. Please retry.",
+            AUTH_SERVICE_UNAVAILABLE,
         }
         if exc.status_code == 503 and exc.detail in safe_service_messages:
             return JSONResponse(status_code=503, content={"detail": exc.detail})
