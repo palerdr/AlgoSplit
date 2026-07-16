@@ -1,13 +1,12 @@
 import React, { useMemo, useRef, useState } from 'react';
-import {
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import {
+  NestableDraggableFlatList,
+  NestableScrollContainer,
+  RenderItemParams,
+  ScaleDecorator,
+} from 'react-native-draggable-flatlist';
 import type { SessionResponse, SplitResponse } from '../../api/backend';
 import { EXERCISES, type Exercise } from '../../data/exercises';
 import { useAccountState } from '../../state/AccountState';
@@ -17,6 +16,8 @@ import {
   WorkoutDraft,
   WorkoutDraftExercise,
   newWorkoutDraft,
+  parseWorkoutDayInput,
+  reorderWorkoutDraftExercises,
   splitWithWorkoutDraft,
   workoutDraftError,
   workoutDraftFromSession,
@@ -30,6 +31,11 @@ interface WorkoutEditorProps {
 }
 
 const tick = () => Haptics.selectionAsync().catch(() => {});
+const RESISTANCE_PROFILES = [
+  { value: 'ascending', label: 'Asc' },
+  { value: 'mid', label: 'Mid' },
+  { value: 'descending', label: 'Desc' },
+] as const;
 
 export default function WorkoutEditor({
   split,
@@ -42,6 +48,7 @@ export default function WorkoutEditor({
   const [draft, setDraft] = useState<WorkoutDraft>(() =>
     session ? workoutDraftFromSession(split.id, session) : newWorkoutDraft(split)
   );
+  const [dayText, setDayText] = useState(() => String(draft.dayNumber));
   const [search, setSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,21 +80,97 @@ export default function WorkoutEditor({
           name: exercise.name,
           sets: 3,
           unilateral: exercise.unilateral,
-          resistanceProfile: exercise.resistanceProfile,
+          resistanceProfile: 'mid',
         },
       ],
     }));
   };
 
-  const moveExercise = (index: number, delta: -1 | 1) => {
-    const target = index + delta;
-    if (target < 0 || target >= draft.exercises.length) return;
-    tick();
-    setDraft((previous) => {
-      const exercises = [...previous.exercises];
-      [exercises[index], exercises[target]] = [exercises[target], exercises[index]];
-      return { ...previous, exercises };
-    });
+  const renderPickedExercise = ({
+    item: exercise,
+    getIndex,
+    drag,
+    isActive,
+  }: RenderItemParams<WorkoutDraftExercise>) => {
+    const index = getIndex();
+    if (index === undefined) return null;
+    return (
+      <ScaleDecorator activeScale={1.02}>
+        <View style={[styles.pickedRow, isActive && styles.pickedRowActive]}>
+          <View style={styles.pickedMainRow}>
+            <Pressable
+              accessibilityLabel={`Reorder ${exercise.name}`}
+              onLongPress={drag}
+              delayLongPress={160}
+              hitSlop={8}
+              style={styles.dragHandle}
+            >
+              <Text style={[styles.dragHandleText, isActive && styles.dragHandleActive]}>≡</Text>
+            </Pressable>
+            <Text style={styles.pickedName} numberOfLines={1}>
+              {exercise.name}
+            </Text>
+            <View style={styles.profileOptions}>
+              {RESISTANCE_PROFILES.map((profile) => {
+                const active = exercise.resistanceProfile === profile.value;
+                return (
+                  <Pressable
+                    key={profile.value}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${profile.label} resistance profile`}
+                    accessibilityState={{ selected: active }}
+                    onPress={() => {
+                      tick();
+                      updateExercise(index, { resistanceProfile: profile.value });
+                    }}
+                    style={[styles.profilePill, active && styles.profilePillActive]}
+                  >
+                    <Text style={[styles.profileText, active && styles.profileTextActive]}>
+                      {profile.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={styles.setControls}>
+              <Pressable
+                onPress={() => {
+                  tick();
+                  updateExercise(index, { sets: Math.max(1, exercise.sets - 1) });
+                }}
+                hitSlop={7}
+              >
+                <Text style={styles.setButton}>−</Text>
+              </Pressable>
+              <Text style={styles.setValue}>{exercise.sets}×</Text>
+              <Pressable
+                onPress={() => {
+                  tick();
+                  updateExercise(index, { sets: Math.min(20, exercise.sets + 1) });
+                }}
+                hitSlop={7}
+              >
+                <Text style={styles.setButton}>+</Text>
+              </Pressable>
+            </View>
+            <Pressable
+              onPress={() => {
+                tick();
+                setDraft((previous) => ({
+                  ...previous,
+                  exercises: previous.exercises.filter(
+                    (candidate) => candidate.key !== exercise.key
+                  ),
+                }));
+              }}
+              hitSlop={8}
+            >
+              <Text style={styles.remove}>✕</Text>
+            </Pressable>
+          </View>
+        </View>
+      </ScaleDecorator>
+    );
   };
 
   const save = async () => {
@@ -127,130 +210,81 @@ export default function WorkoutEditor({
       <Text style={styles.title}>{session ? 'Edit Workout' : 'New Workout'}</Text>
       <Text style={styles.splitName}>{split.name}</Text>
 
-      <FlatList
-        data={catalog}
-        keyExtractor={(exercise) => exercise.id}
+      <NestableScrollContainer
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
-        ListHeaderComponent={
-          <View>
-            {error && <Text style={styles.error}>{error}</Text>}
+        contentContainerStyle={styles.listContent}
+      >
+        {error && <Text style={styles.error}>{error}</Text>}
 
-            <View style={styles.fieldRow}>
-              <Glass style={styles.nameField}>
-                <TextInput
-                  accessibilityLabel="Workout name"
-                  value={draft.name}
-                  onChangeText={(name) => setDraft((previous) => ({ ...previous, name }))}
-                  placeholder="Workout name"
-                  placeholderTextColor={theme.textDim}
-                  style={styles.input}
-                />
-              </Glass>
-              <Glass style={styles.dayField}>
-                <Text style={styles.dayPrefix}>Day</Text>
-                <TextInput
-                  accessibilityLabel="Workout day"
-                  value={String(draft.dayNumber)}
-                  onChangeText={(value) =>
-                    setDraft((previous) => ({
-                      ...previous,
-                      dayNumber: value === '' ? 0 : Number(value.replace(/\D/g, '').slice(0, 1)),
-                    }))
-                  }
-                  keyboardType="number-pad"
-                  style={styles.dayInput}
-                />
-              </Glass>
-            </View>
+        <View style={styles.fieldRow}>
+          <Glass style={styles.nameField}>
+            <TextInput
+              accessibilityLabel="Workout name"
+              value={draft.name}
+              onChangeText={(name) => setDraft((previous) => ({ ...previous, name }))}
+              placeholder="Workout name"
+              placeholderTextColor={theme.textDim}
+              style={styles.input}
+            />
+          </Glass>
+          <Glass style={styles.dayField}>
+            <Text style={styles.dayPrefix}>Day</Text>
+            <TextInput
+              accessibilityLabel="Workout day"
+              value={dayText}
+              onChangeText={(value) => {
+                const parsed = parseWorkoutDayInput(value);
+                setDayText(parsed.text);
+                setDraft((previous) => ({
+                  ...previous,
+                  dayNumber: parsed.dayNumber,
+                }));
+              }}
+              keyboardType="number-pad"
+              maxLength={1}
+              selectTextOnFocus
+              style={styles.dayInput}
+            />
+          </Glass>
+        </View>
 
-            <Text style={styles.sectionLabel}>Exercises</Text>
-            {draft.exercises.map((exercise, index) => (
-              <View key={exercise.key} style={styles.pickedRow}>
-                <View style={styles.orderControls}>
-                  <Pressable
-                    onPress={() => moveExercise(index, -1)}
-                    disabled={index === 0}
-                    hitSlop={6}
-                  >
-                    <Text style={[styles.orderText, index === 0 && styles.disabled]}>↑</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => moveExercise(index, 1)}
-                    disabled={index === draft.exercises.length - 1}
-                    hitSlop={6}
-                  >
-                    <Text
-                      style={[
-                        styles.orderText,
-                        index === draft.exercises.length - 1 && styles.disabled,
-                      ]}
-                    >
-                      ↓
-                    </Text>
-                  </Pressable>
-                </View>
-                <Text style={styles.pickedName} numberOfLines={1}>
-                  {exercise.name}
-                </Text>
-                <View style={styles.setControls}>
-                  <Pressable
-                    onPress={() => {
-                      tick();
-                      updateExercise(index, { sets: Math.max(1, exercise.sets - 1) });
-                    }}
-                    hitSlop={7}
-                  >
-                    <Text style={styles.setButton}>−</Text>
-                  </Pressable>
-                  <Text style={styles.setValue}>{exercise.sets}×</Text>
-                  <Pressable
-                    onPress={() => {
-                      tick();
-                      updateExercise(index, { sets: Math.min(20, exercise.sets + 1) });
-                    }}
-                    hitSlop={7}
-                  >
-                    <Text style={styles.setButton}>+</Text>
-                  </Pressable>
-                </View>
-                <Pressable
-                  onPress={() => {
-                    tick();
-                    setDraft((previous) => ({
-                      ...previous,
-                      exercises: previous.exercises.filter((_, itemIndex) => itemIndex !== index),
-                    }));
-                  }}
-                  hitSlop={8}
-                >
-                  <Text style={styles.remove}>✕</Text>
-                </Pressable>
-              </View>
-            ))}
+        <Text style={styles.sectionLabel}>Exercises</Text>
+        <NestableDraggableFlatList
+          data={draft.exercises}
+          keyExtractor={(exercise) => exercise.key}
+          renderItem={renderPickedExercise}
+          onDragEnd={({ from, to }) => {
+            if (from === to) return;
+            tick();
+            setDraft((previous) => ({
+              ...previous,
+              exercises: reorderWorkoutDraftExercises(previous.exercises, from, to),
+            }));
+          }}
+          activationDistance={8}
+          scrollEnabled={false}
+        />
 
-            <Text style={styles.sectionLabel}>Add exercises</Text>
-            <Glass style={styles.searchField}>
-              <TextInput
-                accessibilityLabel="Search exercises"
-                value={search}
-                onChangeText={setSearch}
-                placeholder="Search exercises"
-                placeholderTextColor={theme.textDim}
-                autoCorrect={false}
-                style={styles.input}
-              />
-            </Glass>
-          </View>
-        }
-        renderItem={({ item }) => (
-          <Pressable style={styles.catalogRow} onPress={() => addExercise(item)}>
+        <Text style={[styles.sectionLabel, styles.addLabel]}>Add exercises</Text>
+        <Glass style={styles.searchField}>
+          <TextInput
+            accessibilityLabel="Search exercises"
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search exercises"
+            placeholderTextColor={theme.textDim}
+            autoCorrect={false}
+            style={styles.input}
+          />
+        </Glass>
+        {catalog.map((item) => (
+          <Pressable key={item.id} style={styles.catalogRow} onPress={() => addExercise(item)}>
             <Text style={styles.catalogName}>{item.name}</Text>
             <Text style={styles.catalogAdd}>+</Text>
           </Pressable>
-        )}
-        contentContainerStyle={styles.listContent}
-      />
+        ))}
+      </NestableScrollContainer>
     </View>
   );
 }
@@ -296,23 +330,44 @@ const styles = StyleSheet.create({
     marginBottom: 9,
   },
   pickedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.07)',
     borderRadius: 14,
     paddingVertical: 9,
     paddingHorizontal: 11,
     marginBottom: 7,
+  },
+  pickedMainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 10,
   },
-  orderControls: { gap: 1 },
-  orderText: { color: theme.textDim, fontSize: 13, lineHeight: 16 },
+  pickedRowActive: {
+    backgroundColor: 'rgba(65,196,110,0.15)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(65,196,110,0.55)',
+  },
+  dragHandle: { paddingHorizontal: 2, paddingVertical: 7 },
+  dragHandleText: { color: theme.textDim, fontSize: 22, lineHeight: 17, fontWeight: '700' },
+  dragHandleActive: { color: theme.accent },
   pickedName: { color: theme.text, fontSize: 14, flex: 1 },
   setControls: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   setButton: { color: theme.text, fontSize: 18, width: 18, textAlign: 'center' },
   setValue: { color: theme.text, fontSize: 13, minWidth: 26, textAlign: 'center' },
   remove: { color: theme.textDim, fontSize: 14 },
+  profileOptions: { flexDirection: 'row', gap: 3 },
+  profilePill: {
+    minWidth: 32,
+    alignItems: 'center',
+    borderRadius: 9,
+    paddingVertical: 5,
+    paddingHorizontal: 5,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  profilePillActive: { backgroundColor: 'rgba(65,196,110,0.18)' },
+  profileText: { color: theme.textDim, fontSize: 11, fontWeight: '700' },
+  profileTextActive: { color: theme.accent },
   searchField: { borderRadius: 16, paddingHorizontal: 14, marginBottom: 8 },
+  addLabel: { marginTop: 12 },
   catalogRow: {
     flexDirection: 'row',
     alignItems: 'center',

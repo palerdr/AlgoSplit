@@ -146,6 +146,76 @@ def test_log_workout_marks_dropped_session_id_in_response(client, fake_supabase,
     assert "Dropping stale workout session_id" in caplog.text
 
 
+def test_log_workout_retry_is_idempotent(client, fake_supabase, monkeypatch):
+    monkeypatch.setattr(
+        workouts_routes,
+        "get_supabase_client_with_token",
+        lambda _token: fake_supabase,
+    )
+    payload = {
+        "client_request_id": "workout-123",
+        "session_name": "Push Day",
+        "completed_at": "2026-07-15T12:00:00Z",
+        "exercises": [
+            {
+                "exercise_name": "Bench Press",
+                "sets_completed": 1,
+                "reps": [8],
+                "weight": [185],
+                "rir": [2],
+            }
+        ],
+    }
+
+    first = client.post("/api/workouts", json=payload)
+    retried = client.post("/api/workouts", json=payload)
+
+    assert first.status_code == 201
+    assert retried.status_code == 201
+    assert retried.json()["id"] == first.json()["id"]
+    assert len(fake_supabase.tables["workout_logs"]) == 1
+    assert len(fake_supabase.tables["workout_exercises"]) == 1
+
+
+def test_log_workout_retry_repairs_interrupted_exercise_insert(client, fake_supabase, auth_user, monkeypatch):
+    monkeypatch.setattr(
+        workouts_routes,
+        "get_supabase_client_with_token",
+        lambda _token: fake_supabase,
+    )
+    existing = fake_supabase.table("workout_logs").insert(
+        {
+            "user_id": auth_user.id,
+            "client_request_id": "interrupted-123",
+            "session_name": "Pull Day",
+            "completed_at": "2026-07-15T13:00:00Z",
+        }
+    ).execute().data[0]
+
+    response = client.post(
+        "/api/workouts",
+        json={
+            "client_request_id": "interrupted-123",
+            "session_name": "Pull Day",
+            "completed_at": "2026-07-15T13:00:00Z",
+            "exercises": [
+                {
+                    "exercise_name": "Barbell Row",
+                    "sets_completed": 1,
+                    "reps": [10],
+                    "weight": [135],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["id"] == existing["id"]
+    assert response.json()["exercises"][0]["exercise_name"] == "Barbell Row"
+    assert len(fake_supabase.tables["workout_logs"]) == 1
+    assert len(fake_supabase.tables["workout_exercises"]) == 1
+
+
 def test_workout_history_strips_legacy_unilateral_note_prefixes(client, fake_supabase, auth_user, monkeypatch):
     monkeypatch.setattr(
         workouts_routes,

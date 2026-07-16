@@ -1,5 +1,5 @@
 import type { WorkoutLogResponse } from '../src/api/backend';
-import { buildWorkoutPayload } from '../src/api/sync';
+import { buildWorkoutPayload, queueFailedWorkoutRetries } from '../src/api/sync';
 import type { CompletedWorkout } from '../src/state/AppState';
 import {
   previousLocalExercise,
@@ -118,9 +118,12 @@ describe('previous-session shadows', () => {
 describe('workout API serialization', () => {
   it('sends the deployed parallel-array contract with RIR and exercise notes', () => {
     const workout = {
+      localId: 'workout-local-1',
       date: '2026-07-15T12:00:00Z',
       name: 'Push',
       durationMin: 42,
+      splitId: 'split-1',
+      sessionId: 'session-1',
       exercises: [
         {
           name: 'Bench Press',
@@ -135,6 +138,9 @@ describe('workout API serialization', () => {
     } as CompletedWorkout;
 
     expect(buildWorkoutPayload(workout)).toEqual({
+      client_request_id: 'workout-local-1',
+      session_id: 'session-1',
+      split_id: 'split-1',
       session_name: 'Push',
       completed_at: '2026-07-15T12:00:00Z',
       duration_minutes: 42,
@@ -149,5 +155,19 @@ describe('workout API serialization', () => {
         },
       ],
     });
+  });
+
+  it('requeues failed uploads without touching pending or synced workouts', () => {
+    const history = [
+      { localId: 'failed', syncStatus: 'failed', syncError: 'offline' },
+      { localId: 'pending', syncStatus: 'pending' },
+      { localId: 'synced', syncStatus: 'synced', remoteId: 'remote-1' },
+    ] as CompletedWorkout[];
+
+    expect(queueFailedWorkoutRetries(history)).toEqual([
+      { localId: 'failed', syncStatus: 'pending', syncError: undefined },
+      history[1],
+      history[2],
+    ]);
   });
 });

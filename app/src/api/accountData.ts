@@ -1,10 +1,25 @@
 import {
   Dataset,
+  MuscleStats,
   SplitRequest,
   SplitResponse,
   WorkoutLogResponse,
   workouts,
 } from './backend';
+
+export function workoutAnalysisNetStimulus(
+  muscles: readonly Pick<MuscleStats, 'region_id' | 'net_stimulus'>[]
+): Record<string, number> {
+  return Object.fromEntries(
+    muscles.map((muscle) => [muscle.region_id, muscle.net_stimulus])
+  );
+}
+
+export function localDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate()
+  ).padStart(2, '0')}`;
+}
 
 const DATASETS: Dataset[] = ['schoenfeld', 'pelland', 'average'];
 

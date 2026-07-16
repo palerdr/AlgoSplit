@@ -7,7 +7,14 @@ import React, {
   ReactNode,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { autoSyncWorkout } from '../api/sync';
+import { queueFailedWorkoutRetries, syncWorkout } from '../api/sync';
+import { BackendError } from '../api/backend';
+import { useAccountState } from './AccountState';
+import {
+  accountStorageKey,
+  demoStorageKey,
+  removeLegacyGlobalData,
+} from './localPersistence';
 import { Exercise, getExercise } from '../data/exercises';
 import { TEMPLATES as SEED_TEMPLATES, TemplateExercise, WorkoutTemplate } from '../data/templates';
 import {
@@ -44,9 +51,15 @@ export interface ActiveSession {
   startedAt: number;
   /** True once the planned split was changed mid-session (swap/add) */
   edited: boolean;
+  splitId?: string;
+  sessionId?: string;
 }
 
+export type WorkoutSyncStatus = 'pending' | 'failed' | 'synced';
+
 export interface CompletedWorkout {
+  /** Stable client id used for durable, idempotent upload retries. */
+  localId?: string;
   date: string; // ISO
   name: string;
   exercises: { name: string; sets: number; records: SetRecord[]; notes: string }[];
@@ -56,6 +69,11 @@ export interface CompletedWorkout {
   volume: number; // total lbs moved (Σ weight × reps)
   durationMin: number;
   edited: boolean;
+  splitId?: string;
+  sessionId?: string;
+  syncStatus?: WorkoutSyncStatus;
+  syncError?: string;
+  remoteId?: string;
 }
 
 interface AppState {
@@ -69,6 +87,10 @@ interface AppState {
   /** Persistent exercise cues keyed by catalog exercise id. */
   exerciseNotes: Record<string, string>;
   templates: WorkoutTemplate[];
+  pendingSyncCount: number;
+  failedSyncCount: number;
+  syncingWorkoutId: string | null;
+  retryFailedWorkouts: () => void;
   addTemplate: (name: string, exercises: TemplateExercise[]) => void;
   updateTemplate: (id: string, name: string, exercises: TemplateExercise[]) => void;
   startTemplateSession: (template: WorkoutTemplate) => void;
@@ -175,8 +197,6 @@ function generateSeedHistory(): CompletedWorkout[] {
 
 const SEED_HISTORY: CompletedWorkout[] = generateSeedHistory();
 
-const STORAGE_KEY = 'fitapp:v1';
-
 interface PersistedState {
   history: CompletedWorkout[];
   templates: WorkoutTemplate[];
@@ -185,6 +205,11 @@ interface PersistedState {
 }
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
+  const account = useAccountState();
+  const authenticatedUserId = account.user?.id ?? null;
+  const storageKey = authenticatedUserId
+    ? accountStorageKey(authenticatedUserId)
+    : demoStorageKey();
   const [history, setHistory] = useState<CompletedWorkout[]>(SEED_HISTORY);
   const [session, setSession] = useState<ActiveSession | null>(null);
   const [lastCompleted, setLastCompleted] = useState<CompletedWorkout | null>(null);
@@ -192,19 +217,40 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [exerciseNotes, setExerciseNotes] = useState<Record<string, string>>({});
   const [templates, setTemplates] = useState<WorkoutTemplate[]>(SEED_TEMPLATES);
   const [hydrated, setHydrated] = useState(false);
+  const [syncingWorkoutId, setSyncingWorkoutId] = useState<string | null>(null);
+  const hydratedKeyRef = React.useRef<string | null>(null);
+  const activeStorageKeyRef = React.useRef(storageKey);
+  const syncInFlightRef = React.useRef<Set<string>>(new Set());
+  activeStorageKeyRef.current = storageKey;
 
-  // ── Local persistence: hydrate once, then save on every change ──
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
+    removeLegacyGlobalData().catch(() => {});
+  }, []);
+
+  // ── Local persistence: hydrate separately for each authenticated user ──
+  useEffect(() => {
+    let cancelled = false;
+    hydratedKeyRef.current = null;
+    setHydrated(false);
+    setSession(null);
+    setLastCompleted(null);
+    setLastUsed({});
+    setExerciseNotes({});
+    setHistory(authenticatedUserId ? [] : SEED_HISTORY);
+    setTemplates(authenticatedUserId ? [] : SEED_TEMPLATES);
+
+    AsyncStorage.getItem(storageKey)
       .then((raw) => {
+        if (cancelled) return;
         if (raw) {
           const stored = JSON.parse(raw) as Partial<PersistedState>;
           if (Array.isArray(stored.history)) {
             // Sanitize entries persisted by older schema versions — missing
             // fields must never crash renders or the startup stimulus pass.
             setHistory(
-              stored.history.map((w) => ({
+              stored.history.map((w, index) => ({
                 ...w,
+                localId: w.localId ?? `restored-${w.date}-${index}`,
                 stimulus: w.stimulus && typeof w.stimulus === 'object' ? w.stimulus : {},
                 edited: w.edited === true,
                 totalSets: Number.isFinite(w.totalSets) ? w.totalSets : 0,
@@ -217,6 +263,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
                       notes: typeof e.notes === 'string' ? e.notes : '',
                     }))
                   : [],
+                syncStatus:
+                  w.syncStatus === 'pending' ||
+                  w.syncStatus === 'failed' ||
+                  w.syncStatus === 'synced'
+                    ? w.syncStatus
+                    : 'synced',
               }))
             );
           }
@@ -234,16 +286,84 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       .catch(() => {
         // corrupted/missing store — fall back to seeds
       })
-      .finally(() => setHydrated(true));
-  }, []);
+      .finally(() => {
+        if (cancelled) return;
+        hydratedKeyRef.current = storageKey;
+        setHydrated(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticatedUserId, storageKey]);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || hydratedKeyRef.current !== storageKey) return;
     const state: PersistedState = { history, templates, lastUsed, exerciseNotes };
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state)).catch(() => {});
-  }, [hydrated, history, templates, lastUsed, exerciseNotes]);
+    AsyncStorage.setItem(storageKey, JSON.stringify(state)).catch(() => {});
+  }, [storageKey, hydrated, history, templates, lastUsed, exerciseNotes]);
 
   const recentStimulus = useMemo(() => computeRecentStimulus(history), [history]);
+  const pendingSyncCount = history.filter((workout) => workout.syncStatus === 'pending').length;
+  const failedSyncCount = history.filter((workout) => workout.syncStatus === 'failed').length;
+
+  useEffect(() => {
+    if (!hydrated || account.status !== 'authenticated' || syncingWorkoutId) return;
+    const candidate = history.find(
+      (workout) => workout.syncStatus === 'pending' && workout.localId
+    );
+    if (!candidate?.localId || syncInFlightRef.current.has(candidate.localId)) return;
+
+    const localId = candidate.localId;
+    const syncStorageKey = storageKey;
+    syncInFlightRef.current.add(localId);
+    setSyncingWorkoutId(localId);
+    syncWorkout(candidate)
+      .then((remote) => {
+        if (activeStorageKeyRef.current !== syncStorageKey) return;
+        setHistory((previous) =>
+          previous.map((workout) =>
+            workout.localId === localId
+              ? {
+                  ...workout,
+                  syncStatus: 'synced',
+                  syncError: undefined,
+                  remoteId: remote.id,
+                }
+              : workout
+          )
+        );
+        account.refreshWorkouts().catch(() => {});
+        account.refreshStimulus().catch(() => {});
+      })
+      .catch((error: unknown) => {
+        if (activeStorageKeyRef.current !== syncStorageKey) return;
+        setHistory((previous) =>
+          previous.map((workout) =>
+            workout.localId === localId
+              ? {
+                  ...workout,
+                  syncStatus: 'failed',
+                  syncError:
+                    error instanceof Error ? error.message : 'Workout upload failed',
+                }
+              : workout
+          )
+        );
+        if (error instanceof BackendError && error.status === 401) {
+          account.refreshSession().catch(() => {});
+        }
+      })
+      .finally(() => {
+        syncInFlightRef.current.delete(localId);
+        if (activeStorageKeyRef.current === syncStorageKey) setSyncingWorkoutId(null);
+      });
+  }, [
+    account,
+    history,
+    hydrated,
+    storageKey,
+    syncingWorkoutId,
+  ]);
 
   // Guards a double finish landing before React re-renders (would duplicate
   // the history entry and double-fire sync). Keyed by the session start time.
@@ -257,6 +377,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     lastUsed,
     exerciseNotes,
     templates,
+    pendingSyncCount,
+    failedSyncCount,
+    syncingWorkoutId,
+    retryFailedWorkouts: () => {
+      setHistory((previous) => queueFailedWorkoutRetries(previous));
+    },
 
     addTemplate: (name, exercises) => {
       const id = `${name.toLowerCase().replace(/\W+/g, '-')}-${Date.now()}`;
@@ -305,6 +431,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         currentIndex: 0,
         startedAt: Date.now(),
         edited: false,
+        splitId: plan.splitId,
+        sessionId: plan.sessionId,
       });
     },
 
@@ -447,6 +575,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         0
       );
       const done: CompletedWorkout = {
+        localId: `workout-${prev.startedAt}-${Date.now()}`,
         date: new Date().toISOString(),
         name: prev.name,
         exercises: exercises
@@ -462,11 +591,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         volume,
         durationMin: Math.max(1, Math.round((Date.now() - prev.startedAt) / 60_000)),
         edited: prev.edited,
+        splitId: prev.splitId,
+        sessionId: prev.sessionId,
+        syncStatus: account.status === 'authenticated' ? 'pending' : undefined,
       };
       setLastCompleted(done);
       setHistory((h) => [done, ...h]);
       setSession(null);
-      autoSyncWorkout(done); // fire-and-forget when a backend is configured
     },
 
     discardSession: () => setSession(null),

@@ -48,6 +48,12 @@ export default function WorkoutsScreen({
     setMode('editor');
   };
 
+  const refreshSavedSplits = async () => {
+    if (account.splits.loading) return;
+    Haptics.selectionAsync().catch(() => {});
+    await account.refreshSplits();
+  };
+
   if (mode === 'editor' && editingSplit) {
     return (
       <WorkoutEditor
@@ -111,8 +117,16 @@ export default function WorkoutsScreen({
                   </Text>
                   <Text style={styles.accountEmail}>{account.user?.email}</Text>
                 </View>
-                <Pressable onPress={account.refreshSplits} hitSlop={8}>
-                  <Text style={styles.refresh}>Refresh</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Refresh saved splits"
+                  onPress={refreshSavedSplits}
+                  disabled={account.splits.loading}
+                  hitSlop={8}
+                >
+                  <Text style={[styles.refresh, account.splits.loading && styles.refreshing]}>
+                    {account.splits.loading ? 'Refreshing…' : 'Refresh'}
+                  </Text>
                 </Pressable>
               </View>
             </FadeIn>
@@ -406,6 +420,9 @@ const styles = StyleSheet.create({
     color: theme.accent,
     fontSize: 12,
     fontWeight: '700',
+  },
+  refreshing: {
+    color: theme.textDim,
   },
   notice: {
     borderRadius: 18,

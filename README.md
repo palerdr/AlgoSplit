@@ -85,7 +85,7 @@ source .venv/bin/activate
 For the app, create `app/.env` when overriding the default API URL:
 
 ```env
-EXPO_PUBLIC_API_URL=http://localhost:8000
+EXPO_PUBLIC_ALGOSPLIT_API=http://localhost:8000
 ```
 
 For the backend, configure these environment variables in your shell or hosting platform:
@@ -137,7 +137,7 @@ npm run ios
 npm run android
 ```
 
-The Expo app default production API URL is set in `app/app.json` under `expo.extra.apiUrl`. Use `EXPO_PUBLIC_API_URL` locally when pointing at a different backend.
+Production web uses same-origin Vercel rewrites. The EAS production profile supplies the native API URL; use `EXPO_PUBLIC_ALGOSPLIT_API` locally when pointing at a different backend.
 
 ## Scripts and Checks
 
@@ -248,7 +248,8 @@ For production, set:
 
 - backend Supabase credentials
 - `APP_ENV=production`, `FRONTEND_URL=https://your-web-app.example` and `ALLOWED_HOSTS=your-api.example` (comma-separated values are accepted). The service refuses to boot without explicit production origins and hosts.
-- `AUTH_EXPOSE_ACCESS_TOKEN=false` for browser deployments. This keeps access and refresh tokens in Secure, HttpOnly cookies; browser refreshes use the CSRF-protected refresh cookie. Native-only deployments may set it to `true` and store the returned tokens with SecureStore.
+- `AUTH_EXPOSE_ACCESS_TOKEN=true` when the same deployment serves native clients. Tokens are returned only when the explicit native header is present, while browser responses remain cookie-only. Native credentials are stored with SecureStore.
+- Apply `backend/db/migrations/011_workout_idempotency.sql` before distributing the mobile build so persisted workout retries cannot create duplicates.
 - `AUTH_REFRESH_COOKIE_MAX_AGE_SECONDS` when the default 30-day browser session lifetime is unsuitable.
 - `MAX_REQUEST_BODY_BYTES` to adjust the default 1 MiB API request limit.
 - `TRUST_PROXY=true` only behind a trusted reverse proxy

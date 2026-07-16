@@ -1,5 +1,6 @@
 import type {
   ExerciseCreate,
+  ResistanceProfile,
   SessionCreate,
   SessionResponse,
   SplitCreate,
@@ -11,7 +12,11 @@ export interface WorkoutDraftExercise {
   name: string;
   sets: number;
   unilateral: boolean;
-  resistanceProfile: string | null;
+  resistanceProfile: ResistanceProfile;
+}
+
+export function normalizeResistanceProfile(value: string | null): ResistanceProfile {
+  return value === 'ascending' || value === 'descending' ? value : 'mid';
 }
 
 export interface WorkoutDraft {
@@ -22,6 +27,31 @@ export interface WorkoutDraft {
   exercises: WorkoutDraftExercise[];
 }
 
+export function parseWorkoutDayInput(value: string): { text: string; dayNumber: number } {
+  const text = value.replace(/\D/g, '').slice(0, 1);
+  return { text, dayNumber: text === '' ? Number.NaN : Number(text) };
+}
+
+export function reorderWorkoutDraftExercises(
+  exercises: WorkoutDraftExercise[],
+  fromIndex: number,
+  toIndex: number
+): WorkoutDraftExercise[] {
+  if (
+    fromIndex === toIndex ||
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= exercises.length ||
+    toIndex >= exercises.length
+  ) {
+    return exercises;
+  }
+  const reordered = [...exercises];
+  const [moved] = reordered.splice(fromIndex, 1);
+  reordered.splice(toIndex, 0, moved);
+  return reordered;
+}
+
 function draftExercise(
   exercise: SessionResponse['exercises'][number]
 ): WorkoutDraftExercise {
@@ -30,7 +60,7 @@ function draftExercise(
     name: exercise.exercise_name,
     sets: exercise.sets,
     unilateral: exercise.unilateral,
-    resistanceProfile: exercise.resistance_profile,
+    resistanceProfile: normalizeResistanceProfile(exercise.resistance_profile),
   };
 }
 
@@ -67,12 +97,7 @@ function exerciseCreate(exercise: WorkoutDraftExercise): ExerciseCreate {
     name: exercise.name,
     sets: exercise.sets,
     unilateral: exercise.unilateral,
-    resistance_profile:
-      exercise.resistanceProfile === 'ascending' ||
-      exercise.resistanceProfile === 'mid' ||
-      exercise.resistanceProfile === 'descending'
-        ? exercise.resistanceProfile
-        : null,
+    resistance_profile: exercise.resistanceProfile,
   };
 }
 
@@ -82,15 +107,17 @@ function existingSessionCreate(session: SessionResponse): SessionCreate {
     day_number: session.day_number,
     exercises: [...session.exercises]
       .sort((left, right) => left.order_index - right.order_index)
-      .map((exercise) =>
-        exerciseCreate({
-          key: exercise.id,
-          name: exercise.exercise_name,
-          sets: exercise.sets,
-          unilateral: exercise.unilateral,
-          resistanceProfile: exercise.resistance_profile,
-        })
-      ),
+      .map((exercise) => ({
+        name: exercise.exercise_name,
+        sets: exercise.sets,
+        unilateral: exercise.unilateral,
+        resistance_profile:
+          exercise.resistance_profile === 'ascending' ||
+          exercise.resistance_profile === 'mid' ||
+          exercise.resistance_profile === 'descending'
+            ? exercise.resistance_profile
+            : null,
+      })),
   };
 }
 

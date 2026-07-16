@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, StyleSheet, View } from 'react-native';
+import { Animated, Easing, Linking, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppStateProvider } from './src/state/AppState';
 import { AccountStateProvider } from './src/state/AccountState';
 import { useAccountState } from './src/state/AccountState';
@@ -10,6 +11,10 @@ import SessionScreen from './src/screens/SessionScreen';
 import DetailsScreen from './src/screens/DetailsScreen';
 import WorkoutsScreen from './src/screens/WorkoutsScreen';
 import AuthScreen from './src/screens/AuthScreen';
+import AccountScreen from './src/screens/AccountScreen';
+import PrivacyScreen from './src/screens/PrivacyScreen';
+import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
+import { recoveryTokenFromUrl } from './src/auth/recoveryLink';
 
 // Deliberately barebones navigation: one state value, no navigator dependency.
 // Screens hand off through a quick, subtle fade: a dark overlay fades over the
@@ -18,7 +23,7 @@ import AuthScreen from './src/screens/AuthScreen';
 // are never opacity-animated — iOS glass effects (GlassView) break, sometimes
 // permanently, when any ancestor view animates opacity. The fade lives on a
 // sibling overlay instead.
-type Screen = 'home' | 'session' | 'details' | 'workouts';
+type Screen = 'home' | 'session' | 'details' | 'workouts' | 'account' | 'privacy';
 
 function Root() {
   const account = useAccountState();
@@ -28,6 +33,7 @@ function Root() {
   // A one-shot flag (cleared by Home once handled) — NOT a persistent key, so
   // ordinary navigation back to Home never replays the celebration.
   const [celebratePending, setCelebratePending] = useState(false);
+  const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
   const pendingRef = useRef<Screen | null>(null);
   const anim = useRef(new Animated.Value(1)).current;
 
@@ -67,6 +73,20 @@ function Root() {
     }
   }, [account.status]);
 
+  useEffect(() => {
+    const handleUrl = (url: string | null) => {
+      const token = recoveryTokenFromUrl(url);
+      if (token) setRecoveryToken(token);
+    };
+    Linking.getInitialURL().then(handleUrl).catch(() => {});
+    const subscription = Linking.addEventListener('url', ({ url }) => handleUrl(url));
+    return () => subscription.remove();
+  }, []);
+
+  if (recoveryToken) {
+    return <ResetPasswordScreen token={recoveryToken} onDone={() => setRecoveryToken(null)} />;
+  }
+
   if (account.status !== 'authenticated') return <AuthScreen />;
 
   const screen = (() => {
@@ -79,6 +99,7 @@ function Root() {
             onStartSession={() => go('session')}
             onDetails={() => go('details')}
             onWorkouts={() => go('workouts')}
+            onAccount={() => go('account')}
           />
         );
       case 'session':
@@ -99,6 +120,10 @@ function Root() {
             onBack={() => go('home')}
           />
         );
+      case 'account':
+        return <AccountScreen onBack={() => go('home')} onPrivacy={() => go('privacy')} />;
+      case 'privacy':
+        return <PrivacyScreen onBack={() => go('account')} />;
     }
   })();
 
@@ -129,11 +154,13 @@ const styles = StyleSheet.create({
 
 export default function App() {
   return (
-    <AppStateProvider>
+    <GestureHandlerRootView style={styles.root}>
       <AccountStateProvider>
-        <StatusBar style="light" />
-        <Root />
+        <AppStateProvider>
+          <StatusBar style="light" />
+          <Root />
+        </AppStateProvider>
       </AccountStateProvider>
-    </AppStateProvider>
+    </GestureHandlerRootView>
   );
 }

@@ -18,7 +18,7 @@ screen or shared app state consumes it. Nothing is omitted from the client.
 Notes:
 - `bodyweight.list()` and `customExercises.list()` unwrap the backend's `{ entries|exercises, total }` envelope to a plain array per the app API contract; the endpoints are still called 1:1.
 - `overrides.update()` sends `pattern_override` as a **query** parameter — that is how the backend declares it (bare `str` param, overrides.py:198).
-- All mutating calls automatically attach the `X-CSRF-Token` header from the `algosplit_csrf_token` cookie when readable (double-submit CSRF is enforced for cookie-authenticated writes, `api/dependencies.py:175-177`).
+- Browser mutations attach the `X-CSRF-Token` header from the `algosplit_csrf_token` cookie. Native sessions use Keychain-backed Bearer tokens and automatically rotate them once on 401.
 
 ## misc — `backend/main.py`
 
@@ -36,11 +36,11 @@ Notes:
 | POST | `/auth/signup` | api/routes/auth.py:33 | `auth.signup(email, password)` | wired |
 | POST | `/auth/login` | api/routes/auth.py:124 | `auth.login(email, password)` | wired (dedicated app entry screen) |
 | GET | `/auth/user` | api/routes/auth.py:209 | `auth.me()` | wired |
-| POST | `/auth/refresh` | api/routes/auth.py:234 | `auth.refresh(refreshToken?)` | client-only |
-| POST | `/auth/forgot-password` | api/routes/auth.py:301 | `auth.forgotPassword(email)` | client-only |
-| POST | `/auth/reset-password` | api/routes/auth.py:329 | `auth.resetPassword(accessToken, newPassword)` | client-only |
+| POST | `/auth/refresh` | api/routes/auth.py:234 | `auth.refresh(refreshToken?)` | wired (automatic native and browser session rotation) |
+| POST | `/auth/forgot-password` | api/routes/auth.py:301 | `auth.forgotPassword(email)` | wired (sign-in recovery flow) |
+| POST | `/auth/reset-password` | api/routes/auth.py:329 | `auth.resetPassword(accessToken, newPassword)` | wired (web and app recovery-link screen) |
 | POST | `/auth/logout` | api/routes/auth.py:384 | `auth.logout()` | wired |
-| DELETE | `/auth/account` | api/routes/auth.py:421 | `auth.deleteAccount()` | client-only |
+| DELETE | `/auth/account` | api/routes/auth.py:421 | `auth.deleteAccount()` | wired (confirmed destructive action in Account) |
 
 ## splits — `backend/api/routes/splits.py` (prefix `/api/splits`)
 
@@ -50,7 +50,7 @@ Notes:
 | GET | `/api/splits?include_exercises=` | api/routes/splits.py:401 | `splits.list(includeExercises?)` | wired (analysis, Workouts list, and Start Workout plans) |
 | GET | `/api/splits/{split_id}` | api/routes/splits.py:457 | `splits.get(splitId)` | client-only |
 | PUT | `/api/splits/{split_id}` | api/routes/splits.py:512 | `splits.update(splitId, update)` | client-only |
-| PUT | `/api/splits/{split_id}/full` | api/routes/splits.py:584 | `splits.replace(splitId, split)` | wired (new/edit workout day builder) |
+| PUT | `/api/splits/{split_id}/full` | api/routes/splits.py:584 | `splits.replace(splitId, split)` | wired (new/edit workout day builder with drag order and resistance profiles) |
 | PUT | `/api/splits/{split_id}/exercises/batch` | api/routes/splits.py:734 | `splits.batchUpdateExercises(splitId, updates)` | client-only |
 | DELETE | `/api/splits/{split_id}` | api/routes/splits.py:832 | `splits.remove(splitId)` | client-only |
 | POST | `/api/splits/{split_id}/analyze?include_breakdowns=` | api/routes/splits.py:880 | `splits.analyze(splitId, includeBreakdowns?)` | client-only |
@@ -65,7 +65,7 @@ Notes:
 
 | Method | Path | Source | Client function | Status |
 | --- | --- | --- | --- | --- |
-| POST | `/api/workouts` | api/routes/workouts.py:152 | `workouts.create(payload)` | wired (validated weight/reps/RIR logger, persistent exercise notes, previous-session shadows) |
+| POST | `/api/workouts` | api/routes/workouts.py:152 | `workouts.create(payload)` | wired (validated logger, account-scoped durable outbox, visible idempotent retry) |
 | GET | `/api/workouts?limit=&offset=&days=` | api/routes/workouts.py:278 | `workouts.list(params?)` | wired (complete paginated History tab and Progress ranges) |
 | GET | `/api/workouts/summaries?limit=&offset=&days=` | api/routes/workouts.py:352 | `workouts.summaries(params?)` | client-only |
 | GET | `/api/workouts/dates?days=` | api/routes/workouts.py:432 | `workouts.dates(days?)` | client-only |
@@ -184,7 +184,7 @@ Notes:
 | Method | Path | Source | Client function | Status |
 | --- | --- | --- | --- | --- |
 | POST | `/api/analyze-split` | api/analysis_routes.py:94 | `analysis.analyzeSplit(request)` | wired |
-| POST | `/api/analyze-workouts?days=&end_date=&timezone_offset_minutes=&stimulus_duration=&maintenance_volume=&dataset=` | api/analysis_routes.py:157 | `analysis.analyzeWorkouts(params?)` | client-only |
+| POST | `/api/analyze-workouts?days=&end_date=&timezone_offset_minutes=&stimulus_duration=&maintenance_volume=&dataset=` | api/analysis_routes.py:157 | `analysis.analyzeWorkouts(params?)` | wired (Home stimulus body with account-scoped defaults) |
 | GET | `/api/muscle-regions` | api/analysis_routes.py:642 | `analysis.muscleRegions()` | client-only |
 | POST | `/api/parse-exercise` | api/analysis_routes.py:688 | `analysis.parseExercise(text)` | client-only |
 | GET | `/api/patterns` | api/analysis_routes.py:760 | `analysis.patterns()` | client-only |

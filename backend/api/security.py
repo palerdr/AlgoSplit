@@ -44,9 +44,22 @@ if AUTH_COOKIE_SAMESITE == "none" and not AUTH_COOKIE_SECURE:
 # access and refresh tokens out of localStorage and JavaScript. Native-only
 # deployments can explicitly set this to true and continue using SecureStore.
 AUTH_EXPOSE_ACCESS_TOKEN = _env_bool("AUTH_EXPOSE_ACCESS_TOKEN", not IS_PRODUCTION)
+NATIVE_CLIENT_HEADER_NAME = "X-AlgoSplit-Client"
 AUTH_REFRESH_COOKIE_MAX_AGE_SECONDS = int(
     os.getenv("AUTH_REFRESH_COOKIE_MAX_AGE_SECONDS", str(30 * 24 * 60 * 60))
 )
+
+
+def should_expose_auth_tokens(request: Request) -> bool:
+    """Expose JSON credentials only to the explicit native client flow.
+
+    Browser sessions continue to receive Secure, HttpOnly cookies even when
+    native token responses are enabled for the same deployment.
+    """
+    return (
+        AUTH_EXPOSE_ACCESS_TOKEN
+        and request.headers.get(NATIVE_CLIENT_HEADER_NAME, "").strip().lower() == "native"
+    )
 
 
 def _cookie_common() -> dict:

@@ -1,4 +1,10 @@
-import { loadAllWorkouts, splitToAnalysisRequest, workoutRangeKey } from '../src/api/accountData';
+import {
+  loadAllWorkouts,
+  localDateKey,
+  splitToAnalysisRequest,
+  workoutAnalysisNetStimulus,
+  workoutRangeKey,
+} from '../src/api/accountData';
 import {
   BackendError,
   SplitResponse,
@@ -12,6 +18,19 @@ function workout(id: string): WorkoutLogResponse {
 }
 
 describe('account split adapter', () => {
+  it('uses the client-local day for rolling workout analysis', () => {
+    expect(localDateKey(new Date(2026, 6, 15, 23, 30))).toBe('2026-07-15');
+  });
+
+  it('maps backend workout analysis into the account body stimulus source', () => {
+    expect(
+      workoutAnalysisNetStimulus([
+        { region_id: 'clavicular', net_stimulus: 1.7 },
+        { region_id: 'vasti', net_stimulus: -0.2 },
+      ])
+    ).toEqual({ clavicular: 1.7, vasti: -0.2 });
+  });
+
   it('preserves saved days, settings, exercises, and disables breakdowns', () => {
     const split = {
       id: 'split-1',

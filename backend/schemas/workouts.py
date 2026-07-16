@@ -85,6 +85,12 @@ class WorkoutExerciseResponse(BaseModel):
 class WorkoutLogCreate(BaseModel):
     """Request to log a completed workout"""
 
+    client_request_id: Optional[str] = Field(
+        None,
+        min_length=1,
+        max_length=100,
+        description="Stable client-generated idempotency key for upload retries",
+    )
     session_id: Optional[str] = Field(
         None, description="Optional reference to planned session"
     )

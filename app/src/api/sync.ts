@@ -1,17 +1,29 @@
 /**
- * Adapters between local state and the backend's workout-log contract, plus
- * the fire-and-forget auto-sync used when a workout finishes.
- *
- * The full generated client (./backend) is loaded lazily and defensively —
- * a missing or broken client must NEVER crash the app: local-first always.
+ * Adapters between local state and the backend's workout-log contract.
+ * Upload lifecycle, persistence, errors, and retries live in AppState so an
+ * authenticated write can never fail invisibly.
  */
 
-import type { WorkoutCreate } from './backend';
+import { backendConfigured, workouts, type WorkoutCreate, type WorkoutLogResponse } from './backend';
 import type { CompletedWorkout } from '../state/AppState';
+
+/** Requeue only failed uploads; synced records are never duplicated. */
+export function queueFailedWorkoutRetries(
+  history: readonly CompletedWorkout[]
+): CompletedWorkout[] {
+  return history.map((workout) =>
+    workout.syncStatus === 'failed'
+      ? { ...workout, syncStatus: 'pending', syncError: undefined }
+      : workout
+  );
+}
 
 /** Local CompletedWorkout → backend workout-log payload. */
 export function buildWorkoutPayload(workout: CompletedWorkout): WorkoutCreate {
   return {
+    ...(workout.localId ? { client_request_id: workout.localId } : {}),
+    ...(workout.sessionId ? { session_id: workout.sessionId } : {}),
+    ...(workout.splitId ? { split_id: workout.splitId } : {}),
     session_name: workout.name,
     completed_at: workout.date,
     duration_minutes: workout.durationMin,
@@ -28,19 +40,8 @@ export function buildWorkoutPayload(workout: CompletedWorkout): WorkoutCreate {
   };
 }
 
-/** Push a finished workout to the server if one is configured; never throws. */
-export function autoSyncWorkout(workout: CompletedWorkout): void {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const backend = require('./backend');
-    if (!backend?.backendConfigured?.()) return;
-    const result = backend?.workouts?.create?.(buildWorkoutPayload(workout));
-    if (result && typeof result.catch === 'function') {
-      result.catch(() => {
-        // offline / signed out — the workout is safe in local storage
-      });
-    }
-  } catch {
-    // client module absent — local-first, nothing to do
-  }
+/** Upload a completed workout; callers must surface and persist failures. */
+export async function syncWorkout(workout: CompletedWorkout): Promise<WorkoutLogResponse> {
+  if (!backendConfigured()) throw new Error('AlgoSplit backend is not configured');
+  return workouts.create(buildWorkoutPayload(workout));
 }

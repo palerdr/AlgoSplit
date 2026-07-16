@@ -1,6 +1,6 @@
 {
   "installCommand": "npm install",
-  "buildCommand": "npx expo export --platform web",
+  "buildCommand": "npm run build:web",
   "outputDirectory": "dist",
   "framework": null,
   "env": {
@@ -11,6 +11,7 @@
     { "source": "/auth/:path*", "destination": "https://algosplit.onrender.com/auth/:path*" },
     { "source": "/health", "destination": "https://algosplit.onrender.com/health" },
     { "source": "/keepalive", "destination": "https://algosplit.onrender.com/keepalive" },
+    { "source": "/privacy", "destination": "/privacy.html" },
     { "source": "/((?!api/|auth/).*)", "destination": "/index.html" }
   ],
   "headers": [

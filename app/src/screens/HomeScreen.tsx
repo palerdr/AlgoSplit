@@ -14,9 +14,10 @@ import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import BodyHeatmap from '../3d/BodyHeatmap';
 import Glass from '../ui/Glass';
-import { levelsFromNet, rollingNet, stimulusScore } from '../analysis/stimulus';
+import { levelsFromNet, stimulusScore } from '../analysis/stimulus';
 import { useAppState } from '../state/AppState';
 import { useAccountState } from '../state/AccountState';
+import { workoutAnalysisNetStimulus } from '../api/accountData';
 import {
   AccountWorkoutPlan,
   accountWorkoutGroups,
@@ -30,6 +31,7 @@ interface HomeScreenProps {
   onStartSession: () => void;
   onDetails: () => void;
   onWorkouts: () => void;
+  onAccount: () => void;
 }
 
 // Sheet progress (0 pill → 1 open sheet) past which releasing opens it.
@@ -49,13 +51,17 @@ export default function HomeScreen({
   onStartSession,
   onDetails,
   onWorkouts,
+  onAccount,
 }: HomeScreenProps) {
   const {
     recentStimulus,
     startPlannedSession,
     startFreeSession,
     lastCompleted,
-    history,
+    pendingSyncCount,
+    failedSyncCount,
+    syncingWorkoutId,
+    retryFailedWorkouts,
   } = useAppState();
   const account = useAccountState();
   const workoutGroups = React.useMemo(
@@ -67,17 +73,15 @@ export default function HomeScreen({
     workoutGroups.find((group) => group.id === selectedSplitId) ?? null;
   const { width, height } = useWindowDimensions();
 
-  const weekEffort = React.useMemo(() => {
-    const now = Date.now();
-    return stimulusScore(
-      rollingNet(
-        history.map((w) => ({
-          stimulus: w.stimulus,
-          daysAgo: (now - new Date(w.date).getTime()) / 86_400_000,
-        }))
-      )
-    );
-  }, [history]);
+  const accountStimulusNet = React.useMemo(
+    () =>
+      workoutAnalysisNetStimulus(account.recentStimulus.data?.muscles ?? []),
+    [account.recentStimulus.data]
+  );
+  const weekEffort = React.useMemo(
+    () => stimulusScore(account.recentStimulus.data?.muscles ?? []),
+    [account.recentStimulus.data]
+  );
 
   const SHEET_HEIGHT = Math.min(height * 0.64, 580);
   const OPEN_DRAG = SHEET_HEIGHT * 0.5; // finger travel that maps to fully open
@@ -142,7 +146,11 @@ export default function HomeScreen({
   }, []);
 
   const bodyLevels =
-    bodySource === 'session' ? levelsFromNet(lastCompleted?.stimulus ?? {}) : recentStimulus;
+    bodySource === 'session'
+      ? levelsFromNet(lastCompleted?.stimulus ?? {})
+      : account.status === 'authenticated'
+        ? levelsFromNet(accountStimulusNet)
+        : recentStimulus;
 
   // One value drives the morph: the glass pill stretches into the sheet.
   // Height/position are layout props, so this value stays JS-driven.
@@ -275,7 +283,57 @@ export default function HomeScreen({
             <Text style={styles.smallButtonText}>Workouts</Text>
           </Glass>
         </Pressable>
+        <Pressable onPress={() => { tick(); onAccount(); }}>
+          <Glass style={styles.smallButton} interactive>
+            <Text style={styles.smallButtonText}>Account</Text>
+          </Glass>
+        </Pressable>
       </Animated.View>
+
+      {account.recentStimulus.error && (
+        <Animated.View
+          style={[
+            styles.stimulusErrorWrap,
+            {
+              transform: [
+                { translateY: uiAnim.interpolate({ inputRange: [0, 1], outputRange: [-130, 0] }) },
+              ],
+            },
+          ]}
+        >
+          <Pressable onPress={() => account.refreshStimulus()}>
+            <Glass style={styles.syncBanner} interactive>
+              <Text style={[styles.syncText, styles.syncError]}>Stimulus could not load · Retry</Text>
+            </Glass>
+          </Pressable>
+        </Animated.View>
+      )}
+
+      {(failedSyncCount > 0 || pendingSyncCount > 0 || syncingWorkoutId) && (
+        <Animated.View
+          style={[
+            styles.syncBannerWrap,
+            {
+              transform: [
+                { translateY: uiAnim.interpolate({ inputRange: [0, 1], outputRange: [-130, 0] }) },
+              ],
+            },
+          ]}
+        >
+          <Pressable
+            onPress={failedSyncCount > 0 ? retryFailedWorkouts : undefined}
+            disabled={failedSyncCount === 0}
+          >
+            <Glass style={styles.syncBanner} interactive={failedSyncCount > 0}>
+              <Text style={[styles.syncText, failedSyncCount > 0 && styles.syncError]}>
+                {failedSyncCount > 0
+                  ? `${failedSyncCount} workout upload failed · Retry`
+                  : 'Syncing workout…'}
+              </Text>
+            </Glass>
+          </Pressable>
+        </Animated.View>
+      )}
 
       {/* Scrim behind the sheet; tap to dismiss */}
       <Animated.View
@@ -522,10 +580,37 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
+  syncBannerWrap: {
+    position: 'absolute',
+    top: 116,
+    left: 24,
+    right: 24,
+    alignItems: 'center',
+  },
+  stimulusErrorWrap: {
+    position: 'absolute',
+    top: 116,
+    left: 24,
+    right: 24,
+    alignItems: 'center',
+  },
+  syncBanner: {
+    borderRadius: 18,
+    paddingVertical: 9,
+    paddingHorizontal: 15,
+  },
+  syncText: {
+    color: theme.textDim,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  syncError: {
+    color: '#E27878',
+  },
   smallButton: {
     borderRadius: 22,
     paddingVertical: 11,
-    paddingHorizontal: 22,
+    paddingHorizontal: 16,
   },
   smallButtonText: {
     color: theme.text,

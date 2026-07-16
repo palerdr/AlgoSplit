@@ -1,6 +1,9 @@
 import type { ExerciseResponse, SessionResponse, SplitResponse } from '../src/api/backend';
 import {
   newWorkoutDraft,
+  normalizeResistanceProfile,
+  parseWorkoutDayInput,
+  reorderWorkoutDraftExercises,
   splitWithWorkoutDraft,
   workoutDraftError,
   workoutDraftFromSession,
@@ -53,10 +56,27 @@ function split(): SplitResponse {
 }
 
 describe('workout split editing', () => {
+  it('allows the day field to be cleared and entered again', () => {
+    const cleared = parseWorkoutDayInput('');
+    expect(cleared.text).toBe('');
+    expect(Number.isNaN(cleared.dayNumber)).toBe(true);
+    expect(parseWorkoutDayInput('Day 4')).toEqual({ text: '4', dayNumber: 4 });
+  });
+
+  it('reorders exercises by drag indices without mutating the source', () => {
+    const draft = workoutDraftFromSession('split-1', split().sessions[0]);
+    const reordered = reorderWorkoutDraftExercises(draft.exercises, 0, 1);
+
+    expect(reordered.map((item) => item.name)).toEqual(['Barbell Row', 'Bench Press']);
+    expect(draft.exercises.map((item) => item.name)).toEqual(['Bench Press', 'Barbell Row']);
+  });
+
   it('hydrates exercises in persisted order', () => {
     const draft = workoutDraftFromSession('split-1', split().sessions[0]);
 
     expect(draft.exercises.map((item) => item.name)).toEqual(['Bench Press', 'Barbell Row']);
+    expect(draft.exercises.map((item) => item.resistanceProfile)).toEqual(['mid', 'mid']);
+    expect(normalizeResistanceProfile('descending')).toBe('descending');
   });
 
   it('replaces one workout while preserving split settings and other days', () => {
@@ -87,7 +107,7 @@ describe('workout split editing', () => {
       name: 'Upper Revised',
       day_number: 1,
       exercises: [
-        { name: 'Barbell Row', sets: 4, unilateral: false, resistance_profile: null },
+        { name: 'Barbell Row', sets: 4, unilateral: false, resistance_profile: 'mid' },
         { name: 'Lateral Raise', sets: 3, unilateral: false, resistance_profile: 'ascending' },
       ],
     });

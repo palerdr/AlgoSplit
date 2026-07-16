@@ -7,28 +7,47 @@
  *   program sessions, program diagnostics, periodization, meso templates,
  *   bodyweight, analysis, plus the root/health/keepalive endpoints.
  *
- * Auth model: the backend sets HttpOnly JWT cookies on login/signup
- * (backend/api/security.py:61-96), so every request here uses
- * `credentials: 'include'`. Cookie-authenticated writes additionally require
- * double-submit CSRF: the non-HttpOnly `algosplit_csrf_token` cookie must be
- * echoed in the `X-CSRF-Token` header (backend/api/security.py:106-117,
- * backend/api/dependencies.py:175-177). On web we read that cookie from
- * `document.cookie` automatically; on native, cookies are managed by the
- * platform cookie jar and are not readable from JS — mutating calls will be
- * rejected with 403 unless the backend runs with header-based bearer auth.
+ * Auth is platform-aware. Web keeps access/refresh tokens in Secure, HttpOnly
+ * cookies and echoes the readable CSRF cookie on writes. Native receives
+ * tokens only when it identifies itself to the backend, stores them in the
+ * platform keychain through SecureStore, and authenticates with Bearer.
  *
  * All field names are exactly as the API serializes them (snake_case).
  * Datetimes/date fields are ISO-8601 strings on the wire.
  */
 
-// Defined locally (not imported from ./algosplit) so this module stays
-// dependency-free per the API-layer contract.
-const API_URL =
-  (process.env.EXPO_PUBLIC_ALGOSPLIT_API as string | undefined)?.replace(/\/$/, '') ?? null;
+import { Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 
-/** True when EXPO_PUBLIC_ALGOSPLIT_API is set and the backend can be called. */
+type RuntimePlatform = 'web' | 'native';
+
+/** Resolve an API URL without treating a deliberate same-origin web value as missing. */
+export function resolveBackendUrl(
+  configuredValue: string | undefined,
+  platform: RuntimePlatform,
+  development: boolean
+): string | null {
+  if (platform === 'web' && !development) return '';
+  if (configuredValue !== undefined) {
+    const normalized = configuredValue.trim().replace(/\/$/, '');
+    return normalized.length > 0 || platform === 'web' ? normalized : null;
+  }
+  if (development) return 'http://localhost:8000';
+  return platform === 'web' ? '' : null;
+}
+
+const IS_WEB = Platform.OS === 'web';
+const IS_DEVELOPMENT =
+  typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production';
+const API_URL = resolveBackendUrl(
+  process.env.EXPO_PUBLIC_ALGOSPLIT_API as string | undefined,
+  IS_WEB ? 'web' : 'native',
+  IS_DEVELOPMENT
+);
+
+/** True when the backend can be called, including same-origin production web. */
 export function backendConfigured(): boolean {
-  return API_URL !== null && API_URL.length > 0;
+  return API_URL !== null;
 }
 
 /** Error thrown for any non-2xx backend response (or when unconfigured, status 0). */
@@ -49,6 +68,56 @@ export class BackendError extends Error {
 /** CSRF cookie/header names — defaults in backend/api/security.py:24-25. */
 const CSRF_COOKIE_NAME = 'algosplit_csrf_token';
 const CSRF_HEADER_NAME = 'X-CSRF-Token';
+const NATIVE_CLIENT_HEADER_NAME = 'X-AlgoSplit-Client';
+const ACCESS_TOKEN_KEY = 'algosplit_access_token';
+const REFRESH_TOKEN_KEY = 'algosplit_refresh_token';
+
+const SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+};
+
+/** Authentication credentials never enter web-accessible storage. */
+export const nativeTokenStore = {
+  async getAccessToken(): Promise<string | null> {
+    if (IS_WEB) return null;
+    try {
+      return await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+    } catch {
+      return null;
+    }
+  },
+  async getRefreshToken(): Promise<string | null> {
+    if (IS_WEB) return null;
+    try {
+      return await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
+    } catch {
+      return null;
+    }
+  },
+  async save(accessToken: string, refreshToken: string): Promise<void> {
+    if (IS_WEB) return;
+    try {
+      await Promise.all([
+        SecureStore.setItemAsync(ACCESS_TOKEN_KEY, accessToken, SECURE_STORE_OPTIONS),
+        SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken, SECURE_STORE_OPTIONS),
+      ]);
+    } catch (error) {
+      await this.clear();
+      throw error;
+    }
+  },
+  async clear(): Promise<void> {
+    if (IS_WEB) return;
+    try {
+      await Promise.all([
+        SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY),
+        SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
+      ]);
+    } catch {
+      // A local logout must remain possible even when keychain access fails.
+    }
+  },
+};
 
 /** Read the double-submit CSRF cookie on web; null on native (no document). */
 function readCsrfToken(): string | null {
@@ -81,27 +150,27 @@ function qs(params: Record<string, QueryValue>): string {
  * - Throws BackendError (with `status` and parsed `detail`) on !ok.
  * - 204 / empty bodies resolve to undefined.
  */
-async function request<T>(method: HttpMethod, path: string, body?: unknown): Promise<T> {
-  if (!API_URL) {
+const AUTH_ROUTES_WITHOUT_REFRESH = new Set([
+  '/auth/login',
+  '/auth/signup',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/auth/refresh',
+]);
+
+async function storeNativeAuthResponse(response: AuthResponse): Promise<void> {
+  if (IS_WEB) return;
+  if (!response.access_token || !response.refresh_token) {
+    await nativeTokenStore.clear();
     throw new BackendError(
       0,
-      'AlgoSplit backend not configured (set EXPO_PUBLIC_ALGOSPLIT_API)'
+      'The backend did not return native session credentials. Enable native token responses and try again.'
     );
   }
+  await nativeTokenStore.save(response.access_token, response.refresh_token);
+}
 
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
-  if (method !== 'GET' && method !== 'HEAD') {
-    const csrf = readCsrfToken();
-    if (csrf) headers[CSRF_HEADER_NAME] = csrf;
-  }
-
-  const res = await fetch(`${API_URL}${path}`, {
-    method,
-    headers,
-    credentials: 'include', // backend auth is an HttpOnly JWT cookie
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-
+async function parseResponse<T>(res: Response, method: HttpMethod, path: string): Promise<T> {
   if (!res.ok) {
     let detail: unknown;
     let message = `${method} ${path} → HTTP ${res.status}`;
@@ -109,7 +178,7 @@ async function request<T>(method: HttpMethod, path: string, body?: unknown): Pro
       detail = await res.json();
       if (detail && typeof detail === 'object' && 'detail' in detail) {
         const d = (detail as { detail?: unknown }).detail;
-        if (typeof d === 'string') message = `${message}: ${d}`;
+        if (typeof d === 'string') message = d;
       }
     } catch {
       // Non-JSON error body; keep the status-only message.
@@ -120,6 +189,103 @@ async function request<T>(method: HttpMethod, path: string, body?: unknown): Pro
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   return (text.length > 0 ? JSON.parse(text) : undefined) as T;
+}
+
+type RefreshOutcome = 'refreshed' | 'invalid';
+let refreshPromise: Promise<RefreshOutcome> | null = null;
+
+async function refreshCredentials(): Promise<RefreshOutcome> {
+  if (API_URL === null) return 'invalid';
+  const refreshToken = await nativeTokenStore.getRefreshToken();
+  if (!IS_WEB && !refreshToken) {
+    await nativeTokenStore.clear();
+    return 'invalid';
+  }
+
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (!IS_WEB) headers[NATIVE_CLIENT_HEADER_NAME] = 'native';
+  if (IS_WEB) {
+    const csrf = readCsrfToken();
+    if (csrf) headers[CSRF_HEADER_NAME] = csrf;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/auth/refresh`, {
+      method: 'POST',
+      headers,
+      credentials: IS_WEB ? 'include' : 'omit',
+      body: !IS_WEB ? JSON.stringify({ refresh_token: refreshToken }) : undefined,
+    });
+  } catch (error) {
+    throw new BackendError(
+      0,
+      error instanceof Error ? error.message : 'Could not refresh the account session'
+    );
+  }
+
+  if ([400, 401, 403].includes(res.status)) {
+    await nativeTokenStore.clear();
+    return 'invalid';
+  }
+  const response = await parseResponse<AuthResponse>(res, 'POST', '/auth/refresh');
+  await storeNativeAuthResponse(response);
+  return 'refreshed';
+}
+
+async function request<T>(
+  method: HttpMethod,
+  path: string,
+  body?: unknown,
+  allowRefresh = true
+): Promise<T> {
+  if (API_URL === null) {
+    throw new BackendError(
+      0,
+      'AlgoSplit backend not configured (set EXPO_PUBLIC_ALGOSPLIT_API)'
+    );
+  }
+
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  if (!IS_WEB) {
+    headers[NATIVE_CLIENT_HEADER_NAME] = 'native';
+    const accessToken = await nativeTokenStore.getAccessToken();
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  } else if (method !== 'GET' && method !== 'HEAD') {
+    const csrf = readCsrfToken();
+    if (csrf) headers[CSRF_HEADER_NAME] = csrf;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      method,
+      headers,
+      credentials: IS_WEB ? 'include' : 'omit',
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (error) {
+    throw new BackendError(
+      0,
+      error instanceof Error ? error.message : 'Could not reach the AlgoSplit backend'
+    );
+  }
+
+  if (
+    res.status === 401 &&
+    allowRefresh &&
+    !AUTH_ROUTES_WITHOUT_REFRESH.has(path)
+  ) {
+    if (!refreshPromise) {
+      refreshPromise = refreshCredentials().finally(() => {
+        refreshPromise = null;
+      });
+    }
+    const outcome = await refreshPromise;
+    if (outcome === 'refreshed') return request<T>(method, path, body, false);
+  }
+
+  return parseResponse<T>(res, method, path);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -580,6 +746,8 @@ export interface WorkoutExerciseCreate {
  * PUT /api/workouts/{id}. Exported as `WorkoutCreate` per the app API contract.
  */
 export interface WorkoutCreate {
+  /** Stable native idempotency key for durable upload retries. */
+  client_request_id?: string | null;
   /** Optional reference to a planned split session. */
   session_id?: string | null;
   split_id?: string | null;
@@ -1430,15 +1598,19 @@ export interface KeepaliveResponse {
 
 export const auth = {
   /** POST /auth/signup — create an account (api/routes/auth.py:33). 201 → AuthResponse; also sets auth cookies. */
-  signup(email: string, password: string): Promise<AuthResponse> {
+  async signup(email: string, password: string): Promise<AuthResponse> {
     const body: SignUpRequest = { email, password };
-    return request<AuthResponse>('POST', '/auth/signup', body);
+    const response = await request<AuthResponse>('POST', '/auth/signup', body);
+    await storeNativeAuthResponse(response);
+    return response;
   },
 
   /** POST /auth/login — authenticate (api/routes/auth.py:124). Sets auth cookies. */
-  login(email: string, password: string): Promise<AuthResponse> {
+  async login(email: string, password: string): Promise<AuthResponse> {
     const body: LoginRequest = { email, password };
-    return request<AuthResponse>('POST', '/auth/login', body);
+    const response = await request<AuthResponse>('POST', '/auth/login', body);
+    await storeNativeAuthResponse(response);
+    return response;
   },
 
   /** GET /auth/user — current user info, i.e. "me" (api/routes/auth.py:209). */
@@ -1447,10 +1619,12 @@ export const auth = {
   },
 
   /** POST /auth/refresh — rotate tokens (api/routes/auth.py:234). Cookie clients send no body; native clients pass the refresh token. */
-  refresh(refreshToken?: string): Promise<AuthResponse> {
+  async refresh(refreshToken?: string): Promise<AuthResponse> {
     const body: RefreshRequest | undefined =
       refreshToken !== undefined ? { refresh_token: refreshToken } : undefined;
-    return request<AuthResponse>('POST', '/auth/refresh', body);
+    const response = await request<AuthResponse>('POST', '/auth/refresh', body);
+    await storeNativeAuthResponse(response);
+    return response;
   },
 
   /** POST /auth/forgot-password — request a reset email (api/routes/auth.py:301). Always 200. */
@@ -1466,13 +1640,18 @@ export const auth = {
   },
 
   /** POST /auth/logout — revoke the session and clear cookies (api/routes/auth.py:384). 204. */
-  logout(): Promise<void> {
-    return request<void>('POST', '/auth/logout');
+  async logout(): Promise<void> {
+    try {
+      await request<void>('POST', '/auth/logout');
+    } finally {
+      await nativeTokenStore.clear();
+    }
   },
 
   /** DELETE /auth/account — permanently delete the account and all data (api/routes/auth.py:421). 204. */
-  deleteAccount(): Promise<void> {
-    return request<void>('DELETE', '/auth/account');
+  async deleteAccount(): Promise<void> {
+    await request<void>('DELETE', '/auth/account');
+    await nativeTokenStore.clear();
   },
 };
 
