@@ -12,7 +12,10 @@ import {
 } from 'react-native';
 import { useAccountState } from '../state/AccountState';
 import { authErrorMessageForDisplay, type SocialProvider } from '../api/backend';
-import { isSocialAuthCancellation } from '../auth/socialAuth';
+import {
+  isSocialAuthCancellation,
+  socialAuthErrorMessageForDisplay,
+} from '../auth/socialAuth';
 import { useAppState } from '../state/AppState';
 import { theme } from '../theme';
 import FadeIn from '../ui/FadeIn';
@@ -55,7 +58,12 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
       await account.linkIdentity(provider);
     } catch (cause) {
       if (!isSocialAuthCancellation(cause)) {
-        setIdentityError(authErrorMessageForDisplay(cause, 'Could not connect this account.'));
+        setIdentityError(
+          authErrorMessageForDisplay(
+            cause,
+            socialAuthErrorMessageForDisplay(cause, 'Could not connect this account.')
+          )
+        );
       }
     } finally {
       setIdentityBusy(null);

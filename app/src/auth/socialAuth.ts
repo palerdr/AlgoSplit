@@ -13,6 +13,7 @@ const TEMPORARY_STORAGE_KEY = 'algosplit_oauth_temporary_v1';
 const OAUTH_STORAGE_KEY = 'algosplit.oauth.bridge';
 const OAUTH_CALLBACK_PATH = 'oauth/callback';
 const IDENTITY_CALLBACK_PATH = 'identity/callback';
+const WEB_AUTH_WINDOW_NAME = 'algosplit-social-auth';
 
 type CallbackKind = 'oauth' | 'identity';
 type DevicePlatform = 'ios' | 'android' | 'web' | string;
@@ -30,6 +31,69 @@ interface SessionStorageLike {
 // This client is intentionally disposable. Once the API has adopted a social
 // session, dropping the bridge client releases its in-memory OAuth session too.
 let oauthClient: ReturnType<typeof createClient> | null = null;
+let preparedWebAuthWindow: Window | null = null;
+
+/**
+ * Open the web auth window while the browser still considers the provider
+ * button click a direct user gesture. Supabase creates its PKCE URL
+ * asynchronously, which is too late for popup blockers on many browsers.
+ */
+export function prepareWebAuthSession(provider: SocialProvider): void {
+  if (Platform.OS !== 'web') return;
+  const browserWindow = (globalThis as { window?: Window }).window;
+  if (!browserWindow) {
+    throw new SocialAuthError('Social sign-in needs a browser window. Please try again.');
+  }
+  if (preparedWebAuthWindow && !preparedWebAuthWindow.closed) {
+    preparedWebAuthWindow.close();
+  }
+  const popup = browserWindow.open(
+    '',
+    WEB_AUTH_WINDOW_NAME,
+    'popup=yes,width=500,height=650,resizable=yes,scrollbars=yes'
+  );
+  if (!popup) {
+    throw new SocialAuthError('Allow pop-ups for AlgoSplit, then try again.');
+  }
+  preparedWebAuthWindow = popup;
+  try {
+    popup.document.title = `Opening ${provider === 'google' ? 'Google' : 'Apple'} sign-in`;
+    popup.document.body.style.background = '#090b10';
+    popup.document.body.style.color = '#f5f7fa';
+    popup.document.body.style.fontFamily = 'system-ui, sans-serif';
+    popup.document.body.style.padding = '32px';
+    popup.document.body.textContent = `Opening ${provider === 'google' ? 'Google' : 'Apple'}…`;
+  } catch {
+    // The placeholder is cosmetic; navigation remains safe without it.
+  }
+  popup.focus();
+}
+
+export function cancelPreparedWebAuthSession(): void {
+  if (preparedWebAuthWindow && !preparedWebAuthWindow.closed) {
+    preparedWebAuthWindow.close();
+  }
+  preparedWebAuthWindow = null;
+}
+
+async function openPreparedAuthSession(
+  authorizationUrl: string,
+  redirectTo: string
+): Promise<WebBrowser.WebBrowserAuthSessionResult> {
+  if (Platform.OS !== 'web') {
+    return WebBrowser.openAuthSessionAsync(authorizationUrl, redirectTo);
+  }
+  if (!preparedWebAuthWindow || preparedWebAuthWindow.closed) {
+    throw new SocialAuthError('The sign-in window was closed. Please try again.');
+  }
+  // Navigate the already-approved window before Expo attaches its secure
+  // callback listener. Reusing the same named window avoids popup blocking.
+  preparedWebAuthWindow.location.assign(authorizationUrl);
+  preparedWebAuthWindow.focus();
+  return WebBrowser.openAuthSessionAsync(authorizationUrl, redirectTo, {
+    windowName: WEB_AUTH_WINDOW_NAME,
+  });
+}
 
 function sessionStorageOrNull(): SessionStorageLike | null {
   try {
@@ -92,6 +156,7 @@ export const temporaryOAuthStorage = {
 /** Delete the PKCE verifier and any transient Supabase session immediately. */
 export async function clearTemporaryOAuthCredentials(): Promise<void> {
   oauthClient = null;
+  cancelPreparedWebAuthSession();
   try {
     if (Platform.OS === 'web') {
       sessionStorageOrNull()?.removeItem(TEMPORARY_STORAGE_KEY);
@@ -259,6 +324,7 @@ function handoffFromSession(session: {
 }
 
 async function socialOAuthSession(provider: SocialProvider): Promise<OAuthSessionCompleteRequest> {
+  prepareWebAuthSession(provider);
   const redirectTo = oauthCallbackUrl();
   const client = getOAuthClient();
   const { data, error } = await client.auth.signInWithOAuth({
@@ -272,7 +338,7 @@ async function socialOAuthSession(provider: SocialProvider): Promise<OAuthSessio
     throw new SocialAuthError('Could not start social sign-in. Please try again.');
   }
 
-  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+  const result = await openPreparedAuthSession(data.url, redirectTo);
   if (result.type === 'cancel' || result.type === 'dismiss') {
     throw new SocialAuthCancelledError();
   }
@@ -353,15 +419,19 @@ export async function socialSessionForProvider(
 /** Open the server-issued identity-link URL and verify it returned to the expected callback. */
 export async function completeIdentityLink(authorizationUrl: string): Promise<void> {
   const redirectTo = identityCallbackUrl();
-  const result = await WebBrowser.openAuthSessionAsync(authorizationUrl, redirectTo);
-  if (result.type === 'cancel' || result.type === 'dismiss') {
-    throw new SocialAuthCancelledError();
-  }
-  if (result.type !== 'success' || !isExpectedCallback(result.url, redirectTo)) {
-    throw new SocialAuthError('Account connection did not return to AlgoSplit. Please try again.');
-  }
-  if (callbackErrorFromUrl(result.url)) {
-    throw new SocialAuthError('Account connection was not completed. Please try again.');
+  try {
+    const result = await openPreparedAuthSession(authorizationUrl, redirectTo);
+    if (result.type === 'cancel' || result.type === 'dismiss') {
+      throw new SocialAuthCancelledError();
+    }
+    if (result.type !== 'success' || !isExpectedCallback(result.url, redirectTo)) {
+      throw new SocialAuthError('Account connection did not return to AlgoSplit. Please try again.');
+    }
+    if (callbackErrorFromUrl(result.url)) {
+      throw new SocialAuthError('Account connection was not completed. Please try again.');
+    }
+  } finally {
+    cancelPreparedWebAuthSession();
   }
 }
 

@@ -39,6 +39,27 @@ const mockOpenAuthSessionAsync = WebBrowser.openAuthSessionAsync as jest.Mock;
 const mockMaybeCompleteAuthSession = WebBrowser.maybeCompleteAuthSession as jest.Mock;
 const mockCreateClient = createClient as jest.Mock;
 
+function mockPopupWindow() {
+  const popup = {
+    closed: false,
+    close: jest.fn(function (this: { closed: boolean }) {
+      this.closed = true;
+    }),
+    focus: jest.fn(),
+    location: { assign: jest.fn() },
+    document: {
+      title: '',
+      body: { style: {}, textContent: '' },
+    },
+  };
+  Object.defineProperty(window, 'open', {
+    configurable: true,
+    writable: true,
+    value: jest.fn(() => popup as unknown as Window),
+  });
+  return popup;
+}
+
 describe('social auth bridge', () => {
   beforeEach(() => {
     sessionValues.clear();
@@ -55,6 +76,11 @@ describe('social auth bridge', () => {
         removeItem: (key: string) => sessionValues.delete(key),
       },
     });
+    mockPopupWindow();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it('shows Apple only outside Android and always shows Google', () => {
@@ -105,7 +131,22 @@ describe('social auth bridge', () => {
     await temporaryOAuthStorage.setItem('algosplit.oauth.bridge-code-verifier', 'verifier');
 
     await expect(socialSessionForProvider('google')).rejects.toBeInstanceOf(SocialAuthCancelledError);
+    expect(window.open).toHaveBeenCalledTimes(1);
+    expect(mockOpenAuthSessionAsync).toHaveBeenCalledWith(
+      'https://project.supabase.co/auth/v1/authorize?provider=google',
+      'https://app.example/oauth/callback',
+      { windowName: 'algosplit-social-auth' }
+    );
     expect(sessionValues.has('algosplit_oauth_temporary_v1')).toBe(false);
+  });
+
+  it('reports when the browser blocks the synchronously opened auth window', async () => {
+    (window.open as jest.Mock).mockReturnValue(null);
+
+    await expect(socialSessionForProvider('google')).rejects.toThrow(
+      'Allow pop-ups for AlgoSplit, then try again.'
+    );
+    expect(mockOpenAuthSessionAsync).not.toHaveBeenCalled();
   });
 
   it('reports a provider callback error without exposing it as a session', async () => {

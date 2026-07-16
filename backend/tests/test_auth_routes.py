@@ -480,6 +480,55 @@ def test_connected_identities_lists_methods_and_brokers_trusted_link_url(client,
     assert fake_supabase.auth.set_session_calls == [("token-user-123", "")]
 
 
+def test_identity_link_accepts_exact_google_and_apple_authorization_urls(
+    client, fake_supabase
+):
+    urls = {
+        "google": "https://accounts.google.com/o/oauth2/v2/auth?client_id=test",
+        "apple": "https://appleid.apple.com/auth/authorize?client_id=test",
+    }
+
+    def direct_provider_url(payload):
+        return type("OAuthResponse", (), {"url": urls[payload["provider"]]})()
+
+    fake_supabase.auth.link_identity = direct_provider_url
+
+    google = client.post("/auth/identities/google/link", json={"platform": "web"})
+    apple = client.post("/auth/identities/apple/link", json={"platform": "web"})
+
+    assert google.status_code == 200
+    assert google.json()["url"] == urls["google"]
+    assert apple.status_code == 200
+    assert apple.json()["url"] == urls["apple"]
+
+
+def test_identity_link_derives_production_web_callback_from_single_frontend_origin(
+    monkeypatch,
+):
+    monkeypatch.setattr(auth_routes, "IS_PRODUCTION", True)
+    monkeypatch.delenv("AUTH_IDENTITY_WEB_CALLBACK_URL", raising=False)
+    monkeypatch.setenv("FRONTEND_URL", "https://algo-split.vercel.app")
+
+    callback = auth_routes._server_controlled_identity_callback(
+        auth_routes.AuthClientPlatform.WEB
+    )
+
+    assert callback == "https://algo-split.vercel.app/identity/callback"
+
+
+def test_identity_link_rejects_mismatched_or_lookalike_provider_url(client, fake_supabase):
+    fake_supabase.auth.link_identity = lambda _payload: type(
+        "OAuthResponse",
+        (),
+        {"url": "https://accounts.google.com.evil.example/o/oauth2/v2/auth"},
+    )()
+
+    response = client.post("/auth/identities/google/link", json={"platform": "web"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Account service is temporarily unavailable. Please try again later."
+
+
 def test_identity_link_rejects_existing_provider_and_untrusted_callback(client, fake_supabase, monkeypatch):
     fake_supabase.auth.current_user.identities.append(_fake_identity("google", "tester@example.com"))
     existing = client.post("/auth/identities/google/link", json={"platform": "native"})

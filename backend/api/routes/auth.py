@@ -237,13 +237,27 @@ def _server_controlled_identity_callback(platform: AuthClientPlatform) -> str:
     )
     callback_url = os.getenv(env_name, "").strip()
     if not callback_url:
-        if IS_PRODUCTION:
-            logger.error("auth_event=identity_link result=missing_callback_config callback=%s", env_name)
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=AUTH_SERVICE_UNAVAILABLE,
-            )
-        callback_url = default
+        if platform == AuthClientPlatform.WEB:
+            # The callback is fully determined by the already trusted frontend
+            # origin, so a second production env variable is not required when
+            # exactly one frontend origin is configured.
+            frontend_origins = _configured_frontend_origins()
+            if len(frontend_origins) == 1:
+                callback_url = f"{next(iter(frontend_origins))}{_IDENTITY_CALLBACK_PATH}"
+            elif IS_PRODUCTION:
+                logger.error(
+                    "auth_event=identity_link result=missing_callback_config callback=%s",
+                    env_name,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=AUTH_SERVICE_UNAVAILABLE,
+                )
+            else:
+                callback_url = default
+        else:
+            # The native callback is a fixed app-owned deep link.
+            callback_url = default
 
     parsed = urlparse(callback_url)
     if (
@@ -307,14 +321,28 @@ def _auth_client_for_identity_change(current_user: AuthUser):
     return auth_client
 
 
-def _is_trusted_provider_authorization_url(value: str) -> bool:
+def _is_trusted_provider_authorization_url(value: str, provider: SocialProvider) -> bool:
     expected = urlparse(SUPABASE_URL)
     candidate = urlparse(value)
-    if candidate.netloc != expected.netloc or not candidate.path.startswith("/auth/v1/"):
+    if candidate.username or candidate.password or candidate.fragment:
         return False
-    if candidate.scheme == "https":
-        return True
-    return not IS_PRODUCTION and candidate.scheme == expected.scheme == "http"
+    if candidate.netloc == expected.netloc and candidate.path.startswith("/auth/v1/"):
+        if candidate.scheme == "https":
+            return True
+        return not IS_PRODUCTION and candidate.scheme == expected.scheme == "http"
+
+    # With skip_http_redirect enabled, Supabase returns the provider's final
+    # authorization URL rather than another Supabase URL. Trust only the exact
+    # OAuth hosts and paths used by providers AlgoSplit supports.
+    if candidate.scheme != "https" or candidate.port is not None:
+        return False
+    if provider == SocialProvider.GOOGLE:
+        return candidate.hostname == "accounts.google.com" and candidate.path.startswith(
+            "/o/oauth2/"
+        )
+    if provider == SocialProvider.APPLE:
+        return candidate.hostname == "appleid.apple.com" and candidate.path == "/auth/authorize"
+    return False
 
 
 def _provider_error_text(error: Exception) -> str:
@@ -728,7 +756,7 @@ def link_identity(
             detail=AUTH_SERVICE_UNAVAILABLE,
         )
 
-    if not _is_trusted_provider_authorization_url(authorization_url):
+    if not _is_trusted_provider_authorization_url(authorization_url, provider):
         logger.error(
             "auth_event=identity_link result=untrusted_provider_url provider=%s",
             provider.value,

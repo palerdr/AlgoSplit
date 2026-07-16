@@ -31,8 +31,10 @@ import {
 } from '../api/backend';
 import {
   clearTemporaryOAuthCredentials,
+  cancelPreparedWebAuthSession,
   completeIdentityLink,
   isSocialAuthCancellation,
+  prepareWebAuthSession,
   socialSessionForProvider,
 } from '../auth/socialAuth';
 import {
@@ -860,6 +862,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   const linkIdentity = useCallback(
     async (provider: SocialProvider) => {
       try {
+        prepareWebAuthSession(provider);
         const response = await auth.linkIdentity(
           provider,
           Platform.OS === 'web' ? 'web' : 'native'
@@ -867,6 +870,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
         await completeIdentityLink(response.url);
         await refreshIdentities();
       } catch (error) {
+        cancelPreparedWebAuthSession();
         if (isSignedOutError(error)) markSignedOut();
         throw error;
       }

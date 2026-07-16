@@ -101,7 +101,7 @@ class IdentityListResponse(BaseModel):
 
 
 class IdentityLinkResponse(BaseModel):
-    """A trusted Supabase authorization URL for a social identity link."""
+    """A trusted Supabase or provider authorization URL for an identity link."""
 
     url: str
 

@@ -282,7 +282,7 @@ export default function AuthScreen() {
           >
             <Text style={styles.switchText}>
               {mode === 'login'
-                ? 'New here? Create an account'
+                ? 'Create an account'
                 : mode === 'signup'
                   ? 'Already have an account? Sign in'
                   : 'Back to sign in'}
