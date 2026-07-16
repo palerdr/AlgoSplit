@@ -15,7 +15,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 
 os.environ.setdefault("SUPABASE_URL", "http://localhost:54321")
-os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon-key")
+os.environ.setdefault("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test-key")
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-jwt-secret")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("AUTH_EXPOSE_ACCESS_TOKEN", "true")

@@ -2,11 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { AppStateProvider } from './src/state/AppState';
+import { AccountStateProvider } from './src/state/AccountState';
+import { useAccountState } from './src/state/AccountState';
 import { theme } from './src/theme';
 import HomeScreen from './src/screens/HomeScreen';
 import SessionScreen from './src/screens/SessionScreen';
 import DetailsScreen from './src/screens/DetailsScreen';
 import WorkoutsScreen from './src/screens/WorkoutsScreen';
+import AuthScreen from './src/screens/AuthScreen';
 
 // Deliberately barebones navigation: one state value, no navigator dependency.
 // Screens hand off through a quick, subtle fade: a dark overlay fades over the
@@ -18,14 +21,13 @@ import WorkoutsScreen from './src/screens/WorkoutsScreen';
 type Screen = 'home' | 'session' | 'details' | 'workouts';
 
 function Root() {
+  const account = useAccountState();
   const [shown, setShown] = useState<Screen>('home');
   // Finishing a workout lands on Home in celebration mode: the same body
   // model spins with the session's stimulus, then the normal UI settles in.
   // A one-shot flag (cleared by Home once handled) — NOT a persistent key, so
   // ordinary navigation back to Home never replays the celebration.
   const [celebratePending, setCelebratePending] = useState(false);
-  // One-shot: Home's "+" tile opens Workouts directly in the builder.
-  const [builderPending, setBuilderPending] = useState(false);
   const pendingRef = useRef<Screen | null>(null);
   const anim = useRef(new Animated.Value(1)).current;
 
@@ -57,6 +59,16 @@ function Root() {
     }).start();
   }, [shown, anim]);
 
+  useEffect(() => {
+    if (account.status !== 'authenticated') {
+      pendingRef.current = null;
+      setShown('home');
+      setCelebratePending(false);
+    }
+  }, [account.status]);
+
+  if (account.status !== 'authenticated') return <AuthScreen />;
+
   const screen = (() => {
     switch (shown) {
       case 'home':
@@ -67,10 +79,6 @@ function Root() {
             onStartSession={() => go('session')}
             onDetails={() => go('details')}
             onWorkouts={() => go('workouts')}
-            onNewWorkout={() => {
-              setBuilderPending(true);
-              go('workouts');
-            }}
           />
         );
       case 'session':
@@ -89,8 +97,6 @@ function Root() {
         return (
           <WorkoutsScreen
             onBack={() => go('home')}
-            startInBuilder={builderPending}
-            onBuilderHandled={() => setBuilderPending(false)}
           />
         );
     }
@@ -124,8 +130,10 @@ const styles = StyleSheet.create({
 export default function App() {
   return (
     <AppStateProvider>
-      <StatusBar style="light" />
-      <Root />
+      <AccountStateProvider>
+        <StatusBar style="light" />
+        <Root />
+      </AccountStateProvider>
     </AppStateProvider>
   );
 }

@@ -1,22 +1,28 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   Animated,
   Easing,
   FlatList,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
+  Modal,
   PanResponder,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { useAccountState } from '../state/AccountState';
 import { EXERCISES } from '../data/exercises';
 import { useAppState, ActiveSession, SetRecord } from '../state/AppState';
 import { theme } from '../theme';
 import Glass from '../ui/Glass';
+import {
+  PreviousExerciseData,
+  previousLocalExercise,
+  previousRemoteExercise,
+  validateSetDraft,
+} from '../workout/logging';
 import RestTimer from './RestTimer';
 
 // Real SF Symbols pencil on iOS; falls back to a text glyph elsewhere.
@@ -34,135 +40,43 @@ interface SessionScreenProps {
   onDiscard: () => void;
 }
 
-const DEFAULT_SET: SetRecord = { weight: 50, reps: 10 };
-// Kept lean — fewer rows keeps the set screen cheap to mount mid-transition.
-const WEIGHT_VALUES = Array.from({ length: 61 }, (_, i) => i * 5); // 0–300 by 5
-const REP_VALUES = Array.from({ length: 30 }, (_, i) => i + 1); // 1–30
-
 const tick = () => Haptics.selectionAsync().catch(() => {});
 
-// ── Drag wheel (Apple clock style, glass lens over the selection) ─
-const ITEM_H = 40;
-const WHEEL_VISIBLE = 5;
-const WHEEL_H = ITEM_H * WHEEL_VISIBLE;
-
-function Wheel({
+function EntryField({
   label,
-  values,
-  initial,
-  markedValue,
-  onChange,
+  value,
+  shadow,
+  error,
+  onChangeText,
+  onBlur,
+  decimal = false,
 }: {
   label: string;
-  values: number[];
-  initial: number;
-  /** Row that gets a subtle star marker (e.g. last weight used) */
-  markedValue?: number;
-  onChange: (v: number) => void;
+  value: string;
+  shadow?: number;
+  error?: string;
+  onChangeText: (value: string) => void;
+  onBlur: () => void;
+  decimal?: boolean;
 }) {
-  // Start the animated offset AT the initial row so the selected value renders
-  // solid white immediately — no dimmed state until first touch. Off-grid
-  // values (legacy/foreign data) snap to the nearest row instead of row 0.
-  const initialIdx = (() => {
-    const exact = values.indexOf(initial);
-    if (exact >= 0) return exact;
-    let best = 0;
-    for (let i = 1; i < values.length; i++) {
-      if (Math.abs(values[i] - initial) < Math.abs(values[best] - initial)) best = i;
-    }
-    return best;
-  })();
-  const scrollY = useRef(new Animated.Value(initialIdx * ITEM_H)).current;
-  const lastIdxRef = useRef(initialIdx);
-  // A flick fires onScrollEndDrag with the UN-snapped offset, then momentum
-  // carries on — settling there would record a value the wheel doesn't land
-  // on. Delay the drag-settle a beat and cancel it if momentum starts.
-  const dragSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const settle = (y: number) => {
-    const idx = Math.min(values.length - 1, Math.max(0, Math.round(y / ITEM_H)));
-    onChange(values[idx]);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (dragSettleRef.current) clearTimeout(dragSettleRef.current);
-    };
-  }, []);
-
   return (
-    <Glass style={styles.wheelPanel}>
-      <Text style={styles.wheelLabel}>{label}</Text>
-      <View style={styles.wheelWindow}>
-        {/* Selection lens — deliberately NOT a nested GlassView: glass inside
-            glass renders unreliably on iOS 26, so this is a crisp overlay. */}
-        <View pointerEvents="none" style={styles.wheelLens} />
-        <Animated.ScrollView
-          showsVerticalScrollIndicator={false}
-          snapToInterval={ITEM_H}
-          decelerationRate="fast"
-          contentOffset={{ x: 0, y: initialIdx * ITEM_H }}
-          contentContainerStyle={{ paddingVertical: (WHEEL_H - ITEM_H) / 2 }}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-            {
-              useNativeDriver: true,
-              listener: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-                const idx = Math.round(e.nativeEvent.contentOffset.y / ITEM_H);
-                if (idx !== lastIdxRef.current) {
-                  lastIdxRef.current = idx;
-                  tick();
-                }
-              },
-            }
-          )}
-          scrollEventThrottle={16}
-          onMomentumScrollBegin={() => {
-            if (dragSettleRef.current) {
-              clearTimeout(dragSettleRef.current);
-              dragSettleRef.current = null;
-            }
-          }}
-          onMomentumScrollEnd={(e) => settle(e.nativeEvent.contentOffset.y)}
-          onScrollEndDrag={(e) => {
-            const y = e.nativeEvent.contentOffset.y;
-            if (dragSettleRef.current) clearTimeout(dragSettleRef.current);
-            dragSettleRef.current = setTimeout(() => {
-              dragSettleRef.current = null;
-              settle(y);
-            }, 64);
-          }}
-        >
-          {values.map((v, i) => (
-            <Animated.View
-              key={v}
-              style={{
-                height: ITEM_H,
-                alignItems: 'center',
-                justifyContent: 'center',
-                opacity: scrollY.interpolate({
-                  inputRange: [(i - 2) * ITEM_H, i * ITEM_H, (i + 2) * ITEM_H],
-                  outputRange: [0.15, 1, 0.15],
-                  extrapolate: 'clamp',
-                }),
-                transform: [
-                  {
-                    scale: scrollY.interpolate({
-                      inputRange: [(i - 2) * ITEM_H, i * ITEM_H, (i + 2) * ITEM_H],
-                      outputRange: [0.78, 1, 0.78],
-                      extrapolate: 'clamp',
-                    }),
-                  },
-                ],
-              }}
-            >
-              <Text style={styles.wheelValue}>{v}</Text>
-              {markedValue === v && <Text style={styles.wheelStar}>★</Text>}
-            </Animated.View>
-          ))}
-        </Animated.ScrollView>
-      </View>
-    </Glass>
+    <View style={styles.entryColumn}>
+      <Text style={styles.entryLabel}>{label}</Text>
+      <Glass style={[styles.entryGlass, error ? styles.entryGlassError : undefined]}>
+        <TextInput
+          accessibilityLabel={label}
+          value={value}
+          onChangeText={onChangeText}
+          onBlur={onBlur}
+          keyboardType={decimal ? 'decimal-pad' : 'number-pad'}
+          inputMode={decimal ? 'decimal' : 'numeric'}
+          placeholder={shadow == null ? '—' : String(shadow)}
+          placeholderTextColor={theme.textDim}
+          selectTextOnFocus
+          style={styles.entryInput}
+        />
+      </Glass>
+    </View>
   );
 }
 
@@ -358,16 +272,19 @@ function SetSegment({
 // ── Session screen ────────────────────────────────────────────────
 export default function SessionScreen({ onComplete, onDiscard }: SessionScreenProps) {
   const {
+    history,
     session,
     completeSet,
     finishSession,
     addExercise,
     editExercise,
+    updateExerciseNotes,
     discardSession,
-    lastUsed,
   } = useAppState();
+  const account = useAccountState();
   const [resting, setResting] = useState(false);
   const [picker, setPicker] = useState<'add' | 'edit' | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   // Shared slide progress: drives the slider AND the live top-bar segment.
   const slideFrac = useRef(new Animated.Value(0)).current;
@@ -382,19 +299,57 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   const current = view ? view.exercises[view.currentIndex] : undefined;
   const currentId = current?.exercise.id;
   const setNumber = current ? current.completedSets.length + 1 : 1;
+  const remoteHistory = account.workoutRanges.all;
 
-  // Weight/reps suggested from the last set of this exercise, ever.
-  const suggested = (currentId ? lastUsed[currentId] : undefined) ?? DEFAULT_SET;
-  const [weight, setWeight] = useState(suggested.weight);
-  const [reps, setReps] = useState(suggested.reps);
   useEffect(() => {
-    if (!currentId) return;
-    const last = lastUsed[currentId];
-    setWeight(last?.weight ?? DEFAULT_SET.weight);
-    setReps(last?.reps ?? DEFAULT_SET.reps);
-    // Only when the exercise changes — keep the user's tweaks between sets.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentId]);
+    if (
+      account.status === 'authenticated' &&
+      !remoteHistory?.loading &&
+      !remoteHistory?.loaded
+    ) {
+      account.refreshWorkouts();
+    }
+  }, [account.status, account.refreshWorkouts, remoteHistory?.loaded, remoteHistory?.loading]);
+
+  // Authenticated shadows come only from account history. Demo/signed-out
+  // shadows come only from local history, mirroring the account-data policy.
+  const previous = useMemo<PreviousExerciseData | null>(() => {
+    if (!view || !current) return null;
+    if (account.status === 'authenticated') {
+      return previousRemoteExercise(
+        remoteHistory?.data ?? [],
+        view.name,
+        current.exercise.name
+      );
+    }
+    if (account.status === 'signedOut' || account.status === 'unconfigured') {
+      return previousLocalExercise(history, view.name, current.exercise.name);
+    }
+    return null;
+  }, [account.status, current, history, remoteHistory?.data, view]);
+
+  const [draft, setDraft] = useState({ weight: '', reps: '', rir: '' });
+  const [touched, setTouched] = useState({ weight: false, reps: false, rir: false });
+  const [attempted, setAttempted] = useState(false);
+  const draftKey = `${view?.startedAt ?? 'none'}-${view?.currentIndex ?? 0}-${setNumber}`;
+  useEffect(() => {
+    setDraft({ weight: '', reps: '', rir: '' });
+    setTouched({ weight: false, reps: false, rir: false });
+    setAttempted(false);
+  }, [draftKey]);
+
+  const validation = useMemo(() => validateSetDraft(draft), [draft]);
+  const shadow = previous?.records[setNumber - 1];
+  const notesInitialized = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!view || !currentId || !previous) return;
+    const key = `${view.startedAt}-${currentId}`;
+    if (notesInitialized.current.has(key)) return;
+    notesInitialized.current.add(key);
+    if (!current?.notes.trim() && previous.notes.trim()) {
+      updateExerciseNotes(currentId, previous.notes);
+    }
+  }, [current?.notes, currentId, previous, updateExerciseNotes, view]);
 
   // The finished set is held as PENDING while the rest screen fades in over
   // the untouched set screen (thumb parked, segment full). It commits — and
@@ -434,6 +389,12 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   };
 
   const handleSetComplete = () => {
+    if (!validation.record) {
+      setAttempted(true);
+      slideFrac.setValue(0);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      return;
+    }
     const willFinishWorkout =
       view.planned &&
       current !== undefined &&
@@ -443,17 +404,23 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     if (willFinishWorkout) {
       // Last set: no rest — fold the final record into the finish atomically.
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      finishSession({ weight, reps });
+      finishSession(validation.record);
       onComplete();
     } else {
-      pendingSetRef.current = { weight, reps };
+      pendingSetRef.current = validation.record;
       setResting(true);
     }
   };
 
   const finishNow = () => {
-    finishSession();
-    if (anyWork) {
+    const hasDraft = Boolean(draft.weight.trim() || draft.reps.trim() || draft.rir.trim());
+    if (hasDraft && !validation.record) {
+      setAttempted(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
+      return;
+    }
+    finishSession(hasDraft ? validation.record ?? undefined : undefined);
+    if (anyWork || hasDraft) {
       onComplete();
     } else {
       onDiscard();
@@ -464,19 +431,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     <View style={styles.container}>
       <View style={styles.header}>
         <Pressable
-          onPress={() => {
-            Alert.alert('Discard workout?', 'This session will not be saved.', [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Discard',
-                style: 'destructive',
-                onPress: () => {
-                  discardSession();
-                  onDiscard();
-                },
-              },
-            ]);
-          }}
+          onPress={() => setConfirmDiscard(true)}
           hitSlop={8}
         >
           <Glass style={styles.headerBtn} interactive>
@@ -523,22 +478,74 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
             </Text>
           </View>
 
-          <View style={styles.wheelsRow}>
-            <Wheel
-              key={`${currentId}-w`}
-              label="LBS"
-              values={WEIGHT_VALUES}
-              initial={suggested.weight}
-              markedValue={currentId ? lastUsed[currentId]?.weight : undefined}
-              onChange={setWeight}
-            />
-            <Wheel
-              key={`${currentId}-r`}
-              label="REPS"
-              values={REP_VALUES}
-              initial={suggested.reps}
-              onChange={setReps}
-            />
+          <View style={styles.entryArea}>
+            <View style={styles.entryRow}>
+              <EntryField
+                label="LBS"
+                decimal
+                value={draft.weight}
+                shadow={shadow?.weight}
+                error={attempted || touched.weight ? validation.errors.weight : undefined}
+                onChangeText={(weight) => setDraft((previousDraft) => ({ ...previousDraft, weight }))}
+                onBlur={() => setTouched((previous) => ({ ...previous, weight: true }))}
+              />
+              <EntryField
+                label="REPS"
+                value={draft.reps}
+                shadow={shadow?.reps}
+                error={attempted || touched.reps ? validation.errors.reps : undefined}
+                onChangeText={(reps) => setDraft((previousDraft) => ({ ...previousDraft, reps }))}
+                onBlur={() => setTouched((previous) => ({ ...previous, reps: true }))}
+              />
+              <EntryField
+                label="RIR"
+                value={draft.rir}
+                shadow={shadow?.rir}
+                error={attempted || touched.rir ? validation.errors.rir : undefined}
+                onChangeText={(rir) => setDraft((previousDraft) => ({ ...previousDraft, rir }))}
+                onBlur={() => setTouched((previous) => ({ ...previous, rir: true }))}
+              />
+            </View>
+            {account.status === 'authenticated' && remoteHistory?.error ? (
+              <View style={styles.shadowErrorRow}>
+                <Text style={styles.shadowErrorText}>Couldn’t load previous-set shadows.</Text>
+                <Pressable onPress={() => account.refreshWorkouts()} hitSlop={8}>
+                  <Text style={styles.shadowRetry}>Retry</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Text style={styles.shadowHint}>
+                {account.status === 'authenticated' && remoteHistory?.loading
+                  ? 'Loading last-session shadows…'
+                  : shadow
+                    ? 'Dim values are your matching set from last time'
+                    : 'Enter 0 lb for bodyweight · RIR is optional (0–5)'}
+              </Text>
+            )}
+            {(attempted || touched.weight || touched.reps || touched.rir) &&
+              Object.values(validation.errors)[0] && (
+                <Text style={styles.validationText}>{Object.values(validation.errors)[0]}</Text>
+              )}
+          </View>
+
+          <View style={styles.notesBlock}>
+            <View style={styles.notesHeader}>
+              <Text style={styles.notesLabel}>EXERCISE NOTES</Text>
+              <Text style={styles.notesCarry}>Carries forward</Text>
+            </View>
+            <Glass style={styles.notesGlass}>
+              <TextInput
+                accessibilityLabel="Exercise notes"
+                value={current.notes}
+                onChangeText={(notes) => currentId && updateExerciseNotes(currentId, notes)}
+                placeholder="Cues, setup, pain, tempo…"
+                placeholderTextColor={theme.textDim}
+                multiline
+                maxLength={500}
+                textAlignVertical="top"
+                style={styles.notesInput}
+              />
+            </Glass>
           </View>
 
           <View style={styles.sliderZone}>
@@ -591,6 +598,47 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
           </Pressable>
         </View>
       )}
+
+      <Modal
+        visible={confirmDiscard}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmDiscard(false)}
+      >
+        <View style={styles.confirmLayer}>
+          <Pressable
+            accessibilityLabel="Close discard confirmation"
+            style={styles.confirmBackdrop}
+            onPress={() => setConfirmDiscard(false)}
+          />
+          <Glass style={styles.confirmCard}>
+            <Text style={styles.confirmTitle}>Discard workout?</Text>
+            <Text style={styles.confirmBody}>
+              Logged sets from this session will be removed. Your persistent exercise notes will
+              stay available next time.
+            </Text>
+            <View style={styles.confirmActions}>
+              <Pressable onPress={() => setConfirmDiscard(false)} style={styles.confirmPressable}>
+                <Glass style={styles.confirmButton} interactive>
+                  <Text style={styles.confirmKeep}>Keep workout</Text>
+                </Glass>
+              </Pressable>
+              <Pressable
+                style={styles.confirmPressable}
+                onPress={() => {
+                  setConfirmDiscard(false);
+                  discardSession();
+                  onDiscard();
+                }}
+              >
+                <Glass style={styles.confirmButton} interactive>
+                  <Text style={styles.confirmDiscardText}>Discard workout</Text>
+                </Glass>
+              </Pressable>
+            </View>
+          </Glass>
+        </View>
+      </Modal>
 
       {resting && (
         <RestTimer
@@ -690,49 +738,98 @@ const styles = StyleSheet.create({
     fontSize: 15,
     marginTop: 8,
   },
-  wheelsRow: {
+  entryArea: {
+    gap: 8,
+  },
+  entryRow: {
     flexDirection: 'row',
-    gap: 14,
+    gap: 10,
   },
-  wheelPanel: {
+  entryColumn: {
     flex: 1,
-    borderRadius: 24,
-    paddingVertical: 14,
-    alignItems: 'center',
   },
-  wheelLabel: {
+  entryLabel: {
     color: theme.textDim,
     fontSize: 11,
-    letterSpacing: 2,
-    marginBottom: 6,
+    letterSpacing: 1.6,
+    marginBottom: 7,
+    textAlign: 'center',
   },
-  wheelWindow: {
-    height: WHEEL_H,
-    width: '100%',
-  },
-  wheelLens: {
-    position: 'absolute',
-    top: (WHEEL_H - ITEM_H) / 2 - 2,
-    left: 12,
-    right: 12,
-    height: ITEM_H + 4,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.07)',
+  entryGlass: {
+    borderRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.16)',
   },
-  wheelValue: {
+  entryGlassError: {
+    borderColor: '#E27878',
+  },
+  entryInput: {
     color: theme.text,
-    fontSize: 26,
+    fontSize: 25,
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
+    paddingHorizontal: 10,
+    paddingVertical: 17,
+    textAlign: 'center',
   },
-  wheelStar: {
-    position: 'absolute',
-    right: 24,
+  shadowHint: {
+    color: theme.textDim,
+    fontSize: 11,
+    textAlign: 'center',
+    minHeight: 14,
+  },
+  shadowErrorRow: {
+    minHeight: 14,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  shadowErrorText: {
+    color: '#E27878',
+    fontSize: 11,
+  },
+  shadowRetry: {
     color: theme.accent,
     fontSize: 11,
-    opacity: 0.85,
+    fontWeight: '700',
+  },
+  validationText: {
+    color: '#E27878',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  notesBlock: {
+    gap: 7,
+  },
+  notesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 3,
+  },
+  notesLabel: {
+    color: theme.textDim,
+    fontSize: 10,
+    letterSpacing: 1.3,
+  },
+  notesCarry: {
+    color: theme.accent,
+    fontSize: 11,
+  },
+  notesGlass: {
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  notesInput: {
+    color: theme.text,
+    fontSize: 16,
+    lineHeight: 21,
+    minHeight: 76,
+    maxHeight: 112,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
   },
   sliderZone: {
     marginTop: 16,
@@ -821,5 +918,55 @@ const styles = StyleSheet.create({
   pickerCancel: {
     alignItems: 'center',
     paddingVertical: 20,
+  },
+  confirmLayer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  confirmBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+  },
+  confirmCard: {
+    width: '100%',
+    maxWidth: 440,
+    borderRadius: 22,
+    padding: 18,
+  },
+  confirmTitle: {
+    color: theme.text,
+    fontSize: 19,
+    fontWeight: '700',
+    marginBottom: 7,
+  },
+  confirmBody: {
+    color: theme.textDim,
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 16,
+  },
+  confirmActions: {
+    flexDirection: 'row',
+    gap: 9,
+  },
+  confirmPressable: {
+    flex: 1,
+  },
+  confirmButton: {
+    borderRadius: 15,
+    paddingVertical: 11,
+    alignItems: 'center',
+  },
+  confirmKeep: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  confirmDiscardText: {
+    color: '#E27878',
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

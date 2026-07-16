@@ -14,10 +14,13 @@ import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import BodyHeatmap from '../3d/BodyHeatmap';
 import Glass from '../ui/Glass';
-import { WorkoutTemplate } from '../data/templates';
-import { getExercise } from '../data/exercises';
 import { levelsFromNet, rollingNet, stimulusScore } from '../analysis/stimulus';
 import { useAppState } from '../state/AppState';
+import { useAccountState } from '../state/AccountState';
+import {
+  AccountWorkoutPlan,
+  accountWorkoutGroups,
+} from '../workout/splitSessions';
 import { theme } from '../theme';
 
 interface HomeScreenProps {
@@ -27,8 +30,6 @@ interface HomeScreenProps {
   onStartSession: () => void;
   onDetails: () => void;
   onWorkouts: () => void;
-  /** Jump straight into the workout builder */
-  onNewWorkout: () => void;
 }
 
 // Sheet progress (0 pill → 1 open sheet) past which releasing opens it.
@@ -48,16 +49,22 @@ export default function HomeScreen({
   onStartSession,
   onDetails,
   onWorkouts,
-  onNewWorkout,
 }: HomeScreenProps) {
   const {
     recentStimulus,
-    startTemplateSession,
+    startPlannedSession,
     startFreeSession,
-    templates,
     lastCompleted,
     history,
   } = useAppState();
+  const account = useAccountState();
+  const workoutGroups = React.useMemo(
+    () => accountWorkoutGroups(account.splits.data),
+    [account.splits.data]
+  );
+  const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
+  const selectedWorkoutGroup =
+    workoutGroups.find((group) => group.id === selectedSplitId) ?? null;
   const { width, height } = useWindowDimensions();
 
   const weekEffort = React.useMemo(() => {
@@ -147,6 +154,7 @@ export default function HomeScreen({
     // Flip interactivity at the START of the spring both ways — waiting for
     // the close spring to finish left a dead zone where the scrim ate taps.
     setSheetLive(toValue === 1);
+    if (toValue === 0) setSelectedSplitId(null);
     Animated.spring(progress, {
       toValue,
       velocity,
@@ -207,9 +215,9 @@ export default function HomeScreen({
     })
   ).current;
 
-  const pick = (template: WorkoutTemplate) => {
+  const pick = (plan: AccountWorkoutPlan) => {
     thump();
-    startTemplateSession(template);
+    startPlannedSession(plan);
     onStartSession();
   };
 
@@ -376,54 +384,98 @@ export default function HomeScreen({
                 <Text style={styles.sheetStimValue}>{weekEffort}</Text>
               </View>
 
-              {templates.map((t) => (
-                <Pressable key={t.id} onPress={() => pick(t)}>
-                  {({ pressed }) => (
-                    <View style={[styles.sheetCard, pressed && styles.cardPressed]}>
-                      <Text style={styles.cardTitle}>{t.name}</Text>
-                      <Text style={styles.cardSub} numberOfLines={1}>
-                        {t.exercises
-                          .map((te) => getExercise(te.exerciseId)?.name)
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </Text>
-                    </View>
-                  )}
+              {account.splits.loading && !account.splits.loaded ? (
+                <Text style={styles.planStatus}>Loading your saved workouts…</Text>
+              ) : account.splits.error ? (
+                <Pressable onPress={account.refreshSplits}>
+                  <Text style={[styles.planStatus, styles.planError]}>
+                    Could not load saved workouts. Tap to retry.
+                  </Text>
                 </Pressable>
-              ))}
+              ) : workoutGroups.length === 0 ? (
+                <Text style={styles.planStatus}>
+                  No saved split sessions yet. Create a split to add planned workouts.
+                </Text>
+              ) : selectedWorkoutGroup ? (
+                <View>
+                  <View style={styles.nestedHeader}>
+                    <Pressable
+                      onPress={() => {
+                        tick();
+                        setSelectedSplitId(null);
+                      }}
+                      hitSlop={8}
+                    >
+                      <Text style={styles.nestedBack}>‹ Splits</Text>
+                    </Pressable>
+                    <Text style={styles.nestedTitle}>{selectedWorkoutGroup.name}</Text>
+                  </View>
+                  {selectedWorkoutGroup.sessions.length === 0 ? (
+                    <Text style={styles.planStatus}>This split has no workout days yet.</Text>
+                  ) : selectedWorkoutGroup.sessions.map((plan) => (
+                    <Pressable key={plan.id} onPress={() => pick(plan)}>
+                      {({ pressed }) => (
+                        <View style={[styles.sheetCard, pressed && styles.cardPressed]}>
+                          <View style={styles.planTitleRow}>
+                            <Text style={styles.dayLabel}>Day {plan.dayNumber}</Text>
+                            <Text style={styles.cardTitle}>{plan.name}</Text>
+                          </View>
+                          <Text style={styles.cardSub}>
+                            {plan.exercises.length} {plan.exercises.length === 1 ? 'exercise' : 'exercises'}
+                          </Text>
+                        </View>
+                      )}
+                    </Pressable>
+                  ))}
+                </View>
+              ) : (
+                <View>
+                  {workoutGroups.map((group) => (
+                    <Pressable
+                      key={group.id}
+                      onPress={() => {
+                        tick();
+                        setSelectedSplitId(group.id);
+                      }}
+                    >
+                      {({ pressed }) => (
+                        <View style={[styles.sheetCard, pressed && styles.cardPressed]}>
+                          <View style={styles.planTitleRow}>
+                            <Text style={styles.cardTitle}>{group.name}</Text>
+                            <Text style={styles.planSplit}>›</Text>
+                          </View>
+                          <Text style={styles.cardSub} numberOfLines={1}>
+                            {group.sessions.length} workout {group.sessions.length === 1 ? 'day' : 'days'}
+                            {group.cycleLength ? ` · ${group.cycleLength}-day cycle` : ''}
+                            {group.sessions.length > 0
+                              ? ` · ${group.sessions.map((session) => session.name).join(' · ')}`
+                              : ''}
+                          </Text>
+                        </View>
+                      )}
+                    </Pressable>
+                  ))}
 
-              {/* Last row: Freeball + jump straight into the workout builder */}
-              <View style={styles.lastRow}>
-                <Pressable style={{ flex: 1 }} onPress={pickFreestyle}>
-                  {({ pressed }) => (
-                    <View
-                      style={[
-                        styles.sheetCard,
-                        styles.freeCard,
-                        styles.lastRowCard,
-                        pressed && styles.cardPressed,
-                      ]}
-                    >
-                      <Text style={styles.cardTitle}>Freeball</Text>
-                      <Text style={styles.cardSub}>Pick exercises as you go</Text>
-                    </View>
-                  )}
-                </Pressable>
-                <Pressable style={styles.plusPressable} onPress={() => { tick(); onNewWorkout(); }}>
-                  {({ pressed }) => (
-                    <View
-                      style={[
-                        styles.sheetCard,
-                        styles.plusCard,
-                        styles.lastRowCard,
-                        pressed && styles.cardPressed,
-                      ]}
-                    >
-                      <Text style={styles.plusText}>＋</Text>
-                    </View>
-                  )}
-                </Pressable>
-              </View>
+                  {/* A free workout remains available without substituting demo plans. */}
+                  <View style={styles.lastRow}>
+                    <Pressable style={{ flex: 1 }} onPress={pickFreestyle}>
+                      {({ pressed }) => (
+                        <View
+                          style={[
+                            styles.sheetCard,
+                            styles.freeCard,
+                            styles.lastRowCard,
+                            pressed && styles.cardPressed,
+                          ]}
+                        >
+                          <Text style={styles.cardTitle}>Freeball</Text>
+                          <Text style={styles.cardSub}>Pick exercises as you go</Text>
+                        </View>
+                      )}
+                    </Pressable>
+                  </View>
+                </View>
+              )}
             </ScrollView>
             </Animated.View>
           </View>
@@ -527,20 +579,6 @@ const styles = StyleSheet.create({
   lastRowCard: {
     marginBottom: 0,
   },
-  plusPressable: {
-    alignSelf: 'stretch',
-  },
-  plusCard: {
-    flex: 1,
-    width: 74,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  plusText: {
-    color: theme.accent,
-    fontSize: 26,
-    fontWeight: '600',
-  },
   morphWrap: {
     position: 'absolute',
   },
@@ -589,6 +627,51 @@ const styles = StyleSheet.create({
   },
   cardPressed: {
     transform: [{ scale: 0.97 }],
+  },
+  planStatus: {
+    color: theme.textDim,
+    fontSize: 13,
+    lineHeight: 19,
+    paddingHorizontal: 4,
+    paddingVertical: 14,
+  },
+  planError: {
+    color: '#E27878',
+  },
+  planTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  nestedHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    paddingBottom: 12,
+  },
+  nestedBack: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  nestedTitle: {
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  dayLabel: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  planSplit: {
+    color: theme.accent,
+    fontSize: 11,
+    fontWeight: '600',
+    flexShrink: 1,
   },
   freeCard: {
     opacity: 0.85,

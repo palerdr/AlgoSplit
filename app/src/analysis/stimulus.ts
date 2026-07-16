@@ -332,13 +332,25 @@ export function stimulusAdequacy(netStimulus: number): number {
   return Math.min(1, netStimulus / OPTIMAL_NET);
 }
 
+export interface StimulusScoreMuscle {
+  stimulus: number;
+  net_stimulus: number;
+}
+
 /**
- * 0–100 stimulus score: mean adequacy across trained muscles. 100 means every
- * trained muscle is at or above productive-growth territory — a strong split
- * honestly lands in the 40–70 range.
+ * 0–100 stimulus score: mean adequacy across trained muscles. Backend muscle
+ * rows identify training with raw stimulus, so a trained-but-under-maintenance
+ * muscle remains in the denominator and contributes zero instead of vanishing.
+ * Local net maps remain supported for the offline overview/demo engine.
  */
-export function stimulusScore(net: Record<string, number>): number {
-  const values = Object.values(net).filter((v) => Number.isFinite(v) && v > 0);
+export function stimulusScore(
+  input: Record<string, number> | readonly StimulusScoreMuscle[]
+): number {
+  const values = Array.isArray(input)
+    ? input
+        .filter((muscle) => Number.isFinite(muscle.stimulus) && muscle.stimulus > 0)
+        .map((muscle) => muscle.net_stimulus)
+    : Object.values(input).filter((value) => Number.isFinite(value) && value > 0);
   if (values.length === 0) return 0;
   const mean = values.reduce((n, v) => n + stimulusAdequacy(v), 0) / values.length;
   return Math.round(mean * 100);

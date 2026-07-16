@@ -70,6 +70,16 @@ describe('canonical stimulus scale', () => {
     expect(stimulusScore({})).toBe(0);
     expect(levelsFromNet({ a: 1.8 }).a).toBe(5);
   });
+
+  it('keeps trained muscles with non-positive net stimulus in the backend score', () => {
+    expect(
+      stimulusScore([
+        { stimulus: 2.4, net_stimulus: 1.8 },
+        { stimulus: 1.1, net_stimulus: -0.4 },
+        { stimulus: 0, net_stimulus: 10 },
+      ])
+    ).toBe(50);
+  });
 });
 
 describe('CNS fatigue (exponential, fatigue_modifiers.py)', () => {

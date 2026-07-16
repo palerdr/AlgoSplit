@@ -15,6 +15,7 @@ import {
   levelsFromNet,
   rollingNet,
 } from '../analysis/stimulus';
+import type { AccountWorkoutPlan } from '../workout/splitSessions';
 
 // Rest duration between sets. Fixed at 3 minutes for now — will be tuned /
 // made adaptive later.
@@ -23,12 +24,16 @@ export const REST_SECONDS = 180;
 export interface SetRecord {
   weight: number; // lbs
   reps: number;
+  /** Reps in reserve; the backend accepts whole numbers from 0 through 5. */
+  rir?: number;
 }
 
 export interface SessionExercise {
   exercise: Exercise;
   targetSets: number;
   completedSets: SetRecord[];
+  /** Exercise cue carried into the next session for this exercise. */
+  notes: string;
 }
 
 export interface ActiveSession {
@@ -44,7 +49,7 @@ export interface ActiveSession {
 export interface CompletedWorkout {
   date: string; // ISO
   name: string;
-  exercises: { name: string; sets: number; records: SetRecord[] }[];
+  exercises: { name: string; sets: number; records: SetRecord[]; notes: string }[];
   /** Raw per-region net stimulus from the engine (map to 0–7 via levelsFromNet) */
   stimulus: Record<string, number>;
   totalSets: number;
@@ -61,14 +66,18 @@ interface AppState {
   recentStimulus: Record<string, number>;
   /** Last weight/reps used per exercise id, to prefill the set screen */
   lastUsed: Record<string, SetRecord>;
+  /** Persistent exercise cues keyed by catalog exercise id. */
+  exerciseNotes: Record<string, string>;
   templates: WorkoutTemplate[];
   addTemplate: (name: string, exercises: TemplateExercise[]) => void;
   updateTemplate: (id: string, name: string, exercises: TemplateExercise[]) => void;
   startTemplateSession: (template: WorkoutTemplate) => void;
+  startPlannedSession: (plan: AccountWorkoutPlan) => void;
   startFreeSession: () => void;
   addExercise: (exercise: Exercise, sets?: number) => void;
   /** Swap the exercise at an index mid-session (marks the workout edited) */
   editExercise: (index: number, exercise: Exercise) => void;
+  updateExerciseNotes: (exerciseId: string, notes: string) => void;
   /** Records one set and advances. */
   completeSet: (record: SetRecord) => void;
   /** Finish the session; pass the final set's record to include it atomically. */
@@ -144,7 +153,7 @@ function generateSeedHistory(): CompletedWorkout[] {
         weight: baseWeight,
         reps: 8 + ((daysAgo + ei + si) % 5),
       }));
-      return { name: e.exercise.name, sets: e.sets, records };
+      return { name: e.exercise.name, sets: e.sets, records, notes: '' };
     });
     const volume = exercisesWithRecords.reduce(
       (n, e) => n + e.records.reduce((m, r) => m + r.weight * r.reps, 0),
@@ -172,6 +181,7 @@ interface PersistedState {
   history: CompletedWorkout[];
   templates: WorkoutTemplate[];
   lastUsed: Record<string, SetRecord>;
+  exerciseNotes: Record<string, string>;
 }
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
@@ -179,6 +189,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<ActiveSession | null>(null);
   const [lastCompleted, setLastCompleted] = useState<CompletedWorkout | null>(null);
   const [lastUsed, setLastUsed] = useState<Record<string, SetRecord>>({});
+  const [exerciseNotes, setExerciseNotes] = useState<Record<string, string>>({});
   const [templates, setTemplates] = useState<WorkoutTemplate[]>(SEED_TEMPLATES);
   const [hydrated, setHydrated] = useState(false);
 
@@ -203,6 +214,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
                   ? w.exercises.map((e) => ({
                       ...e,
                       records: Array.isArray(e.records) ? e.records : [],
+                      notes: typeof e.notes === 'string' ? e.notes : '',
                     }))
                   : [],
               }))
@@ -214,6 +226,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           if (stored.lastUsed && typeof stored.lastUsed === 'object') {
             setLastUsed(stored.lastUsed);
           }
+          if (stored.exerciseNotes && typeof stored.exerciseNotes === 'object') {
+            setExerciseNotes(stored.exerciseNotes);
+          }
         }
       })
       .catch(() => {
@@ -224,9 +239,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!hydrated) return;
-    const state: PersistedState = { history, templates, lastUsed };
+    const state: PersistedState = { history, templates, lastUsed, exerciseNotes };
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state)).catch(() => {});
-  }, [hydrated, history, templates, lastUsed]);
+  }, [hydrated, history, templates, lastUsed, exerciseNotes]);
 
   const recentStimulus = useMemo(() => computeRecentStimulus(history), [history]);
 
@@ -240,6 +255,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     lastCompleted,
     recentStimulus,
     lastUsed,
+    exerciseNotes,
     templates,
 
     addTemplate: (name, exercises) => {
@@ -255,11 +271,35 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       const exercises: SessionExercise[] = template.exercises
         .map((te): SessionExercise | null => {
           const exercise = getExercise(te.exerciseId);
-          return exercise ? { exercise, targetSets: te.sets, completedSets: [] } : null;
+          return exercise
+            ? {
+                exercise,
+                targetSets: te.sets,
+                completedSets: [],
+                notes: exerciseNotes[exercise.id] ?? '',
+              }
+            : null;
         })
         .filter((se): se is SessionExercise => se !== null);
       setSession({
         name: template.name,
+        planned: true,
+        exercises,
+        currentIndex: 0,
+        startedAt: Date.now(),
+        edited: false,
+      });
+    },
+
+    startPlannedSession: (plan) => {
+      const exercises: SessionExercise[] = plan.exercises.map(({ exercise, sets }) => ({
+        exercise,
+        targetSets: sets,
+        completedSets: [],
+        notes: exerciseNotes[exercise.id] ?? '',
+      }));
+      setSession({
+        name: plan.name,
         planned: true,
         exercises,
         currentIndex: 0,
@@ -286,7 +326,15 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           ...prev,
           // Adding to a planned split is an edit; add-as-you-go is the norm.
           edited: prev.edited || prev.planned,
-          exercises: [...prev.exercises, { exercise, targetSets: sets, completedSets: [] }],
+          exercises: [
+            ...prev.exercises,
+            {
+              exercise,
+              targetSets: sets,
+              completedSets: [],
+              notes: exerciseNotes[exercise.id] ?? '',
+            },
+          ],
         };
       });
     },
@@ -302,7 +350,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           return {
             ...prev,
             edited,
-            exercises: prev.exercises.map((se, i) => (i === index ? { ...se, exercise } : se)),
+            exercises: prev.exercises.map((se, i) =>
+              i === index
+                ? { ...se, exercise, notes: exerciseNotes[exercise.id] ?? '' }
+                : se
+            ),
           };
         }
         // Sets were already logged against the old exercise: freeze it with
@@ -310,7 +362,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         // so history/stimulus/e1RM never reattribute completed work.
         const remaining = Math.max(1, target.targetSets - target.completedSets.length);
         const frozen = { ...target, targetSets: target.completedSets.length };
-        const fresh = { exercise, targetSets: remaining, completedSets: [] };
+        const fresh = {
+          exercise,
+          targetSets: remaining,
+          completedSets: [],
+          notes: exerciseNotes[exercise.id] ?? '',
+        };
         const exercises = [
           ...prev.exercises.slice(0, index),
           frozen,
@@ -322,6 +379,22 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           edited,
           exercises,
           currentIndex: prev.currentIndex === index ? index + 1 : prev.currentIndex,
+        };
+      });
+    },
+
+    updateExerciseNotes: (exerciseId, notes) => {
+      const nextNotes = notes.slice(0, 500);
+      setExerciseNotes((previous) => ({ ...previous, [exerciseId]: nextNotes }));
+      setSession((previous) => {
+        if (!previous) return previous;
+        return {
+          ...previous,
+          exercises: previous.exercises.map((sessionExercise) =>
+            sessionExercise.exercise.id === exerciseId
+              ? { ...sessionExercise, notes: nextNotes }
+              : sessionExercise
+          ),
         };
       });
     },
@@ -382,6 +455,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
             name: se.exercise.name,
             sets: se.completedSets.length,
             records: se.completedSets,
+            notes: se.notes,
           })),
         stimulus: computeSessionStimulus(exercises, history),
         totalSets,

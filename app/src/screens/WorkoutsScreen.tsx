@@ -1,251 +1,205 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  Animated,
-  Easing,
   FlatList,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { TemplateExercise, WorkoutTemplate } from '../data/templates';
-import { EXERCISES, getExercise } from '../data/exercises';
-import { useAppState } from '../state/AppState';
+import { useAccountState } from '../state/AccountState';
+import {
+  AccountWorkoutGroup,
+  AccountWorkoutPlan,
+  accountWorkoutGroups,
+} from '../workout/splitSessions';
 import { theme } from '../theme';
 import Glass from '../ui/Glass';
 import FadeIn from '../ui/FadeIn';
+import WorkoutEditor from '../components/workouts/WorkoutEditor';
 
 interface WorkoutsScreenProps {
   onBack: () => void;
-  /** One-shot: open directly in the New Workout builder */
-  startInBuilder?: boolean;
-  onBuilderHandled?: () => void;
 }
-
-const tick = () => Haptics.selectionAsync().catch(() => {});
 
 export default function WorkoutsScreen({
   onBack,
-  startInBuilder,
-  onBuilderHandled,
 }: WorkoutsScreenProps) {
-  const { templates, addTemplate, updateTemplate } = useAppState();
-  const [building, setBuilding] = useState(startInBuilder === true);
-  useEffect(() => {
-    if (startInBuilder) onBuilderHandled?.();
-    // consume the one-shot on mount only
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [name, setName] = useState('');
-  const [items, setItems] = useState<TemplateExercise[]>([]);
+  const account = useAccountState();
+  const groups = useMemo(() => accountWorkoutGroups(account.splits.data), [account.splits.data]);
+  const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
+  const [mode, setMode] = useState<'browse' | 'chooseSplit' | 'editor'>('browse');
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const selectedGroup = groups.find((group) => group.id === selectedSplitId) ?? null;
+  const editingSplit = account.splits.data.find((split) => split.id === selectedSplitId) ?? null;
+  const editingSession =
+    editingSplit?.sessions.find((session) => session.id === editingSessionId) ?? undefined;
+  const items: Array<AccountWorkoutGroup | AccountWorkoutPlan> =
+    mode === 'chooseSplit'
+      ? groups
+      : selectedGroup
+    ? selectedGroup.sessions
+    : groups;
 
-  // List ↔ builder handoff fades through a sibling overlay (glass-safe),
-  // same pattern as the app-level screen transitions.
-  const fade = useRef(new Animated.Value(1)).current;
-  const switchMode = (apply: () => void) => {
-    Animated.timing(fade, {
-      toValue: 0,
-      duration: 110,
-      easing: Easing.in(Easing.quad),
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) apply();
-    });
-  };
-  useEffect(() => {
-    Animated.timing(fade, {
-      toValue: 1,
-      duration: 220,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start();
-  }, [building, fade]);
-
-  const resetBuilder = () => {
-    setBuilding(false);
-    setEditingId(null);
-    setName('');
-    setItems([]);
+  const openEditor = (splitId: string, sessionId: string | null) => {
+    Haptics.selectionAsync().catch(() => {});
+    setSelectedSplitId(splitId);
+    setEditingSessionId(sessionId);
+    setMode('editor');
   };
 
-  const openEditor = (template: WorkoutTemplate) => {
-    switchMode(() => {
-      setEditingId(template.id);
-      setName(template.name);
-      setItems(template.exercises.map((te) => ({ ...te })));
-      setBuilding(true);
-    });
-  };
-
-  const fadeOverlay = (
-    <Animated.View
-      pointerEvents="none"
-      style={[
-        StyleSheet.absoluteFill,
-        {
-          backgroundColor: theme.bg,
-          opacity: fade.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
-        },
-      ]}
-    />
-  );
-
-  const save = () => {
-    if (!name.trim() || items.length === 0) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    const trimmed = name.trim();
-    const saved = [...items];
-    const id = editingId;
-    switchMode(() => {
-      if (id) {
-        updateTemplate(id, trimmed, saved);
-      } else {
-        addTemplate(trimmed, saved);
-      }
-      resetBuilder();
-    });
-  };
-
-  const bumpSets = (index: number, delta: number) => {
-    tick();
-    setItems((prev) =>
-      prev.map((it, i) =>
-        i === index ? { ...it, sets: Math.max(1, Math.min(10, it.sets + delta)) } : it
-      )
-    );
-  };
-
-  // ── Builder mode (new workout, or an existing one pre-filled) ───
-  if (building) {
-    const canSave = name.trim().length > 0 && items.length > 0;
+  if (mode === 'editor' && editingSplit) {
     return (
-      <View style={styles.container}>
-        <View style={styles.headerRow}>
-          <Pressable onPress={() => switchMode(resetBuilder)} hitSlop={12}>
-            <Text style={styles.back}>Cancel</Text>
-          </Pressable>
-          <Pressable onPress={save} disabled={!canSave}>
-            <Glass style={styles.saveBtn} interactive>
-              <Text style={[styles.saveText, !canSave && { opacity: 0.35 }]}>Save</Text>
-            </Glass>
-          </Pressable>
-        </View>
-        <Text style={styles.title}>{editingId ? 'Edit Workout' : 'New Workout'}</Text>
-
-        <FlatList
-          data={EXERCISES}
-          keyExtractor={(e) => e.id}
-          keyboardShouldPersistTaps="handled"
-          ListHeaderComponent={
-            <View>
-              <Glass style={styles.nameField}>
-                <TextInput
-                  value={name}
-                  onChangeText={setName}
-                  placeholder="Workout name"
-                  placeholderTextColor={theme.textDim}
-                  style={styles.nameInput}
-                />
-              </Glass>
-
-              {items.map((it, i) => (
-                <View key={`${it.exerciseId}-${i}`} style={styles.pickedRow}>
-                  <Text style={styles.pickedName} numberOfLines={1}>
-                    {getExercise(it.exerciseId)?.name ?? it.exerciseId}
-                  </Text>
-                  <View style={styles.setsControl}>
-                    <Pressable onPress={() => bumpSets(i, -1)} hitSlop={8} style={styles.setsBtn}>
-                      <Text style={styles.setsBtnText}>−</Text>
-                    </Pressable>
-                    <Text style={styles.setsValue}>{it.sets}×</Text>
-                    <Pressable onPress={() => bumpSets(i, 1)} hitSlop={8} style={styles.setsBtn}>
-                      <Text style={styles.setsBtnText}>+</Text>
-                    </Pressable>
-                  </View>
-                  <Pressable
-                    onPress={() => {
-                      tick();
-                      setItems((prev) => prev.filter((_, j) => j !== i));
-                    }}
-                    hitSlop={10}
-                  >
-                    <Text style={styles.removeX}>✕</Text>
-                  </Pressable>
-                </View>
-              ))}
-
-              <Text style={styles.sectionLabel}>
-                {items.length === 0 ? 'Tap exercises to add them, in order' : 'Add more'}
-              </Text>
-            </View>
-          }
-          renderItem={({ item }) => (
-            <Pressable
-              style={styles.catalogRow}
-              onPress={() => {
-                tick();
-                setItems((prev) => [...prev, { exerciseId: item.id, sets: 3 }]);
-              }}
-            >
-              <Text style={styles.catalogName}>{item.name}</Text>
-              <Text style={styles.catalogPlus}>+</Text>
-            </Pressable>
-          )}
-          contentContainerStyle={{ paddingBottom: 40 }}
-        />
-        {fadeOverlay}
-      </View>
+      <WorkoutEditor
+        key={`${editingSplit.id}:${editingSessionId ?? 'new'}`}
+        split={editingSplit}
+        session={editingSession}
+        onCancel={() => {
+          setEditingSessionId(null);
+          setMode('browse');
+        }}
+        onSaved={(saved) => {
+          setSelectedSplitId(saved.id);
+          setEditingSessionId(null);
+          setMode('browse');
+        }}
+      />
     );
   }
 
-  // ── List mode: New workout on top, then name-only rows ──────────
   return (
     <View style={styles.container}>
-      <Pressable onPress={onBack} hitSlop={8} style={styles.backWrap}>
+      <Pressable
+        onPress={() => {
+          if (mode === 'chooseSplit') {
+            Haptics.selectionAsync().catch(() => {});
+            setMode('browse');
+          } else if (selectedGroup) {
+            Haptics.selectionAsync().catch(() => {});
+            setSelectedSplitId(null);
+          } else {
+            onBack();
+          }
+        }}
+        hitSlop={8}
+        style={styles.backWrap}
+      >
         <Glass style={styles.backChip} interactive>
-          <Text style={styles.backText}>‹ Home</Text>
+          <Text style={styles.backText}>
+            {mode === 'chooseSplit' || selectedGroup ? '‹ Workouts' : '‹ Home'}
+          </Text>
         </Glass>
       </Pressable>
-      <Text style={styles.title}>Workouts</Text>
+      <Text style={styles.title}>
+        {mode === 'chooseSplit' ? 'New Workout' : selectedGroup?.name ?? 'Workouts'}
+      </Text>
 
       <FlatList
-        data={templates}
-        keyExtractor={(t) => t.id}
+        data={items}
+        keyExtractor={(item) => item.id}
         ListHeaderComponent={
-          <FadeIn>
-            <Pressable
-              onPress={() => {
-                tick();
-                switchMode(() => setBuilding(true));
-              }}
-            >
+          <View>
+            <FadeIn>
+              <View style={styles.accountRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.accountLabel}>
+                    {mode === 'chooseSplit'
+                      ? 'Choose a split'
+                      : selectedGroup
+                        ? 'Workout days'
+                        : 'Saved splits'}
+                  </Text>
+                  <Text style={styles.accountEmail}>{account.user?.email}</Text>
+                </View>
+                <Pressable onPress={account.refreshSplits} hitSlop={8}>
+                  <Text style={styles.refresh}>Refresh</Text>
+                </Pressable>
+              </View>
+            </FadeIn>
+            {mode === 'browse' && (
+              <FadeIn delay={45}>
+                <Pressable
+                  onPress={() => {
+                    if (selectedGroup) openEditor(selectedGroup.id, null);
+                    else setMode('chooseSplit');
+                  }}
+                >
+                  <Glass style={styles.newBtn} interactive>
+                    <Text style={styles.newBtnText}>+ New workout</Text>
+                  </Glass>
+                </Pressable>
+              </FadeIn>
+            )}
+            {account.splits.loading && !account.splits.loaded && (
               <Glass style={styles.newBtn} interactive>
-                <Text style={styles.newBtnText}>+ New workout</Text>
+                <Text style={styles.noticeText}>Loading your saved workouts…</Text>
               </Glass>
-            </Pressable>
-          </FadeIn>
+            )}
+            {account.splits.error && (
+              <Pressable onPress={account.refreshSplits}>
+                <Glass style={styles.notice} interactive>
+                  <Text style={styles.errorText}>Saved workouts could not load.</Text>
+                  <Text style={styles.noticeText}>Tap to retry. Demo plans were not substituted.</Text>
+                </Glass>
+              </Pressable>
+            )}
+            {account.splits.loaded && !account.splits.error && items.length === 0 && (
+              <Glass style={styles.notice}>
+                <Text style={styles.noticeText}>
+                  {selectedGroup
+                    ? 'This split has no workout days yet.'
+                    : 'No saved splits yet. Create a split and it will appear here.'}
+                </Text>
+              </Glass>
+            )}
+          </View>
         }
         renderItem={({ item, index }) => (
           <FadeIn delay={(index + 1) * 45}>
-            <Pressable
-              onPress={() => {
-                tick();
-                openEditor(item);
-              }}
-            >
-              <Glass style={styles.nameRow} interactive>
-                <Text style={styles.nameRowText}>{item.name}</Text>
-                <Text style={styles.chevron}>›</Text>
-              </Glass>
-            </Pressable>
+            {'sessions' in item ? (
+              <Pressable
+                onPress={() => {
+                  if (mode === 'chooseSplit') openEditor(item.id, null);
+                  else {
+                    Haptics.selectionAsync().catch(() => {});
+                    setSelectedSplitId(item.id);
+                  }
+                }}
+              >
+                <Glass style={styles.nameRow} interactive>
+                  <View style={styles.rowCopy}>
+                    <Text style={styles.nameRowText}>{item.name}</Text>
+                    <Text style={styles.rowMeta} numberOfLines={1}>
+                      {item.sessions.length} workout {item.sessions.length === 1 ? 'day' : 'days'}
+                      {item.cycleLength ? ` · ${item.cycleLength}-day cycle` : ''}
+                      {item.sessions.length > 0
+                        ? ` · ${item.sessions.map((session) => session.name).join(' · ')}`
+                        : ''}
+                    </Text>
+                  </View>
+                  <Text style={styles.chevron}>›</Text>
+                </Glass>
+              </Pressable>
+            ) : (
+              <Pressable onPress={() => openEditor(item.splitId, item.sessionId)}>
+                <Glass style={styles.nameRow} interactive>
+                  <View style={styles.rowCopy}>
+                    <View style={styles.rowTitleLine}>
+                      <Text style={styles.dayLabel}>Day {item.dayNumber}</Text>
+                      <Text style={styles.nameRowText}>{item.name}</Text>
+                    </View>
+                    <Text style={styles.rowMeta}>
+                      {item.exercises.length} {item.exercises.length === 1 ? 'exercise' : 'exercises'}
+                    </Text>
+                  </View>
+                  <Text style={styles.chevron}>›</Text>
+                </Glass>
+              </Pressable>
+            )}
           </FadeIn>
         )}
         contentContainerStyle={{ paddingBottom: 40 }}
       />
-      {fadeOverlay}
     </View>
   );
 }
@@ -431,5 +385,69 @@ const styles = StyleSheet.create({
     color: theme.accent,
     fontSize: 20,
     fontWeight: '600',
+  },
+  accountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: 16,
+  },
+  accountLabel: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  accountEmail: {
+    color: theme.textDim,
+    fontSize: 11,
+    marginTop: 3,
+  },
+  refresh: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  notice: {
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 14,
+  },
+  noticeText: {
+    color: theme.textDim,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  errorText: {
+    color: '#E27878',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  rowCopy: {
+    flex: 1,
+    marginRight: 12,
+  },
+  rowTitleLine: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  splitName: {
+    color: theme.accent,
+    fontSize: 11,
+    fontWeight: '600',
+    flexShrink: 1,
+  },
+  dayLabel: {
+    color: theme.accent,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  rowMeta: {
+    color: theme.textDim,
+    fontSize: 11.5,
+    lineHeight: 17,
+    marginTop: 5,
   },
 });

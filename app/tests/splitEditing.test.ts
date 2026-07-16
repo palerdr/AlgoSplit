@@ -1,0 +1,129 @@
+import type { ExerciseResponse, SessionResponse, SplitResponse } from '../src/api/backend';
+import {
+  newWorkoutDraft,
+  splitWithWorkoutDraft,
+  workoutDraftError,
+  workoutDraftFromSession,
+} from '../src/workout/splitEditing';
+
+function exercise(id: string, name: string, order: number): ExerciseResponse {
+  return {
+    id,
+    session_id: 'session-1',
+    exercise_name: name,
+    sets: 3,
+    order_index: order,
+    unilateral: false,
+    resistance_profile: null,
+    created_at: '2026-01-01T00:00:00Z',
+  };
+}
+
+function session(id: string, name: string, day: number, exercises: ExerciseResponse[]): SessionResponse {
+  return {
+    id,
+    split_id: 'split-1',
+    name,
+    day_number: day,
+    exercises,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  };
+}
+
+function split(): SplitResponse {
+  return {
+    id: 'split-1',
+    user_id: 'user-1',
+    name: 'Account Split',
+    cycle_length: 4,
+    stimulus_duration: 72,
+    maintenance_volume: 5,
+    dataset: 'average',
+    sessions: [
+      session('session-1', 'Upper', 1, [
+        exercise('ex-2', 'Barbell Row', 1),
+        exercise('ex-1', 'Bench Press', 0),
+      ]),
+      session('session-2', 'Lower', 3, [exercise('ex-3', 'Back Squat', 0)]),
+    ],
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+  };
+}
+
+describe('workout split editing', () => {
+  it('hydrates exercises in persisted order', () => {
+    const draft = workoutDraftFromSession('split-1', split().sessions[0]);
+
+    expect(draft.exercises.map((item) => item.name)).toEqual(['Bench Press', 'Barbell Row']);
+  });
+
+  it('replaces one workout while preserving split settings and other days', () => {
+    const source = split();
+    const draft = workoutDraftFromSession(source.id, source.sessions[0]);
+    draft.name = 'Upper Revised';
+    draft.exercises = [
+      { ...draft.exercises[1], sets: 4 },
+      {
+        key: 'new:lateral_raise',
+        name: 'Lateral Raise',
+        sets: 3,
+        unilateral: false,
+        resistanceProfile: 'ascending',
+      },
+    ];
+
+    const payload = splitWithWorkoutDraft(source, draft);
+
+    expect(payload).toMatchObject({
+      name: 'Account Split',
+      cycle_length: 4,
+      stimulus_duration: 72,
+      maintenance_volume: 5,
+      dataset: 'average',
+    });
+    expect(payload.sessions[0]).toEqual({
+      name: 'Upper Revised',
+      day_number: 1,
+      exercises: [
+        { name: 'Barbell Row', sets: 4, unilateral: false, resistance_profile: null },
+        { name: 'Lateral Raise', sets: 3, unilateral: false, resistance_profile: 'ascending' },
+      ],
+    });
+    expect(payload.sessions[1]).toMatchObject({ name: 'Lower', day_number: 3 });
+  });
+
+  it('adds a new workout on the first open day', () => {
+    const source = split();
+    const draft = newWorkoutDraft(source);
+    draft.name = 'Arms';
+    draft.exercises = [
+      {
+        key: 'new:curl',
+        name: 'Barbell Curl',
+        sets: 3,
+        unilateral: false,
+        resistanceProfile: 'mid',
+      },
+    ];
+
+    expect(draft.dayNumber).toBe(2);
+    expect(splitWithWorkoutDraft(source, draft).sessions.map((item) => item.name)).toEqual([
+      'Upper',
+      'Arms',
+      'Lower',
+    ]);
+  });
+
+  it('rejects duplicate days and empty exercise lists', () => {
+    const source = split();
+    const draft = newWorkoutDraft(source);
+    draft.name = 'Duplicate';
+    draft.dayNumber = 1;
+
+    expect(workoutDraftError(source, draft)).toBe('Day 1 already has a workout in this split.');
+    draft.dayNumber = 2;
+    expect(workoutDraftError(source, draft)).toBe('Add at least one exercise.');
+  });
+});

@@ -6,22 +6,24 @@
  * a missing or broken client must NEVER crash the app: local-first always.
  */
 
+import type { WorkoutCreate } from './backend';
 import type { CompletedWorkout } from '../state/AppState';
 
 /** Local CompletedWorkout → backend workout-log payload. */
-export function buildWorkoutPayload(workout: CompletedWorkout): Record<string, unknown> {
+export function buildWorkoutPayload(workout: CompletedWorkout): WorkoutCreate {
   return {
-    name: workout.name,
-    performed_at: workout.date,
-    duration_min: workout.durationMin,
-    exercises: (workout.exercises ?? []).map((e, i) => ({
+    session_name: workout.name,
+    completed_at: workout.date,
+    duration_minutes: workout.durationMin,
+    exercises: (workout.exercises ?? []).map((e) => ({
       exercise_name: e.name,
-      order_index: i,
-      sets: (e.records ?? []).map((r, j) => ({
-        set_index: j,
-        weight: r.weight,
-        reps: r.reps,
-      })),
+      sets_completed: e.records.length,
+      weight: e.records.map((record) => record.weight),
+      reps: e.records.map((record) => record.reps),
+      ...(e.records.some((record) => record.rir !== undefined)
+        ? { rir: e.records.map((record) => record.rir ?? 0) }
+        : {}),
+      ...(e.notes.trim() ? { notes: e.notes.trim() } : {}),
     })),
   };
 }
