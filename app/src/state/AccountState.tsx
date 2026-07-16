@@ -30,11 +30,14 @@ import {
   workouts as workoutsApi,
 } from '../api/backend';
 import {
+  type AuthReturnScreen,
+  SocialAuthError,
+  appleProviderEnabled,
+  cleanWebAuthUrl,
   clearTemporaryOAuthCredentials,
-  cancelPreparedWebAuthSession,
+  completePendingWebAuth,
   completeIdentityLink,
   isSocialAuthCancellation,
-  prepareWebAuthSession,
   socialSessionForProvider,
 } from '../auth/socialAuth';
 import {
@@ -75,6 +78,9 @@ interface AccountState {
   status: AccountStatus;
   user: UserInfo | null;
   sessionError: string | null;
+  appleProviderEnabled: boolean;
+  authReturnScreen: AuthReturnScreen | null;
+  clearAuthReturnScreen: () => void;
   identities: RemoteResource<AuthIdentity[]>;
   splits: RemoteResource<SplitResponse[]>;
   workoutRanges: Record<string, RemoteResource<WorkoutLogResponse[]>>;
@@ -173,6 +179,8 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   );
   const [user, setUser] = useState<UserInfo | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [appleEnabled, setAppleEnabled] = useState(false);
+  const [authReturnScreen, setAuthReturnScreen] = useState<AuthReturnScreen | null>(null);
   const [identityResource, setIdentityResource] = useState(EMPTY_IDENTITIES);
   const [splitResource, setSplitResource] = useState(EMPTY_SPLITS);
   const [workoutRanges, setWorkoutRanges] = useState<
@@ -842,8 +850,13 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   const signInWithProvider = useCallback(async (provider: SocialProvider) => {
     setStatus('checking');
     setSessionError(null);
+    let credentialsCreated = false;
     try {
       const socialSession = await socialSessionForProvider(provider);
+      // Web continues after a full-page callback. Keep the checking state so a
+      // restored page cannot briefly show the signed-out form during redirect.
+      if (!socialSession) return;
+      credentialsCreated = true;
       const response = await auth.oauthComplete(socialSession);
       setUser(response.user);
       setStatus('authenticated');
@@ -855,22 +868,21 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       }
       throw error;
     } finally {
-      await clearTemporaryOAuthCredentials();
+      if (credentialsCreated) await clearTemporaryOAuthCredentials();
     }
   }, []);
 
   const linkIdentity = useCallback(
     async (provider: SocialProvider) => {
       try {
-        prepareWebAuthSession(provider);
         const response = await auth.linkIdentity(
           provider,
           Platform.OS === 'web' ? 'web' : 'native'
         );
-        await completeIdentityLink(response.url);
+        await completeIdentityLink(response.url, provider);
+        if (Platform.OS === 'web') return;
         await refreshIdentities();
       } catch (error) {
-        cancelPreparedWebAuthSession();
         if (isSignedOutError(error)) markSignedOut();
         throw error;
       }
@@ -938,9 +950,112 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     markSignedOut();
   }, [markSignedOut, user?.id]);
 
+  const clearAuthReturnScreen = useCallback(() => setAuthReturnScreen(null), []);
+
+  const bootstrapAuth = useCallback(async () => {
+    if (Platform.OS !== 'web') {
+      await refreshSession();
+      return;
+    }
+
+    let handledCallback = false;
+    try {
+      const result = await completePendingWebAuth();
+      if (result.type === 'none') {
+        await refreshSession();
+        return;
+      }
+      handledCallback = true;
+      cleanWebAuthUrl();
+      setAuthReturnScreen(result.returnScreen);
+
+      if (result.type === 'cancelled') {
+        if (result.kind === 'oauth') {
+          markSignedOut();
+        } else {
+          const nextUser = await auth.me();
+          setUser(nextUser);
+          setStatus('authenticated');
+        }
+        return;
+      }
+
+      if (result.type === 'oauth') {
+        const response = await auth.oauthComplete(result.session);
+        setUser(response.user);
+        setSessionError(null);
+        setStatus('authenticated');
+        return;
+      }
+
+      const nextUser = await auth.me();
+      const response = await auth.identities();
+      const linked = response.identities.some((identity) => identity.provider === result.provider);
+      setUser(nextUser);
+      setStatus('authenticated');
+      setIdentityResource({
+        data: response.identities,
+        loading: false,
+        loaded: true,
+        error: linked ? null : 'Could not load your connected accounts. Please try again.',
+        fetchedAt: Date.now(),
+      });
+    } catch (error) {
+      handledCallback = true;
+      cleanWebAuthUrl();
+      const callbackError = error instanceof SocialAuthError ? error : null;
+      if (callbackError?.returnScreen) setAuthReturnScreen(callbackError.returnScreen);
+
+      // An identity callback still has the first-party HttpOnly cookie even
+      // when the provider rejects or cannot finish the link.
+      if (callbackError?.kind === 'identity') {
+        try {
+          const nextUser = await auth.me();
+          setUser(nextUser);
+          setStatus('authenticated');
+          setIdentityResource((previous) => ({
+            ...previous,
+            loading: false,
+            loaded: true,
+            error: 'Could not load your connected accounts. Please try again.',
+          }));
+          return;
+        } catch {
+          // Fall through to the normal signed-out recovery below.
+        }
+      }
+
+      markSignedOut();
+      if (!isSocialAuthCancellation(error)) {
+        setSessionError('Could not sign in. Try again.');
+      }
+    } finally {
+      if (handledCallback) await clearTemporaryOAuthCredentials();
+    }
+  }, [markSignedOut, refreshSession]);
+
   useEffect(() => {
-    refreshSession();
-  }, [refreshSession]);
+    void bootstrapAuth();
+  }, [bootstrapAuth]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) void bootstrapAuth();
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, [bootstrapAuth]);
+
+  useEffect(() => {
+    let active = true;
+    void appleProviderEnabled().then((enabled) => {
+      if (active) setAppleEnabled(enabled);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -1000,6 +1115,9 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       status,
       user,
       sessionError,
+      appleProviderEnabled: appleEnabled,
+      authReturnScreen,
+      clearAuthReturnScreen,
       identities: identityResource,
       splits: splitResource,
       workoutRanges,
@@ -1046,6 +1164,9 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       status,
       user,
       sessionError,
+      appleEnabled,
+      authReturnScreen,
+      clearAuthReturnScreen,
       identityResource,
       splitResource,
       workoutRanges,

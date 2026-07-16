@@ -231,7 +231,7 @@ export default function AuthScreen() {
                   )}
                 </Glass>
               </Pressable>
-              {socialProviderVisible('apple') && (
+              {account.appleProviderEnabled && socialProviderVisible('apple') && (
                 <Pressable
                   accessibilityLabel="Continue with Apple"
                   accessibilityState={{ disabled: socialBusy !== null || !socialConfigured }}
