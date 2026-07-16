@@ -13,9 +13,11 @@ import {
   AccountWorkoutEditorGroup,
   accountWorkoutEditorGroups,
 } from '../workout/splitSessions';
+import { workoutsPrimaryCreateTarget } from '../workout/newSplitDraft';
 import { theme } from '../theme';
 import Glass from '../ui/Glass';
 import FadeIn from '../ui/FadeIn';
+import NewSplitEditor from '../components/workouts/NewSplitEditor';
 import WorkoutEditor from '../components/workouts/WorkoutEditor';
 
 interface WorkoutsScreenProps {
@@ -31,19 +33,16 @@ export default function WorkoutsScreen({
     [account.splits.data]
   );
   const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
-  const [mode, setMode] = useState<'browse' | 'chooseSplit' | 'editor'>('browse');
+  const [mode, setMode] = useState<'browse' | 'newSplit' | 'editor'>('browse');
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingRestDay, setEditingRestDay] = useState<number | undefined>(undefined);
   const selectedGroup = groups.find((group) => group.id === selectedSplitId) ?? null;
+  const createTarget = workoutsPrimaryCreateTarget(selectedGroup?.id ?? null);
   const editingSplit = account.splits.data.find((split) => split.id === selectedSplitId) ?? null;
   const editingSession =
     editingSplit?.sessions.find((session) => session.id === editingSessionId) ?? undefined;
   const items: Array<AccountWorkoutEditorGroup | AccountWorkoutEditorEntry> =
-    mode === 'chooseSplit'
-      ? groups
-      : selectedGroup
-    ? selectedGroup.sessions
-    : groups;
+    selectedGroup ? selectedGroup.sessions : groups;
 
   const openEditor = (
     splitId: string,
@@ -62,6 +61,18 @@ export default function WorkoutsScreen({
     Haptics.selectionAsync().catch(() => {});
     await account.refreshSplits();
   };
+
+  if (mode === 'newSplit') {
+    return (
+      <NewSplitEditor
+        onCancel={() => setMode('browse')}
+        onSaved={(saved) => {
+          setSelectedSplitId(saved.id);
+          setMode('browse');
+        }}
+      />
+    );
+  }
 
   if (mode === 'editor' && editingSplit) {
     return (
@@ -89,10 +100,7 @@ export default function WorkoutsScreen({
     <View style={styles.container}>
       <Pressable
         onPress={() => {
-          if (mode === 'chooseSplit') {
-            Haptics.selectionAsync().catch(() => {});
-            setMode('browse');
-          } else if (selectedGroup) {
+          if (selectedGroup) {
             Haptics.selectionAsync().catch(() => {});
             setSelectedSplitId(null);
           } else {
@@ -104,13 +112,11 @@ export default function WorkoutsScreen({
       >
         <Glass style={styles.backChip} interactive>
           <Text style={styles.backText}>
-            {mode === 'chooseSplit' || selectedGroup ? '‹ Workouts' : '‹ Home'}
+            {selectedGroup ? '‹ Workouts' : '‹ Home'}
           </Text>
         </Glass>
       </Pressable>
-      <Text style={styles.title}>
-        {mode === 'chooseSplit' ? 'New Workout' : selectedGroup?.name ?? 'Workouts'}
-      </Text>
+      <Text style={styles.title}>{selectedGroup?.name ?? 'Workouts'}</Text>
 
       <FlatList
         data={items}
@@ -121,11 +127,7 @@ export default function WorkoutsScreen({
               <View style={styles.accountRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.accountLabel}>
-                    {mode === 'chooseSplit'
-                      ? 'Choose a split'
-                      : selectedGroup
-                        ? 'Workout days'
-                        : 'Saved splits'}
+                    {selectedGroup ? 'Workout days' : 'Saved splits'}
                   </Text>
                   <Text style={styles.accountEmail}>{account.user?.email}</Text>
                 </View>
@@ -146,12 +148,18 @@ export default function WorkoutsScreen({
               <FadeIn delay={45}>
                 <Pressable
                   onPress={() => {
-                    if (selectedGroup) openEditor(selectedGroup.id, null);
-                    else setMode('chooseSplit');
+                    if (createTarget === 'workout' && selectedGroup) {
+                      openEditor(selectedGroup.id, null);
+                    } else {
+                      Haptics.selectionAsync().catch(() => {});
+                      setMode('newSplit');
+                    }
                   }}
                 >
                   <Glass style={styles.newBtn} interactive>
-                    <Text style={styles.newBtnText}>+ New workout</Text>
+                    <Text style={styles.newBtnText}>
+                      {createTarget === 'workout' ? '+ New workout' : '+ New split'}
+                    </Text>
                   </Glass>
                 </Pressable>
               </FadeIn>
@@ -185,11 +193,8 @@ export default function WorkoutsScreen({
             {'sessions' in item ? (
               <Pressable
                 onPress={() => {
-                  if (mode === 'chooseSplit') openEditor(item.id, null);
-                  else {
-                    Haptics.selectionAsync().catch(() => {});
-                    setSelectedSplitId(item.id);
-                  }
+                  Haptics.selectionAsync().catch(() => {});
+                  setSelectedSplitId(item.id);
                 }}
               >
                 <Glass style={styles.nameRow} interactive>

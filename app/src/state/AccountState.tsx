@@ -84,6 +84,7 @@ interface AccountState {
   deleteAccount: () => Promise<void>;
   ensureSplits: () => Promise<void>;
   refreshSplits: () => Promise<void>;
+  createSplit: (split: SplitCreate) => Promise<SplitResponse>;
   replaceSplit: (splitId: string, split: SplitCreate) => Promise<SplitResponse>;
   saveSplitSession: (
     splitId: string,
@@ -603,6 +604,27 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   const ensureStimulus = useCallback(() => loadStimulus(false), [loadStimulus]);
   const refreshStimulus = useCallback(() => loadStimulus(true), [loadStimulus]);
 
+  const createSplit = useCallback(
+    async (split: SplitCreate) => {
+      try {
+        const saved = await splitsApi.create(split);
+        clearSplitAnalysisCache();
+        setSplitResource((previous) => ({
+          data: [saved, ...previous.data.filter((candidate) => candidate.id !== saved.id)],
+          loading: false,
+          loaded: true,
+          error: null,
+          fetchedAt: Date.now(),
+        }));
+        return saved;
+      } catch (error) {
+        if (isSignedOutError(error)) markSignedOut();
+        throw error;
+      }
+    },
+    [markSignedOut]
+  );
+
   const replaceSplit = useCallback(
     async (splitId: string, split: SplitCreate) => {
       try {
@@ -833,6 +855,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       deleteAccount,
       ensureSplits,
       refreshSplits,
+      createSplit,
       replaceSplit,
       saveSplitSession,
       ensureWorkouts,
@@ -871,6 +894,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       deleteAccount,
       ensureSplits,
       refreshSplits,
+      createSplit,
       replaceSplit,
       saveSplitSession,
       ensureWorkouts,
