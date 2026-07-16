@@ -207,22 +207,181 @@ Apply migrations in order from `backend/db/migrations` when bootstrapping a new 
 
 ## Analysis Model
 
-The analysis engine models:
+The analyzer is a deterministic programming model, not a physiological digital
+twin. It estimates relative stimulus across a schedule so two splits can be
+compared consistently. Its output should not be read as measured hypertrophy,
+muscle protein synthesis, tissue loss, or medical advice.
 
-- Set-by-set stimulus with diminishing returns.
-- Recovery penalties when a muscle is retrained inside the stimulus window.
-- CNS/global fatigue and axial fatigue.
-- Consecutive-day penalties.
-- Bilateral/unilateral modifiers.
-- Region-level muscle contribution tiers.
-- Atrophy after the configured stimulus duration.
-- Group summaries, optimization suggestions, and optional session breakdowns.
+### Inputs and normalization
 
-Default analysis settings can be adjusted per split:
+1. Python resolves each exercise name to one of 38 canonical movement patterns
+   or an account-specific custom/override mapping.
+2. A pattern distributes a nominal stimulus budget across 29 muscle regions in
+   `prime`, `secondary`, `tertiary`, and `quaternary` tiers.
+3. The resistance profile (`ascending`, `mid`, or `descending`) reweights those
+   regions according to their short-, mid-, or long-length leverage classification.
+   The result is normalized, so resistance profile changes *where* the pattern's
+   stimulus goes without creating or destroying its total nominal budget:
 
-- `stimulus_duration`: 24-96 hours
-- `maintenance_volume`: 1-9 sets
-- `dataset`: `schoenfeld`, `pelland`, or `average`
+   `adjusted_weight_i = weight_i * leverage_multiplier_i * sum(weight) / sum(weight * leverage_multiplier)`
+
+   A perfect leverage/profile match uses `1.00`, an adjacent match `0.85`, and
+   the strongest mismatch `0.70`.
+4. Sessions named `Rest`, and sessions with no exercises, do not execute. Cycle
+   lengths that do not divide seven are simulated over
+   `lcm(cycle_length, 7) / 7` weeks and averaged into weekly output.
+
+### Per-set stimulus
+
+For every target region on every set, the kernel applies this modifier chain:
+
+`set_stimulus = target_weight * recovery * unilateral * local_return * global_capacity * consecutive_day_capacity`
+
+- **Recovery:** retraining a prime-targeted region in a later session before the
+  configured hypertrophy window ends uses
+  `clamp(hours_since_prime_training / stimulus_duration, 0, 1)`. Otherwise the
+  multiplier is `1`. The public backend field remains `stimulus_duration`, with
+  a validated range of 24-96 hours.
+- **Unilateral:** explicitly unilateral work receives a `1.05` multiplier.
+  Bilateral work receives no direct within-set penalty, but bilateral compound
+  sets contribute to consecutive-day fatigue.
+- **Local diminishing returns:** prime sets use the selected dataset's marginal
+  return directly. Non-prime targets use
+  `1 - beta * (1 - marginal_return)`, where beta is `0.55` for secondary,
+  `0.35` for tertiary, and `0.15` for quaternary stimulus. After set nine, the
+  last marginal value decays by `0.97` for each additional set.
+- **Global capacity:** set order matters. Capacity is
+  `0.85 + 0.15 * exp(-0.06 * effective_sets)`, where
+  `effective_sets = session_set_number + 2.5 * accumulated_axial_fatigue`.
+  A pattern contributes `axial_load * sets * 0.15` axial fatigue before its sets
+  are evaluated.
+- **Consecutive days:** the first training day is unpenalized. Later consecutive
+  days combine a day-count term, prior axial fatigue, and prior bilateral sets:
+  `max(0.25, 1 - base - axial - bilateral)`, where
+  `base = min(0.40, 0.08*d*(1 - 0.06*d))`,
+  `axial = min(0.30, cumulative_axial*0.12)`,
+  `bilateral = min(0.15, cumulative_bilateral_sets*0.005)`, and
+  `d = consecutive_days - 1`.
+
+### Dataset curves and net stimulus
+
+The dataset selector changes the cumulative and marginal returns assigned to
+sets one through nine:
+
+| Dataset | Cumulative values for sets 1-9 |
+| --- | --- |
+| `schoenfeld` | `1.00, 1.39, 1.61, 1.77, 1.90, 2.00, 2.09, 2.16, 2.23` |
+| `pelland` | `1.00, 1.89, 2.50, 3.07, 3.56, 4.00, 4.40, 4.78, 5.16` |
+| `average` | Element-wise arithmetic mean of the two curves |
+
+The names identify the calibrations used by the project; they do not imply that
+the application reproduces every inclusion criterion or conclusion of the
+underlying literature. Marginal returns are adjacent differences in the chosen
+cumulative curve.
+
+After a region's hypertrophy window ends, the engine accrues an accounting debit:
+
+`atrophy_rate = cumulative_curve[maintenance_volume - 1] / (168 - stimulus_duration)`
+
+`atrophy_debit = atrophy_rate * hours_beyond_window`
+
+`net_stimulus = accumulated_stimulus - accumulated_atrophy_debit`
+
+Here, `maintenance_volume` is a model calibration from 1-9 and “atrophy” means
+loss of modeled weekly stimulus, not a prediction of literal tissue loss.
+Recovery readiness is separately reported as
+`clamp(hours_since_any_stimulus / stimulus_duration, 0, 1)` at the end of the
+analysis window.
+
+### Important interpretation limits
+
+- Split analysis is driven by exercise identity, set count, order, schedule,
+  unilateral status, and resistance profile. Logged weight, reps, and RIR are
+  retained for workout history and progress calculations, but they do not
+  currently scale the stimulus kernel.
+- Frequency counts sessions in which a region is a **prime** target. Secondary
+  exposure still adds stimulus and affects readiness but does not increase that
+  frequency value.
+- `primary_sets`, group set totals, and the summary's total sets are region-level
+  prime-set exposures. They are not necessarily the literal number of sets the
+  athlete performed because one exercise can have multiple prime regions.
+- `damage_tier` is recommendation metadata. `recovery_modifier` is carried in
+  the region contract for future tuning. Neither currently multiplies Rust
+  stimulus.
+- The optimization suggestions are threshold rules over model output, not an
+  individualized prescription.
+
+The authoritative implementation is
+`backend/rust/analysis_engine/src/engine.rs`; the parity reference is
+`backend/core/MainClasses.py`.
+
+## Backend Runtime Boundaries
+
+The backend is not Rust-only. FastAPI still owns the application process and
+calls Rust through a Maturin/PyO3 extension for normalized split simulation.
+
+| Responsibility | Current implementation |
+| --- | --- |
+| Numeric split simulation, fatigue curves, recovery, atrophy debit, summaries | Rust (`backend/rust/analysis_engine`) when `ANALYSIS_ENGINE=rust` |
+| HTTP routing, middleware, CORS, compression, security headers, error mapping | Python/FastAPI (`backend/main.py`, `backend/api`) |
+| Cookie and native authentication bridge, JWT/JWKS validation, CSRF, session refresh/revocation | Python |
+| Request/response validation and OpenAPI schemas | Python/Pydantic |
+| Supabase Auth, PostgREST calls, RPC orchestration, pagination, and caches | Python |
+| Exercise-name matching, canonical patterns, custom exercises, and user overrides | Python |
+| Adapting database/request objects into normalized Rust engine input | Python (`backend/core/rust_analysis.py`) |
+| Split/workout imports and workout-history transforms | Python |
+| Reference engine, Rust fallback, shadow comparisons, and parity diagnostics | Python |
+
+Authentication includes Supabase email/password signup, confirmation, login,
+refresh, password recovery, logout, account deletion, Google and Apple sign-in,
+and connected-identity linking. The provider exchange and identity APIs remain
+Python/FastAPI work; see [the social-auth setup guide](SOCIAL_AUTH_SETUP.md).
+
+`ANALYSIS_ENGINE=python` is the code default. Production configuration in this
+repository selects `rust` with fallback disabled; `shadow` mode can retain
+Python as authority while sampling Rust parity. The current local 100-iteration
+heavy-split benchmark measured a Rust p95 of about 4 ms versus Python's 36 ms,
+but that only measures uncached engine execution—not authentication, database,
+network, or serverless startup time.
+
+## Full Rust API Migration
+
+If the API is migrated, **Axum** is the best fit for this codebase. It is a thin
+Tokio/Hyper routing layer, uses Tower middleware, and maps naturally to the
+existing Serde engine types. Actix Web is also fast, but Axum would require less
+conceptual translation from FastAPI dependencies and middleware while keeping
+the service modular. See the [Axum documentation](https://docs.rs/axum/latest/axum/).
+
+This would not be a framework-name swap. The difficult work is reproducing the
+95-endpoint contract, Supabase Auth behavior, rotating browser/native sessions,
+CSRF and rate limiting, Pydantic validation semantics, PostgREST/RPC behavior,
+OpenAPI output, and failure mapping. Supabase does not list an officially
+supported Rust client, so the least disruptive first version should use `reqwest`
+against Auth/PostgREST rather than changing database architecture at the same
+time. Direct `sqlx` access can be considered later, with an explicit replacement
+for RLS and token-scoped behavior.
+
+A migration that avoids a flag day would be:
+
+1. Split the current Rust package into a pure reusable engine crate plus the
+   existing PyO3 wrapper.
+2. Create one Axum service with shared Serde contracts, Tower security middleware,
+   JWKS caching, and `reqwest` clients for Supabase Auth/PostgREST.
+3. Port read-only health and compact workout routes first, then split/workout
+   mutations, and authentication last.
+4. Run both implementations against the same golden requests and compare status,
+   headers, JSON, database effects, and security behavior before moving each route.
+5. Preserve the FastAPI deployment as rollback until a full JWT lifetime and
+   production traffic window pass without parity failures.
+
+Vercel now has a first-party Rust Functions runtime, but it is currently
+[documented as Beta](https://vercel.com/docs/functions/runtimes/rust). Vercel also
+maps direct `api/*.rs` handlers to functions, so the deployment shape and plan's
+function limits need to be tested before committing to it. A containerized Axum
+service is the lower-risk production target if runtime maturity or serverless
+function layout becomes friction. Either way, colocating compute with the
+Supabase region will usually save more request time than replacing FastAPI's
+routing overhead alone.
 
 ## Deployment Notes
 
