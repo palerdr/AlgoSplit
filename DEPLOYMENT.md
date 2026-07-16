@@ -47,8 +47,8 @@ SUPABASE_JWT_SECRET=your-jwt-secret
    Branch: main
    Root Directory: backend
    Runtime: Python 3
-   Build Command: pip install -r requirements.txt
-   Start Command: uvicorn main:app --host 0.0.0.0 --port $PORT
+   Build Command: uv sync --frozen --no-dev
+   Start Command: uv run --frozen uvicorn main:app --host 0.0.0.0 --port $PORT
    ```
 
 4. **Add Environment Variables**

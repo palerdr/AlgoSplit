@@ -33,7 +33,7 @@ All three files are standalone Python scripts from an earlier CLI prototype. Non
 |------|--------|----------|
 | `my_split.json` | SAFE TO DELETE | Sample data file. Not referenced anywhere in code (grep: 0 hits). |
 | `progress.txt` | SAFE TO DELETE | Project tracker from early development. References "Phase 4: Frontend [0% COMPLETE]" — completely stale. Not imported or read by any code. |
-| `requirements.txt` | KEEP | Root-level duplicate of `backend/requirements.txt`. May be used by deployment. Verify with deploy config before removing. |
+| `requirements.txt` | REMOVED | Replaced by `backend/pyproject.toml` and the committed `backend/uv.lock`. |
 | `pytest.ini` | KEEP | Used by backend test runner. |
 | `README.md` | KEEP | Standard repo readme. |
 | `design/` | NEEDS REVIEW | Contains 5 design reference images (whoop charts, body mesh mockups). Not imported by code but may be useful as design references. Low priority. |
@@ -96,4 +96,4 @@ The entire `frontend/` directory is the Vite + React web app that is being migra
 
 - The `backend/core/exercise_parser.py` line 511 contains the string "legacy mapping" but this is a code comment, not an import of the `legacy/` directory.
 - The `expo-file-system/legacy` import in `InteractiveBody.tsx` is the Expo SDK module path, unrelated to the `legacy/` directory.
-- Root `requirements.txt` is identical in purpose to `backend/requirements.txt` — may be a deploy artifact. Verify before removing.
+- Backend dependency resolution is owned by `backend/pyproject.toml` and `backend/uv.lock`; requirements files must not be reintroduced as a second source of truth.

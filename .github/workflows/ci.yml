@@ -18,22 +18,30 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install backend dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r backend/requirements.txt
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
 
-      - name: Verify and package Rust analysis engine
+      - name: Verify backend lockfile
+        run: uv lock --check --project backend
+
+      - name: Install locked backend dependencies
+        run: uv sync --project backend --frozen --all-groups
+
+      - name: Verify Rust extension import
+        run: uv run --project backend python -c "import analysis_engine_rs"
+
+      - name: Verify Rust analysis engine
         run: |
           cargo fmt --manifest-path backend/rust/analysis_engine/Cargo.toml --check
           cargo clippy --manifest-path backend/rust/analysis_engine/Cargo.toml -- -D warnings
           cargo test --manifest-path backend/rust/analysis_engine/Cargo.toml
-          python -m maturin build --manifest-path backend/rust/analysis_engine/Cargo.toml --release --out backend/rust/analysis_engine/dist
-          python -m pip install backend/rust/analysis_engine/dist/*.whl
 
       - name: Run backend test suite
         run: |
-          pytest backend/tests --cov=backend --cov-report=term-missing --cov-report=xml
+          uv run --project backend pytest backend/tests --cov=backend --cov-report=term-missing --cov-report=xml
 
   # NOTE: the previous `frontend-tests` job targeted a `frontend/` directory
   # that never existed in this repo (likely vestige of an earlier layout) and

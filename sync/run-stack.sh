@@ -9,7 +9,7 @@ PID_DIR="$SYNC/pids"
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
 echo "Starting backend (uvicorn)..."
-nohup bash -lc "cd '$ROOT/backend' && python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000" \
+nohup bash -lc "cd '$ROOT' && uv run --project backend uvicorn main:app --app-dir backend --reload --host 0.0.0.0 --port 8000" \
   > "$LOG_DIR/backend.log" 2>&1 &
 echo $! > "$PID_DIR/backend.pid"
 

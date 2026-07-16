@@ -1,13 +1,13 @@
 # analysis_engine_rs
 
-Optional Rust compute extension for `/api/analyze-split`.
+Rust compute extension for `/api/analyze-split`. It is a required member of
+the backend uv workspace and is built by Maturin during `uv sync`.
 
-Build and install locally:
+Install the complete locked backend environment from the repository root:
 
 ```powershell
-python -m pip install maturin
-python -m maturin build --manifest-path backend\rust\analysis_engine\Cargo.toml --release
-python -m pip install --force-reinstall (Get-ChildItem backend\rust\analysis_engine\target\wheels\analysis_engine_rs-*.whl | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+uv sync --project backend --frozen --all-groups
+uv run --project backend python -c "import analysis_engine_rs"
 ```
 
 Runtime defaults to the Python engine. Enable Rust with:

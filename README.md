@@ -22,9 +22,9 @@ The project is no longer an API-only prototype. It now includes authentication, 
 | --- | --- |
 | App | Expo Router, React Native 0.83, React 19, TypeScript |
 | State/data | Zustand, TanStack Query, AsyncStorage, SecureStore |
-| API | FastAPI, Pydantic v2, Uvicorn |
+| API | FastAPI, Pydantic v2, Uvicorn, uv |
 | Database/auth | Supabase Postgres, Supabase Auth/JWT, RLS |
-| Analysis | Python engine under `backend/core` |
+| Analysis | Rust kernel with parity-gated Python fallback under `backend/core` |
 | Tests | Jest/Jest Expo, pytest |
 | Deployment | Expo/Vercel-style web export for app, Render/Fly/Railway for API, Supabase for data |
 
@@ -41,13 +41,15 @@ algosplit/
 |   |-- api/                # FastAPI routes, dependencies, security
 |   |-- core/               # Analysis engine and movement matching
 |   |-- db/migrations/      # Supabase SQL migrations
+|   |-- rust/               # Maturin/PyO3 analysis extension
 |   |-- schemas/            # Pydantic request/response models
+|   |-- pyproject.toml      # Backend project and uv workspace
+|   |-- uv.lock             # Locked Python and local-package dependencies
 |   `-- main.py
 |-- legacy/                 # Older prototype code retained for reference
 |-- sync/                   # Supporting sync utilities
 |-- DATA_FLOW.md            # Analysis/session flow notes
 |-- DEPLOYMENT.md           # Older deployment notes, still partly useful
-|-- requirements.txt        # Backend Python dependencies
 `-- README.md
 ```
 
@@ -56,7 +58,8 @@ algosplit/
 ### Prerequisites
 
 - Node.js and npm
-- Python 3.10+
+- Python 3.12 and uv
+- Rust toolchain (Cargo, rustc, rustfmt, and Clippy)
 - A Supabase project with the migrations in `backend/db/migrations` applied
 - Expo tooling through `npx expo`
 
@@ -67,17 +70,9 @@ algosplit/
 cd app
 npm ci
 
-# Backend
+# Backend (from the repository root)
 cd ..
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-On macOS/Linux, activate the virtualenv with:
-
-```bash
-source .venv/bin/activate
+uv sync --project backend --frozen --all-groups
 ```
 
 ### 2. Configure Environment
@@ -111,8 +106,7 @@ The backend also supports cookie/CSRF overrides such as `AUTH_COOKIE_NAME`, `AUT
 ### 3. Run the Backend
 
 ```bash
-cd backend
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uv run --project backend uvicorn main:app --app-dir backend --reload --host 0.0.0.0 --port 8000
 ```
 
 Useful API URLs:
@@ -155,7 +149,10 @@ Current caveat: the full Jest suite may hang in the older hook tests under `app/
 ### Backend
 
 ```bash
-pytest
+uv lock --check --project backend
+uv sync --project backend --frozen --all-groups
+uv run --project backend python -c "import analysis_engine_rs"
+uv run --project backend pytest backend/tests --cov=backend --cov-report=term-missing
 ```
 
 ## API Surface
@@ -234,7 +231,7 @@ Backend hosting options used by the project:
 Backend start command:
 
 ```bash
-uvicorn main:app --host 0.0.0.0 --port $PORT
+uv run --project backend uvicorn main:app --app-dir backend --host 0.0.0.0 --port $PORT
 ```
 
 App web export:

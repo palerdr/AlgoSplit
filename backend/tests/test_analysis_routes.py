@@ -1,6 +1,61 @@
 import api.analysis_routes as analysis_routes
 
 
+def test_authenticated_split_analysis_uses_rust_without_fallback(
+    client,
+    fake_supabase,
+    auth_user,
+    monkeypatch,
+):
+    """The deployed route must execute the installed Rust workspace member."""
+    monkeypatch.setenv("ANALYSIS_ENGINE", "rust")
+    monkeypatch.setenv("ANALYSIS_ENGINE_FALLBACK", "false")
+    monkeypatch.setattr(
+        analysis_routes,
+        "get_supabase_client_with_token",
+        lambda _token: fake_supabase,
+    )
+    monkeypatch.setattr(
+        analysis_routes,
+        "preload_user_exercise_maps",
+        lambda _user_id, supabase=None: {"custom": {}, "overrides": {}},
+    )
+
+    rust_calls = 0
+    run_rust = analysis_routes.run_rust_split_analysis
+
+    def tracked_rust(*args, **kwargs):
+        nonlocal rust_calls
+        rust_calls += 1
+        return run_rust(*args, **kwargs)
+
+    monkeypatch.setattr(analysis_routes, "run_rust_split_analysis", tracked_rust)
+    analysis_routes.invalidate_analysis_cache(auth_user.id)
+
+    response = client.post(
+        "/api/analyze-split",
+        json={
+            "name": "Authenticated Rust Acceptance",
+            "cycle_length": 7,
+            "stimulus_duration": 48,
+            "maintenance_volume": 3,
+            "dataset": "average",
+            "include_breakdowns": False,
+            "sessions": [
+                {
+                    "name": "Push",
+                    "day": 1,
+                    "exercises": [{"name": "Bench Press", "sets": 3}],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["split_name"] == "Authenticated Rust Acceptance"
+    assert rust_calls == 1
+
+
 def test_analyze_workouts_honors_client_timezone_offset(client, fake_supabase, auth_user, monkeypatch):
     monkeypatch.setattr(
         analysis_routes,
