@@ -1,6 +1,6 @@
 # AlgoSplit
 
-AlgoSplit is a training split planner, workout tracker, and analysis app. It combines a React Native/Expo client with a FastAPI backend that models muscle stimulus, fatigue, recovery, and training history against user-created splits.
+AlgoSplit is a training split planner, workout tracker, and analysis app. It combines a React Native/Expo client with a FastAPI (Python + Rust) backend that models muscle stimulus, fatigue, recovery, and training history against user-created splits.
 
 The project is no longer an API-only prototype. It now includes authentication, Supabase-backed persistence, split editing/importing, logged workout history, progress charts, custom exercise overrides, comparisons, bodyweight tracking, and program/session-template workflows.
 
@@ -22,11 +22,11 @@ The project is no longer an API-only prototype. It now includes authentication, 
 | --- | --- |
 | App | Expo Router, React Native 0.83, React 19, TypeScript |
 | State/data | Zustand, TanStack Query, AsyncStorage, SecureStore |
-| API | FastAPI, Pydantic v2, Uvicorn |
+| API | FastAPI, Pydantic v2, Uvicorn, uv |
 | Database/auth | Supabase Postgres, Supabase Auth/JWT, RLS |
-| Analysis | Python engine under `backend/core` |
+| Analysis | Rust kernel with parity-gated Python fallback under `backend/core` |
 | Tests | Jest/Jest Expo, pytest |
-| Deployment | Expo/Vercel-style web export for app, Render/Fly/Railway for API, Supabase for data |
+| Deployment | Vercel web export and FastAPI functions, EAS for native builds, Supabase for data |
 
 ## Repository Layout
 
@@ -41,13 +41,15 @@ algosplit/
 |   |-- api/                # FastAPI routes, dependencies, security
 |   |-- core/               # Analysis engine and movement matching
 |   |-- db/migrations/      # Supabase SQL migrations
+|   |-- rust/               # Maturin/PyO3 analysis extension
 |   |-- schemas/            # Pydantic request/response models
+|   |-- pyproject.toml      # Backend project and uv workspace
+|   |-- uv.lock             # Locked Python and local-package dependencies
 |   `-- main.py
 |-- legacy/                 # Older prototype code retained for reference
 |-- sync/                   # Supporting sync utilities
 |-- DATA_FLOW.md            # Analysis/session flow notes
 |-- DEPLOYMENT.md           # Older deployment notes, still partly useful
-|-- requirements.txt        # Backend Python dependencies
 `-- README.md
 ```
 
@@ -56,7 +58,8 @@ algosplit/
 ### Prerequisites
 
 - Node.js and npm
-- Python 3.10+
+- Python 3.12 and uv
+- Rust toolchain (Cargo, rustc, rustfmt, and Clippy)
 - A Supabase project with the migrations in `backend/db/migrations` applied
 - Expo tooling through `npx expo`
 
@@ -67,17 +70,9 @@ algosplit/
 cd app
 npm ci
 
-# Backend
+# Backend (from the repository root)
 cd ..
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-On macOS/Linux, activate the virtualenv with:
-
-```bash
-source .venv/bin/activate
+uv sync --project backend --frozen --all-groups
 ```
 
 ### 2. Configure Environment
@@ -85,15 +80,15 @@ source .venv/bin/activate
 For the app, create `app/.env` when overriding the default API URL:
 
 ```env
-EXPO_PUBLIC_API_URL=http://localhost:8000
+EXPO_PUBLIC_ALGOSPLIT_API=http://localhost:8000
 ```
 
 For the backend, configure these environment variables in your shell or hosting platform:
 
 ```env
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+SUPABASE_SECRET_KEY=sb_secret_...
 SUPABASE_JWT_SECRET=...
 FRONTEND_URL=http://localhost:8081
 
@@ -111,8 +106,7 @@ The backend also supports cookie/CSRF overrides such as `AUTH_COOKIE_NAME`, `AUT
 ### 3. Run the Backend
 
 ```bash
-cd backend
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uv run --project backend uvicorn main:app --app-dir backend --reload --host 0.0.0.0 --port 8000
 ```
 
 Useful API URLs:
@@ -137,7 +131,7 @@ npm run ios
 npm run android
 ```
 
-The Expo app default production API URL is set in `app/app.json` under `expo.extra.apiUrl`. Use `EXPO_PUBLIC_API_URL` locally when pointing at a different backend.
+Production web uses same-origin Vercel rewrites. The EAS production profile supplies the native API URL; use `EXPO_PUBLIC_ALGOSPLIT_API` locally when pointing at a different backend.
 
 ## Scripts and Checks
 
@@ -155,7 +149,10 @@ Current caveat: the full Jest suite may hang in the older hook tests under `app/
 ### Backend
 
 ```bash
-pytest
+uv lock --check --project backend
+uv sync --project backend --frozen --all-groups
+uv run --project backend python -c "import analysis_engine_rs"
+uv run --project backend pytest backend/tests --cov=backend --cov-report=term-missing
 ```
 
 ## API Surface
@@ -225,16 +222,14 @@ Typical production layout:
 Expo web/native app -> FastAPI API -> Supabase Auth/Postgres
 ```
 
-Backend hosting options used by the project:
-
-- Render
-- Fly.io
-- Railway
+The production web client and FastAPI backend are separate Vercel projects from
+this repository, rooted at `app/` and `backend/` respectively. See
+`DEPLOYMENT.md` for the current project settings and release sequence.
 
 Backend start command:
 
 ```bash
-uvicorn main:app --host 0.0.0.0 --port $PORT
+uv run --project backend uvicorn main:app --app-dir backend --host 0.0.0.0 --port $PORT
 ```
 
 App web export:
@@ -248,7 +243,8 @@ For production, set:
 
 - backend Supabase credentials
 - `APP_ENV=production`, `FRONTEND_URL=https://your-web-app.example` and `ALLOWED_HOSTS=your-api.example` (comma-separated values are accepted). The service refuses to boot without explicit production origins and hosts.
-- `AUTH_EXPOSE_ACCESS_TOKEN=false` for browser deployments. This keeps access and refresh tokens in Secure, HttpOnly cookies; browser refreshes use the CSRF-protected refresh cookie. Native-only deployments may set it to `true` and store the returned tokens with SecureStore.
+- `AUTH_EXPOSE_ACCESS_TOKEN=true` when the same deployment serves native clients. Tokens are returned only when the explicit native header is present, while browser responses remain cookie-only. Native credentials are stored with SecureStore.
+- Apply `backend/db/migrations/011_workout_idempotency.sql` before distributing the mobile build so persisted workout retries cannot create duplicates.
 - `AUTH_REFRESH_COOKIE_MAX_AGE_SECONDS` when the default 30-day browser session lifetime is unsuitable.
 - `MAX_REQUEST_BODY_BYTES` to adjust the default 1 MiB API request limit.
 - `TRUST_PROXY=true` only behind a trusted reverse proxy

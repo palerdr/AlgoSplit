@@ -100,6 +100,34 @@ def test_replace_split_rewrites_sessions_and_exercises(client):
     assert body["sessions"][0]["exercises"][0]["exercise_name"] == "Romanian Deadlift"
 
 
+def test_empty_rest_session_persists_and_analyzes_as_non_training_day(client):
+    payload = _create_payload("Rest Sentinel")
+    payload["cycle_length"] = 3
+    payload["sessions"] = [
+        payload["sessions"][0],
+        {"name": "Rest", "day_number": 2, "exercises": []},
+        {**payload["sessions"][1], "day_number": 3},
+    ]
+
+    create_resp = client.post("/api/splits", json=payload)
+    assert create_resp.status_code == 201
+    body = create_resp.json()
+    rest = next(session for session in body["sessions"] if session["day_number"] == 2)
+    assert rest["name"] == "Rest"
+    assert rest["exercises"] == []
+
+    analysis_resp = client.post(
+        f"/api/splits/{body['id']}/analyze?include_breakdowns=true"
+    )
+    assert analysis_resp.status_code == 200
+    analysis = analysis_resp.json()
+    assert analysis["summary"]["total_sets"] > 0
+    assert all(
+        breakdown["session_name"] != "Rest"
+        for breakdown in analysis["session_breakdowns"]
+    )
+
+
 def test_analyze_saved_split_passes_include_breakdowns_query(monkeypatch, client):
     now = datetime.now(timezone.utc)
     split = SplitResponse(
@@ -136,12 +164,12 @@ def test_analyze_saved_split_passes_include_breakdowns_query(monkeypatch, client
         ],
     )
 
-    async def fake_get_split(_split_id, _current_user):
+    def fake_get_split(_split_id, _current_user):
         return split
 
     captured = {"include_breakdowns": None}
 
-    def fake_run_analysis(request, user_id=None):
+    def fake_run_analysis(request, user_id=None, supabase=None):
         captured["include_breakdowns"] = request.include_breakdowns
         return {"ok": True, "include_breakdowns": request.include_breakdowns}
 
@@ -274,3 +302,87 @@ def test_list_splits_can_skip_nested_exercises(client):
     assert len(body["splits"]) == 1
     assert len(body["splits"][0]["sessions"]) == 2
     assert body["splits"][0]["sessions"][0]["exercises"] == []
+
+
+def test_standard_exercise_validation_stays_local(monkeypatch):
+    database_calls = 0
+
+    monkeypatch.setattr(splits_routes, "default_move_match", lambda _name: object())
+
+    def fail_preload(*_args, **_kwargs):
+        nonlocal database_calls
+        database_calls += 1
+        raise AssertionError("standard exercises must not preload account maps")
+
+    monkeypatch.setattr(splits_routes, "preload_user_exercise_maps", fail_preload)
+    exercises = [{"name": f"Known exercise {index}"} for index in range(29)]
+
+    assert splits_routes.validate_exercises(exercises, "user-123", object()) == []
+    assert database_calls == 0
+
+
+def test_unresolved_duplicate_exercises_use_one_preload_and_one_classification(monkeypatch):
+    preload_calls = 0
+    classification_calls = 0
+
+    monkeypatch.setattr(splits_routes, "default_move_match", lambda _name: None)
+
+    def preload(*_args, **_kwargs):
+        nonlocal preload_calls
+        preload_calls += 1
+        return ({}, {})
+
+    def classify(*_args, **_kwargs):
+        nonlocal classification_calls
+        classification_calls += 1
+        return object()
+
+    monkeypatch.setattr(splits_routes, "preload_user_exercise_maps", preload)
+    monkeypatch.setattr(splits_routes, "move_match_with_overrides", classify)
+
+    assert splits_routes.validate_exercises(
+        [{"name": "Custom Fly"}, {"name": "custom fly"}], "user-123", object()
+    ) == []
+    assert preload_calls == 1
+    assert classification_calls == 1
+
+
+def test_session_routes_preserve_id_order_profiles_and_allow_rest(client):
+    split_id = client.post("/api/splits", json=_create_payload("Session RPC")).json()["id"]
+
+    rest = client.post(
+        f"/api/splits/{split_id}/sessions",
+        json={"name": "Rest", "day_number": 3, "exercises": []},
+    )
+    assert rest.status_code == 201
+    session_id = rest.json()["id"]
+    assert rest.json()["exercises"] == []
+
+    updated = client.put(
+        f"/api/splits/{split_id}/sessions/{session_id}",
+        json={
+            "name": "Legs",
+            "day_number": 3,
+            "exercises": [
+                {"name": "Leg Press", "sets": 4, "resistance_profile": "ascending"},
+                {"name": "Leg Extension", "sets": 3, "resistance_profile": "descending"},
+            ],
+        },
+    )
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["id"] == session_id
+    assert [exercise["order_index"] for exercise in body["exercises"]] == [0, 1]
+    assert [exercise["resistance_profile"] for exercise in body["exercises"]] == [
+        "ascending",
+        "descending",
+    ]
+
+
+def test_session_route_maps_duplicate_day_to_conflict(client):
+    split_id = client.post("/api/splits", json=_create_payload("Duplicate Session")).json()["id"]
+    response = client.post(
+        f"/api/splits/{split_id}/sessions",
+        json={"name": "Another Push", "day_number": 1, "exercises": []},
+    )
+    assert response.status_code == 409

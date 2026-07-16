@@ -1,7 +1,27 @@
-backend/
-frontend/
-scripts/
-legacy/
-misc/
-sync/
-worktrees/
+# Dependency and build output
+node_modules/
+app/node_modules/
+app/dist/
+backend/.venv/
+backend/rust/**/target/
+backend/rust/**/dist/
+
+# Python caches and local test output
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Local configuration and credentials
+.env
+.env.*
+app/.env
+backend/.env
+
+# Repository-only material that neither deployment needs
+/legacy/
+/misc/
+/sync/
+/worktrees/

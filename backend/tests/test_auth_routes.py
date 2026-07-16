@@ -2,6 +2,7 @@ def test_signup_sets_auth_and_csrf_cookies(client):
     response = client.post(
         "/auth/signup",
         json={"email": "new-user@example.com", "password": "StrongPass123!"},
+        headers={"X-AlgoSplit-Client": "native"},
     )
 
     assert response.status_code == 201
@@ -24,6 +25,38 @@ def test_login_with_invalid_credentials_returns_401(client, fake_supabase):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid email or password"
+
+
+def test_browser_login_keeps_tokens_out_of_json(client):
+    client.post(
+        "/auth/signup",
+        json={"email": "user@example.com", "password": "StrongPass123!"},
+    )
+    response = client.post(
+        "/auth/login",
+        json={"email": "user@example.com", "password": "StrongPass123!"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["access_token"] == ""
+    assert response.json()["refresh_token"] == ""
+    assert "algosplit_access_token" in response.cookies
+
+
+def test_native_login_returns_tokens_without_relying_on_cookies(client):
+    client.post(
+        "/auth/signup",
+        json={"email": "user@example.com", "password": "StrongPass123!"},
+    )
+    response = client.post(
+        "/auth/login",
+        json={"email": "user@example.com", "password": "StrongPass123!"},
+        headers={"X-AlgoSplit-Client": "native"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["access_token"].startswith("token-")
+    assert response.json()["refresh_token"].startswith("refresh-")
 
 
 def test_get_current_user_returns_dependency_user(client):
@@ -63,8 +96,32 @@ def test_cookie_refresh_requires_csrf_and_rotates_session(client):
     )
 
     assert response.status_code == 200
-    assert response.json()["access_token"] == "token-refreshed"
+    assert response.json()["access_token"] == ""
     assert "algosplit_refresh_token" in response.headers.get("set-cookie", "")
+
+    native_spoof = client.post(
+        "/auth/refresh",
+        json={},
+        cookies=cookies,
+        headers={
+            "X-CSRF-Token": "csrf-token",
+            "X-AlgoSplit-Client": "native",
+        },
+    )
+    assert native_spoof.status_code == 200
+    assert native_spoof.json()["access_token"] == ""
+
+
+def test_native_refresh_returns_rotated_tokens_from_body(client):
+    response = client.post(
+        "/auth/refresh",
+        json={"refresh_token": "native-refresh-token"},
+        headers={"X-AlgoSplit-Client": "native"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["access_token"] == "token-refreshed"
+    assert response.json()["refresh_token"] == "refresh-token-refreshed"
 
 
 def test_api_responses_include_baseline_security_headers(client):

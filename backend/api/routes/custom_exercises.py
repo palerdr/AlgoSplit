@@ -16,6 +16,7 @@ from schemas.overrides import (
 from api.dependencies import get_current_user, AuthUser
 from db.supabase import get_supabase_client_with_token
 from core.muscle_regions import get_all_muscle_regions
+from core.exerciseMatching import invalidate_user_exercise_maps
 
 router = APIRouter(prefix="/api/custom-exercises", tags=["custom-exercises"])
 
@@ -125,6 +126,7 @@ async def create_custom_exercise(
         if not result.data:
             raise HTTPException(status_code=500, detail="Failed to create custom exercise - no data returned")
 
+        invalidate_user_exercise_maps(user.id)
         return _build_response(result.data[0])
 
     except HTTPException:
@@ -152,6 +154,7 @@ async def get_custom_exercise(
     if not result.data:
         raise HTTPException(status_code=404, detail="Custom exercise not found")
 
+    invalidate_user_exercise_maps(user.id)
     return _build_response(result.data[0])
 
 
@@ -268,4 +271,5 @@ async def delete_custom_exercise(
     if not result.data:
         raise HTTPException(status_code=404, detail="Custom exercise not found")
 
+    invalidate_user_exercise_maps(user.id)
     return None

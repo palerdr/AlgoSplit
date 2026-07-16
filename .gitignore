@@ -27,6 +27,7 @@ Thumbs.db
 # Testing
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 
 # Distribution
@@ -43,6 +44,10 @@ coverage/
 .next/
 out/
 .turbo/
+
+# Rust
+target/
+backend/rust/**/dist/
 
 # Database
 *.db
@@ -66,3 +71,8 @@ sync/pids/
 worktrees/*
 !worktrees/.gitkeep
 
+
+# Refreshed-frontend docs (root *.md is ignored above)
+!MIGRATION.md
+!FEATURE_COVERAGE.md
+!app/README.md

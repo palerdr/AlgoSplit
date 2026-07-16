@@ -20,10 +20,10 @@ from schemas.auth import (
 )
 from api.dependencies import _decode_token, get_current_user, AuthUser
 from api.security import (
-    AUTH_EXPOSE_ACCESS_TOKEN,
     AUTH_REFRESH_COOKIE_NAME,
     clear_auth_cookies,
     set_auth_cookies,
+    should_expose_auth_tokens,
     validate_csrf_request,
 )
 
@@ -41,7 +41,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     summary="Sign up a new user",
     description="Create a new user account with email and password",
 )
-async def signup(request: SignUpRequest, http_response: Response):
+async def signup(request: SignUpRequest, http_request: Request, http_response: Response):
     """
     Create a new user account
 
@@ -77,9 +77,10 @@ async def signup(request: SignUpRequest, http_response: Response):
         expires_in = sign_up_response.session.expires_in if sign_up_response.session else 3600
         if access_token:
             set_auth_cookies(http_response, access_token, refresh_token, expires_in)
+        expose_tokens = should_expose_auth_tokens(http_request)
         return AuthResponse(
-            access_token=access_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
-            refresh_token=refresh_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
+            access_token=access_token if expose_tokens else "",
+            refresh_token=refresh_token if expose_tokens else "",
             token_type="bearer",
             expires_in=expires_in,
             user=UserInfo(
@@ -131,7 +132,7 @@ async def signup(request: SignUpRequest, http_response: Response):
     summary="Log in a user",
     description="Authenticate a user with email and password",
 )
-async def login(request: LoginRequest, http_response: Response):
+async def login(request: LoginRequest, http_request: Request, http_response: Response):
     """
     Log in a user
 
@@ -168,9 +169,10 @@ async def login(request: LoginRequest, http_response: Response):
             login_response.session.refresh_token,
             login_response.session.expires_in,
         )
+        expose_tokens = should_expose_auth_tokens(http_request)
         return AuthResponse(
-            access_token=login_response.session.access_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
-            refresh_token=login_response.session.refresh_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
+            access_token=login_response.session.access_token if expose_tokens else "",
+            refresh_token=login_response.session.refresh_token if expose_tokens else "",
             token_type="bearer",
             expires_in=login_response.session.expires_in,
             user=UserInfo(
@@ -277,9 +279,10 @@ async def refresh(
             session_response.session.refresh_token,
             session_response.session.expires_in,
         )
+        expose_tokens = should_expose_auth_tokens(http_request) and not refresh_cookie
         return AuthResponse(
-            access_token=session_response.session.access_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
-            refresh_token=session_response.session.refresh_token if AUTH_EXPOSE_ACCESS_TOKEN else "",
+            access_token=session_response.session.access_token if expose_tokens else "",
+            refresh_token=session_response.session.refresh_token if expose_tokens else "",
             token_type="bearer",
             expires_in=session_response.session.expires_in,
             user=UserInfo(
@@ -446,7 +449,7 @@ async def delete_account(
         logger.exception("Failed to delete account for user %s", current_user.id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete account: {str(e)}",
+            detail="Failed to delete account",
         )
 
     clear_auth_cookies(response)

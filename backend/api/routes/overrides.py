@@ -13,6 +13,7 @@ from schemas.overrides import (
 from schemas.auth import ErrorResponse
 from api.dependencies import get_current_user, AuthUser
 from core.granular_patterns import GRANULAR_PATTERNS
+from core.exerciseMatching import invalidate_user_exercise_maps
 
 router = APIRouter(prefix="/api/exercise-overrides", tags=["Exercise Overrides"])
 
@@ -118,6 +119,7 @@ async def create_override(
 
             override_data = result.data[0]
 
+            invalidate_user_exercise_maps(current_user.id)
             return ExerciseOverrideResponse(
                 id=override_data["id"],
                 user_id=override_data["user_id"],
@@ -177,6 +179,7 @@ async def get_override(
 
         override_data = result.data[0]
 
+        invalidate_user_exercise_maps(current_user.id)
         return ExerciseOverrideResponse(
             id=override_data["id"],
             user_id=override_data["user_id"],
@@ -290,6 +293,7 @@ async def delete_override(
                 detail="Override not found",
             )
 
+        invalidate_user_exercise_maps(current_user.id)
         return None
 
     except HTTPException:

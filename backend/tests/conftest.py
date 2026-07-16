@@ -15,7 +15,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 
 os.environ.setdefault("SUPABASE_URL", "http://localhost:54321")
-os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon-key")
+os.environ.setdefault("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test-key")
 os.environ.setdefault("SUPABASE_JWT_SECRET", "test-jwt-secret")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 os.environ.setdefault("AUTH_EXPOSE_ACCESS_TOKEN", "true")
@@ -35,6 +35,23 @@ class FakeResult:
     def __init__(self, data: Any, count: int | None = None):
         self.data = data
         self.count = count
+
+
+class FakeRpcError(Exception):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class FakeRpcQuery:
+    def __init__(self, client: "FakeSupabaseClient", function_name: str, params: dict[str, Any]):
+        self.client = client
+        self.function_name = function_name
+        self.params = params
+
+    def execute(self) -> FakeResult:
+        return FakeResult(self.client.execute_rpc(self.function_name, self.params))
 
 
 class FakeAuthResponse:
@@ -309,6 +326,132 @@ class FakeSupabaseClient:
             self.tables[table_name] = []
             self._ids[table_name] = 0
         return FakeTableQuery(self, table_name)
+
+    def rpc(self, function_name: str, params: dict[str, Any]) -> FakeRpcQuery:
+        return FakeRpcQuery(self, function_name, params)
+
+    def _session_payload(self, session: dict[str, Any]) -> dict[str, Any]:
+        payload = copy.deepcopy(session)
+        payload["exercises"] = sorted(
+            [
+                copy.deepcopy(exercise)
+                for exercise in self.tables["exercises"]
+                if exercise["session_id"] == session["id"]
+            ],
+            key=lambda exercise: exercise["order_index"],
+        )
+        return payload
+
+    def execute_rpc(self, function_name: str, params: dict[str, Any]):
+        if function_name == "save_split_session":
+            split_id = params["p_split_id"]
+            if not any(split["id"] == split_id for split in self.tables["splits"]):
+                raise FakeRpcError("P0002", "split_not_found")
+            session_id = params.get("p_session_id")
+            day_number = params["p_day_number"]
+            if any(
+                session["split_id"] == split_id
+                and session["day_number"] == day_number
+                and session["id"] != session_id
+                for session in self.tables["sessions"]
+            ):
+                raise FakeRpcError("23505", "duplicate key")
+            now = _utc_now_iso()
+            if session_id is None:
+                session = {
+                    "id": self.next_id("sessions"),
+                    "split_id": split_id,
+                    "name": params["p_name"],
+                    "day_number": day_number,
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                self.tables["sessions"].append(session)
+            else:
+                session = next(
+                    (
+                        row for row in self.tables["sessions"]
+                        if row["id"] == session_id and row["split_id"] == split_id
+                    ),
+                    None,
+                )
+                if session is None:
+                    raise FakeRpcError("P0002", "session_not_found")
+                session.update(
+                    name=params["p_name"],
+                    day_number=day_number,
+                    updated_at=now,
+                )
+                self.tables["exercises"] = [
+                    exercise for exercise in self.tables["exercises"]
+                    if exercise["session_id"] != session_id
+                ]
+            for index, exercise in enumerate(params.get("p_exercises") or []):
+                self.tables["exercises"].append(
+                    {
+                        "id": self.next_id("exercises"),
+                        "session_id": session["id"],
+                        "exercise_name": exercise["name"],
+                        "sets": exercise["sets"],
+                        "order_index": index,
+                        "unilateral": exercise.get("unilateral", False),
+                        "resistance_profile": exercise.get("resistance_profile"),
+                        "created_at": now,
+                    }
+                )
+            return self._session_payload(session)
+
+        if function_name == "replace_split_full":
+            split = next(
+                (row for row in self.tables["splits"] if row["id"] == params["p_split_id"]),
+                None,
+            )
+            if split is None:
+                raise FakeRpcError("P0002", "split_not_found")
+            payload = params["p_split"]
+            split.update(
+                name=payload["name"],
+                cycle_length=payload.get("cycle_length"),
+                stimulus_duration=payload["stimulus_duration"],
+                maintenance_volume=payload["maintenance_volume"],
+                dataset=payload["dataset"],
+                updated_at=_utc_now_iso(),
+            )
+            old_ids = {
+                session["id"] for session in self.tables["sessions"]
+                if session["split_id"] == split["id"]
+            }
+            self.tables["sessions"] = [
+                session for session in self.tables["sessions"]
+                if session["id"] not in old_ids
+            ]
+            self.tables["exercises"] = [
+                exercise for exercise in self.tables["exercises"]
+                if exercise["session_id"] not in old_ids
+            ]
+            for session_payload in payload["sessions"]:
+                self.execute_rpc(
+                    "save_split_session",
+                    {
+                        "p_split_id": split["id"],
+                        "p_session_id": None,
+                        "p_name": session_payload["name"],
+                        "p_day_number": session_payload["day_number"],
+                        "p_exercises": session_payload.get("exercises", []),
+                    },
+                )
+            response = copy.deepcopy(split)
+            response["sessions"] = sorted(
+                [
+                    self._session_payload(session)
+                    for session in self.tables["sessions"]
+                    if session["split_id"] == split["id"]
+                ],
+                key=lambda session: session["day_number"],
+            )
+            return response
+
+        raise FakeRpcError("PGRST202", f"Unknown RPC {function_name}")
 
 
 @pytest.fixture

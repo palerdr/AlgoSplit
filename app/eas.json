@@ -1,0 +1,26 @@
+{
+  "cli": {
+    "version": ">= 16.17.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      }
+    },
+    "preview": {
+      "distribution": "internal"
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_ALGOSPLIT_API": "https://algosplit-api-staging.vercel.app"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

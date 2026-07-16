@@ -1,16 +1,17 @@
 {
   "installCommand": "npm install",
-  "buildCommand": "npx expo export --platform web",
+  "buildCommand": "npm run build:web",
   "outputDirectory": "dist",
   "framework": null,
   "env": {
     "NODE_OPTIONS": "--max-old-space-size=4096"
   },
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://algosplit.onrender.com/api/:path*" },
-    { "source": "/auth/:path*", "destination": "https://algosplit.onrender.com/auth/:path*" },
-    { "source": "/health", "destination": "https://algosplit.onrender.com/health" },
-    { "source": "/keepalive", "destination": "https://algosplit.onrender.com/keepalive" },
+    { "source": "/api/:path*", "destination": "https://algosplit-api-staging.vercel.app/api/:path*" },
+    { "source": "/auth/:path*", "destination": "https://algosplit-api-staging.vercel.app/auth/:path*" },
+    { "source": "/health", "destination": "https://algosplit-api-staging.vercel.app/health" },
+    { "source": "/keepalive", "destination": "https://algosplit-api-staging.vercel.app/keepalive" },
+    { "source": "/privacy", "destination": "/privacy.html" },
     { "source": "/((?!api/|auth/).*)", "destination": "/index.html" }
   ],
   "headers": [

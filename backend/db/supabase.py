@@ -19,8 +19,8 @@ load_dotenv()
 
 # Supabase configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_PUBLISHABLE_KEY = os.getenv("SUPABASE_PUBLISHABLE_KEY")
+SUPABASE_SECRET_KEY = os.getenv("SUPABASE_SECRET_KEY")
 
 # Validate required environment variables
 if not SUPABASE_URL:
@@ -29,9 +29,9 @@ if not SUPABASE_URL:
         "Please copy .env.example to .env and configure your Supabase credentials."
     )
 
-if not SUPABASE_ANON_KEY:
+if not SUPABASE_PUBLISHABLE_KEY:
     raise ValueError(
-        "SUPABASE_ANON_KEY environment variable is not set. "
+        "SUPABASE_PUBLISHABLE_KEY environment variable is not set. "
         "Please copy .env.example to .env and configure your Supabase credentials."
     )
 
@@ -60,7 +60,7 @@ def _get_postgrest_pool() -> tuple[httpx.Client, str]:
 
 def get_supabase_client() -> Client:
     """
-    Get the Supabase client instance (uses anon key)
+    Get the Supabase client instance (uses the publishable key).
     This client respects Row Level Security (RLS) policies
 
     Returns:
@@ -69,14 +69,14 @@ def get_supabase_client() -> Client:
     global _supabase_client
 
     if _supabase_client is None:
-        _supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        _supabase_client = create_client(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
 
     return _supabase_client
 
 
 def get_supabase_admin() -> Client:
     """
-    Get the Supabase admin client instance (uses service role key)
+    Get the Supabase admin client instance (uses the server-only secret key).
     This client bypasses Row Level Security (RLS) policies
     USE WITH CAUTION - only for server-side operations that need elevated privileges
 
@@ -84,18 +84,18 @@ def get_supabase_admin() -> Client:
         Client: Supabase admin client instance
 
     Raises:
-        ValueError: If SUPABASE_SERVICE_ROLE_KEY is not set
+        ValueError: If SUPABASE_SECRET_KEY is not set
     """
     global _supabase_admin
 
-    if not SUPABASE_SERVICE_ROLE_KEY:
+    if not SUPABASE_SECRET_KEY:
         raise ValueError(
-            "SUPABASE_SERVICE_ROLE_KEY environment variable is not set. "
+            "SUPABASE_SECRET_KEY environment variable is not set. "
             "This is required for admin operations."
         )
 
     if _supabase_admin is None:
-        _supabase_admin = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+        _supabase_admin = create_client(SUPABASE_URL, SUPABASE_SECRET_KEY)
 
     return _supabase_admin
 
@@ -140,7 +140,7 @@ def get_supabase_client_with_token(access_token: str) -> SyncPostgrestClient:
         rest_url,
         schema="public",
         headers={
-            "apiKey": SUPABASE_ANON_KEY,
+            "apiKey": SUPABASE_PUBLISHABLE_KEY,
             "Authorization": f"Bearer {access_token}",
         },
         http_client=http_client,

@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 import logging
 import os
@@ -78,6 +79,12 @@ async def security_headers_middleware(request: Request, call_next):
 @app.exception_handler(HTTPException)
 async def safe_http_exception_handler(_: Request, exc: HTTPException):
     if exc.status_code >= 500:
+        safe_service_messages = {
+            "Database performance migration 012 is required before using this endpoint.",
+            "Exercise validation is temporarily unavailable. Please retry.",
+        }
+        if exc.status_code == 503 and exc.detail in safe_service_messages:
+            return JSONResponse(status_code=503, content={"detail": exc.detail})
         request_id = uuid4().hex
         logger.exception("HTTP %s [request_id=%s]", exc.status_code, request_id)
         return JSONResponse(
@@ -123,7 +130,7 @@ RATE_LIMIT_MAX_BUCKETS = int(os.getenv("RATE_LIMIT_MAX_BUCKETS", "50000"))
 RATE_LIMIT_CLEANUP_INTERVAL = int(os.getenv("RATE_LIMIT_CLEANUP_INTERVAL", "300"))
 
 # Set TRUST_PROXY=true only when running behind a verified reverse proxy
-# (e.g., Render, Railway, Vercel serverless functions, or your own nginx).
+# (e.g., Vercel serverless functions or your own nginx).
 TRUST_PROXY = os.getenv("TRUST_PROXY", "false").lower() == "true"
 
 rate_limiter = RateLimiter(
@@ -228,6 +235,7 @@ else:
     )
     allowed_hosts = ["localhost", "127.0.0.1", "testserver"]
 
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 
 app.add_middleware(
@@ -235,7 +243,7 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
-    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
+    allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-AlgoSplit-Client"],
     expose_headers=["Retry-After", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"],
 )
 

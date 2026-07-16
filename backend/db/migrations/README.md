@@ -14,6 +14,8 @@ This directory contains SQL migration files for setting up the AlgoSplit databas
    - `003_create_exercise_overrides.sql`
    - `004_setup_rls_policies.sql`
    - `005_create_triggers.sql`
+   - Continue through the remaining numbered migrations, including
+     `012_performance_rpcs.sql` before deploying the optimized frontend/backend.
 
 4. After running all migrations, verify the tables were created:
    ```sql
@@ -49,6 +51,7 @@ This directory contains SQL migration files for setting up the AlgoSplit databas
 | `003_create_exercise_overrides.sql` | Creates exercise_overrides table |
 | `004_setup_rls_policies.sql` | Sets up Row Level Security policies for all tables |
 | `005_create_triggers.sql` | Creates triggers for automatic timestamp updates |
+| `012_performance_rpcs.sql` | Adds atomic split-session saves and compact workout overview/progress RPCs |
 
 ## Schema Overview
 

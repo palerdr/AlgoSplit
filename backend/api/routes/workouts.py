@@ -14,6 +14,11 @@ from schemas.workouts import (
     WorkoutHistoryResponse,
     WorkoutSummaryListResponse,
     WorkoutSummaryResponse,
+    WorkoutOverviewPoint,
+    WorkoutOverviewResponse,
+    WorkoutProgressExercise,
+    WorkoutProgressWorkout,
+    WorkoutProgressResponse,
     WorkoutDatesResponse,
     WorkoutStatsResponse,
     WorkoutExerciseResponse,
@@ -123,6 +128,71 @@ def validate_workout_exercises(workout: WorkoutLogCreate) -> None:
         )
 
 
+def workout_exercise_rows(workout: WorkoutLogCreate, workout_log_id: str) -> list[dict]:
+    """Serialize workout exercises consistently for initial writes and repair retries."""
+    rows = []
+    for idx, exercise in enumerate(workout.exercises):
+        row = {
+            "workout_log_id": workout_log_id,
+            "exercise_name": exercise.exercise_name,
+            "sets_completed": exercise.sets_completed,
+            "reps": exercise.reps,
+            "weight": exercise.weight,
+            "order_index": idx,
+        }
+        if exercise.notes:
+            row["notes"] = exercise.notes
+        if exercise.rir is not None:
+            row["rir"] = exercise.rir
+        rows.append(row)
+    return rows
+
+
+def find_idempotent_workout(
+    supabase,
+    user_id: str,
+    client_request_id: str,
+    workout: WorkoutLogCreate | None = None,
+):
+    """Return an existing retry and repair a log interrupted before exercise insertion."""
+    existing_result = (
+        supabase.table("workout_logs")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("client_request_id", client_request_id)
+        .limit(1)
+        .execute()
+    )
+    if not existing_result.data:
+        return None
+    workout_data = existing_result.data[0]
+    exercises_result = (
+        supabase.table("workout_exercises")
+        .select("*")
+        .eq("workout_log_id", workout_data["id"])
+        .order("order_index")
+        .execute()
+    )
+    exercises_data = exercises_result.data or []
+    if not exercises_data and workout is not None:
+        try:
+            repaired = supabase.table("workout_exercises").insert(
+                workout_exercise_rows(workout, workout_data["id"])
+            ).execute()
+            exercises_data = repaired.data or []
+        except Exception:
+            # A concurrent request may have completed the same repair.
+            repaired = (
+                supabase.table("workout_exercises")
+                .select("*")
+                .eq("workout_log_id", workout_data["id"])
+                .order("order_index")
+                .execute()
+            )
+            exercises_data = repaired.data or []
+    return build_workout_response(workout_data, exercises_data)
+
+
 def build_workout_summary_response(
     workout_data: dict, exercises_data: list
 ) -> WorkoutSummaryResponse:
@@ -161,7 +231,7 @@ def build_workout_summary_response(
     summary="Log a completed workout",
     description="Record a completed workout with exercises, sets, reps, and weights",
 )
-async def log_workout(
+def log_workout(
     workout: WorkoutLogCreate,
     current_user: AuthUser = Depends(get_current_user),
 ):
@@ -177,6 +247,13 @@ async def log_workout(
 
         validate_workout_exercises(workout)
 
+        if workout.client_request_id:
+            existing = find_idempotent_workout(
+                supabase, current_user.id, workout.client_request_id, workout
+            )
+            if existing:
+                return existing
+
         # Use provided completed_at or default to now
         completed_at = workout.completed_at or datetime.utcnow()
 
@@ -186,6 +263,8 @@ async def log_workout(
             "session_name": workout.session_name,
             "completed_at": completed_at.isoformat(),
         }
+        if workout.client_request_id:
+            workout_data["client_request_id"] = workout.client_request_id
 
         # Validate session_id FK before inserting — the session may have been
         # deleted/recreated if the user replaced exercises mid-workout
@@ -211,7 +290,17 @@ async def log_workout(
         if workout.notes:
             workout_data["notes"] = workout.notes
 
-        workout_result = supabase.table("workout_logs").insert(workout_data).execute()
+        try:
+            workout_result = supabase.table("workout_logs").insert(workout_data).execute()
+        except Exception:
+            # A concurrent retry may have won the unique-key race.
+            if workout.client_request_id:
+                existing = find_idempotent_workout(
+                    supabase, current_user.id, workout.client_request_id, workout
+                )
+                if existing:
+                    return existing
+            raise
 
         if not workout_result.data:
             raise HTTPException(
@@ -221,25 +310,8 @@ async def log_workout(
 
         workout_log_id = workout_result.data[0]["id"]
 
-        # Batch insert all exercises in a single DB round-trip
-        exercise_rows = []
-        for idx, exercise in enumerate(workout.exercises):
-            row = {
-                "workout_log_id": workout_log_id,
-                "exercise_name": exercise.exercise_name,
-                "sets_completed": exercise.sets_completed,
-                "reps": exercise.reps,
-                "weight": exercise.weight,
-                "order_index": idx,
-            }
-
-            if exercise.notes:
-                row["notes"] = exercise.notes
-            if exercise.rir is not None:
-                row["rir"] = exercise.rir
-
-            exercise_rows.append(row)
-
+        # Batch insert all exercises in a single DB round-trip.
+        exercise_rows = workout_exercise_rows(workout, workout_log_id)
         exercises_result = supabase.table("workout_exercises").insert(
             exercise_rows
         ).execute()
@@ -269,9 +341,10 @@ async def log_workout(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("Failed to log workout")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to log workout: {str(e)}",
+            detail="Failed to log workout",
         )
 
 
@@ -284,7 +357,7 @@ async def log_workout(
     summary="Get workout history",
     description="Get all logged workouts for the authenticated user",
 )
-async def get_workout_history(
+def get_workout_history(
     current_user: AuthUser = Depends(get_current_user),
     limit: int = Query(50, ge=1, le=500, description="Number of workouts to return"),
     offset: int = Query(0, ge=0, description="Number of workouts to skip"),
@@ -358,7 +431,7 @@ async def get_workout_history(
     summary="Get workout history summaries",
     description="Get compact workout history cards for the authenticated user",
 )
-async def get_workout_history_summaries(
+def get_workout_history_summaries(
     current_user: AuthUser = Depends(get_current_user),
     limit: int = Query(50, ge=1, le=500, description="Number of workouts to return"),
     offset: int = Query(0, ge=0, description="Number of workouts to skip"),
@@ -429,6 +502,102 @@ async def get_workout_history_summaries(
         )
 
 
+def _performance_rpc_unavailable(exc: Exception) -> HTTPException:
+    code = str(getattr(exc, "code", ""))
+    message = str(getattr(exc, "message", exc)).lower()
+    if code in {"42883", "PGRST202"} or "schema cache" in message:
+        return HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database performance migration 012 is required before using this endpoint.",
+        )
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail="Could not load optimized workout data.",
+    )
+
+
+@router.get(
+    "/overview",
+    response_model=WorkoutOverviewResponse,
+    summary="Get compact workout overview aggregates",
+)
+def get_workout_overview(
+    days: int = Query(180, ge=1, le=730),
+    current_user: AuthUser = Depends(get_current_user),
+):
+    try:
+        supabase = get_supabase_client_with_token(current_user.access_token)
+        result = supabase.rpc("get_workout_overview", {"p_days": days}).execute()
+        points = [
+            WorkoutOverviewPoint(
+                id=str(row["id"]),
+                completed_at=row["completed_at"],
+                total_sets=int(row.get("total_sets") or 0),
+                total_volume=float(row.get("total_volume") or 0),
+            )
+            for row in (result.data or [])
+        ]
+        return WorkoutOverviewResponse(workouts=points)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _performance_rpc_unavailable(exc) from exc
+
+
+@router.get(
+    "/progress",
+    response_model=WorkoutProgressResponse,
+    summary="Get paginated workout rows for one progress exercise",
+)
+def get_workout_progress(
+    exercise_name: str = Query(..., min_length=1, max_length=200),
+    days: Optional[int] = Query(None, ge=1, le=3650),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    current_user: AuthUser = Depends(get_current_user),
+):
+    try:
+        supabase = get_supabase_client_with_token(current_user.access_token)
+        result = supabase.rpc(
+            "get_workout_progress",
+            {
+                "p_exercise_name": exercise_name,
+                "p_days": days,
+                "p_limit": limit,
+                "p_offset": offset,
+            },
+        ).execute()
+        rows = result.data or []
+        grouped: dict[str, dict] = {}
+        for row in rows:
+            workout_id = str(row["workout_id"])
+            workout = grouped.setdefault(
+                workout_id,
+                {
+                    "id": workout_id,
+                    "completed_at": row["completed_at"],
+                    "session_name": row["session_name"],
+                    "exercises": [],
+                },
+            )
+            workout["exercises"].append(
+                WorkoutProgressExercise(
+                    exercise_name=row["exercise_name"],
+                    reps=row.get("reps") or [],
+                    weight=row.get("weight") or [],
+                    rir=row.get("rir"),
+                    order_index=int(row.get("order_index") or 0),
+                )
+            )
+        workouts = [WorkoutProgressWorkout(**workout) for workout in grouped.values()]
+        total = int(rows[0].get("total_count") or 0) if rows else 0
+        return WorkoutProgressResponse(workouts=workouts, total=total)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _performance_rpc_unavailable(exc) from exc
+
+
 @router.get(
     "/dates",
     response_model=WorkoutDatesResponse,
@@ -438,7 +607,7 @@ async def get_workout_history_summaries(
     summary="Get workout dates",
     description="Get distinct dates with completed workouts (for calendar dots)",
 )
-async def get_workout_dates(
+def get_workout_dates(
     current_user: AuthUser = Depends(get_current_user),
     days: Optional[int] = Query(None, ge=1, description="Filter to last N days"),
 ):
@@ -494,7 +663,7 @@ async def get_workout_dates(
     summary="Clear exercise history",
     description="Delete all past workout_exercises rows for a specific exercise name",
 )
-async def clear_exercise_history(
+def clear_exercise_history(
     exercise_name: str,
     current_user: AuthUser = Depends(get_current_user),
 ):
@@ -540,7 +709,7 @@ async def clear_exercise_history(
     summary="Update a logged workout",
     description="Replace exercises in a logged workout (does NOT update split template)",
 )
-async def update_workout(
+def update_workout(
     workout_id: str,
     workout: WorkoutLogCreate,
     current_user: AuthUser = Depends(get_current_user),
@@ -630,7 +799,7 @@ async def update_workout(
     summary="Get a specific workout",
     description="Get details of a specific workout by ID",
 )
-async def get_workout(
+def get_workout(
     workout_id: str,
     current_user: AuthUser = Depends(get_current_user),
 ):
@@ -682,7 +851,7 @@ async def get_workout(
     summary="Get workout statistics",
     description="Get aggregate statistics and progress metrics",
 )
-async def get_workout_stats(
+def get_workout_stats(
     current_user: AuthUser = Depends(get_current_user),
     days: Optional[int] = Query(None, ge=1, description="Calculate stats for last N days"),
 ):
@@ -795,7 +964,7 @@ async def get_workout_stats(
     summary="Delete a workout",
     description="Delete a logged workout (cascade deletes exercises)",
 )
-async def delete_workout(
+def delete_workout(
     workout_id: str,
     current_user: AuthUser = Depends(get_current_user),
 ):

@@ -68,7 +68,10 @@ class SessionCreate(BaseModel):
 
     name: str = Field(..., min_length=1, description="Session name (e.g., 'Push Day')")
     day_number: int = Field(..., ge=1, le=7, description="Day number in the weekly cycle (1-7)")
-    exercises: List[ExerciseCreate] = Field(..., min_items=1, description="Exercises in this session")
+    exercises: List[ExerciseCreate] = Field(
+        default_factory=list,
+        description="Exercises in this session; empty sessions are non-executable rest days",
+    )
 
     model_config = {
         "json_schema_extra": {

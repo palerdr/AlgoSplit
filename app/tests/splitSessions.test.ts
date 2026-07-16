@@ -1,0 +1,165 @@
+import type { ExerciseResponse, SplitResponse } from '../src/api/backend';
+import {
+  accountWorkoutEditorGroups,
+  accountWorkoutGroups,
+  accountWorkoutPlans,
+  resolveSavedExercise,
+} from '../src/workout/splitSessions';
+
+function exercise(
+  overrides: Partial<ExerciseResponse> & Pick<ExerciseResponse, 'id' | 'exercise_name'>
+): ExerciseResponse {
+  return {
+    session_id: 'session-1',
+    sets: 3,
+    order_index: 0,
+    unilateral: false,
+    resistance_profile: 'mid',
+    created_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  };
+}
+
+function split(): SplitResponse {
+  return {
+    id: 'split-1',
+    user_id: 'user-1',
+    name: 'My Actual Split',
+    cycle_length: 8,
+    stimulus_duration: 48,
+    maintenance_volume: 4,
+    dataset: 'average',
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
+    sessions: [
+      {
+        id: 'session-2',
+        split_id: 'split-1',
+        name: 'Lower',
+        day_number: 4,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        exercises: [
+          exercise({ id: 'ex-2', exercise_name: 'Leg Press', order_index: 1, sets: 4 }),
+          exercise({ id: 'ex-1', exercise_name: 'Back Squat', order_index: 0, sets: 5 }),
+        ],
+      },
+      {
+        id: 'session-1',
+        split_id: 'split-1',
+        name: 'Upper',
+        day_number: 1,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+        exercises: [exercise({ id: 'ex-3', exercise_name: 'Barbell Bench Press' })],
+      },
+    ],
+  };
+}
+
+describe('account workout plans', () => {
+  it('groups sessions beneath their persisted split', () => {
+    const groups = accountWorkoutGroups([split()]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      id: 'split-1',
+      name: 'My Actual Split',
+      cycleLength: 8,
+    });
+    expect(groups[0].sessions.map((session) => session.name)).toEqual(['Upper', 'Lower']);
+  });
+
+  it('flattens real split sessions in day and exercise order', () => {
+    const plans = accountWorkoutPlans([split()]);
+
+    expect(plans.map((plan) => plan.name)).toEqual(['Upper', 'Lower']);
+    expect(plans[0]).toMatchObject({
+      splitName: 'My Actual Split',
+      dayNumber: 1,
+      sessionId: 'session-1',
+    });
+    expect(plans[1].exercises.map(({ exercise, sets }) => [exercise.name, sets])).toEqual([
+      ['Back Squat', 5],
+      ['Leg Press', 4],
+    ]);
+  });
+
+  it('resolves catalog exercises using normalized saved names', () => {
+    const resolved = resolveSavedExercise(
+      exercise({ id: 'catalog', exercise_name: 'barbell-bench press' })
+    );
+
+    expect(resolved.id).toBe('barbell_bench_press');
+    expect(resolved.muscles.length).toBeGreaterThan(0);
+  });
+
+  it('keeps custom exercises instead of silently dropping them', () => {
+    const resolved = resolveSavedExercise(
+      exercise({
+        id: 'custom-9',
+        exercise_name: 'My Cable Sweep',
+        unilateral: true,
+        resistance_profile: 'ascending',
+      })
+    );
+
+    expect(resolved).toMatchObject({
+      id: 'account:custom-9',
+      name: 'My Cable Sweep',
+      unilateral: true,
+      resistanceProfile: 'ascending',
+      muscles: [],
+    });
+  });
+
+  it('adds only interior rest sentinels and excludes them from the start registry', () => {
+    const source = split();
+    source.cycle_length = 4;
+    source.sessions.find((session) => session.day_number === 4)!.day_number = 3;
+
+    const editorDays = accountWorkoutEditorGroups([source])[0].sessions;
+    expect(editorDays.map((entry) => [entry.dayNumber, entry.kind])).toEqual([
+      [1, 'workout'],
+      [2, 'rest'],
+      [3, 'workout'],
+    ]);
+    expect(editorDays.some((entry) => entry.dayNumber === 4)).toBe(false);
+    expect(editorDays[1]).toMatchObject({
+      sessionId: null,
+      name: 'Rest',
+      synthetic: true,
+    });
+
+    expect(accountWorkoutGroups([source])[0].sessions.map((entry) => entry.dayNumber)).toEqual([
+      1,
+      3,
+    ]);
+  });
+
+  it('keeps a persisted empty rest day editable but never executable', () => {
+    const source = split();
+    source.sessions.splice(1, 0, {
+      id: 'rest-2',
+      split_id: source.id,
+      name: 'Rest',
+      day_number: 2,
+      exercises: [],
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    });
+
+    const rest = accountWorkoutEditorGroups([source])[0].sessions.find(
+      (entry) => entry.dayNumber === 2
+    );
+    expect(rest).toMatchObject({
+      kind: 'rest',
+      sessionId: 'rest-2',
+      synthetic: false,
+    });
+    expect(accountWorkoutGroups([source])[0].sessions.map((entry) => entry.dayNumber)).toEqual([
+      1,
+      4,
+    ]);
+  });
+});

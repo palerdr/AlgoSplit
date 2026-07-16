@@ -9,6 +9,9 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Optional
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
+import logging
+import os
+import random
 import threading
 import time as _time
 import json
@@ -33,6 +36,7 @@ from schemas.models import (
 from core.MainClasses import Split, MuscleRegion
 from core.movementMatching import move_match
 from core.exerciseMatching import preload_user_exercise_maps
+from core.rust_analysis import compare_analysis_responses, run_rust_split_analysis
 from core.muscle_regions import get_all_muscle_regions, get_parent_groups
 from api.dependencies import get_current_user, AuthUser
 from db.supabase import get_supabase_client_with_token
@@ -42,6 +46,7 @@ from core.granular_patterns import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -88,11 +93,157 @@ def invalidate_analysis_cache(user_id: str) -> None:
 
 
 # ============================================================================
+# ANALYSIS ENGINE DISPATCH
+# ============================================================================
+
+def _analysis_engine_mode() -> str:
+    """Return the configured engine mode, defaulting safely to Python."""
+    mode = os.getenv("ANALYSIS_ENGINE", "python").lower()
+    if mode in {"python", "rust", "shadow"}:
+        return mode
+    logger.warning("analysis_engine_invalid_mode mode=%s; using python", mode)
+    return "python"
+
+
+def _shadow_sample_rate(mode: str) -> float:
+    default = "0.01" if mode == "shadow" else "0"
+    try:
+        return min(1.0, max(0.0, float(os.getenv("ANALYSIS_SHADOW_SAMPLE_RATE", default))))
+    except ValueError:
+        logger.warning("analysis_engine_invalid_shadow_sample_rate; disabling shadow comparison")
+        return 0.0
+
+
+def _should_shadow_compare(mode: str) -> bool:
+    return random.random() < _shadow_sample_rate(mode)
+
+
+def _run_python_analysis(
+    request: SplitRequest,
+    days: list,
+    user_id: Optional[str],
+    user_exercise_maps: Optional[dict],
+) -> AnalysisResponse:
+    split = Split(
+        name=request.name,
+        days=days,
+        stimulus_duration=request.stimulus_duration,
+        maintenance_volume=request.maintenance_volume,
+        dataset=request.dataset,
+        cycle_length=request.cycle_length,
+        user_id=user_id,
+        user_exercise_maps=user_exercise_maps,
+    )
+    split.simulate_split(collect_breakdowns=request.include_breakdowns)
+    return _build_response(split, request)
+
+
+def _run_rust_analysis(
+    request: SplitRequest,
+    user_id: Optional[str],
+    user_exercise_maps: Optional[dict],
+) -> AnalysisResponse:
+    return run_rust_split_analysis(
+        request,
+        user_id,
+        user_exercise_maps,
+    )
+
+
+def _log_engine_event(
+    event: str,
+    *,
+    primary: str,
+    primary_duration_ms: float,
+    secondary_duration_ms: Optional[float] = None,
+    difference: Optional[str] = None,
+) -> None:
+    """Emit safe observability without request or user data."""
+    logger.info(
+        "analysis_engine_event event=%s primary=%s primary_duration_ms=%.3f "
+        "secondary_duration_ms=%s difference=%s",
+        event,
+        primary,
+        primary_duration_ms,
+        f"{secondary_duration_ms:.3f}" if secondary_duration_ms is not None else "-",
+        difference or "-",
+    )
+
+
+def _run_analysis_engine(
+    request: SplitRequest,
+    days: list,
+    user_id: Optional[str],
+    user_exercise_maps: Optional[dict],
+) -> AnalysisResponse:
+    """Run the selected engine and compare the alternate engine when sampled."""
+    mode = _analysis_engine_mode()
+
+    if mode == "python":
+        return _run_python_analysis(request, days, user_id, user_exercise_maps)
+
+    if mode == "shadow":
+        start = _time.perf_counter()
+        python_response = _run_python_analysis(request, days, user_id, user_exercise_maps)
+        python_duration_ms = (_time.perf_counter() - start) * 1000
+        if not _should_shadow_compare(mode):
+            return python_response
+
+        rust_start = _time.perf_counter()
+        try:
+            rust_response = _run_rust_analysis(request, user_id, user_exercise_maps)
+        except Exception:
+            logger.exception("analysis_engine_event event=shadow_rust_error primary=python")
+            return python_response
+
+        rust_duration_ms = (_time.perf_counter() - rust_start) * 1000
+        difference = compare_analysis_responses(python_response, rust_response)
+        _log_engine_event(
+            "shadow_match" if difference is None else "shadow_mismatch",
+            primary="python",
+            primary_duration_ms=python_duration_ms,
+            secondary_duration_ms=rust_duration_ms,
+            difference=difference,
+        )
+        return python_response
+
+    rust_start = _time.perf_counter()
+    try:
+        rust_response = _run_rust_analysis(request, user_id, user_exercise_maps)
+    except Exception:
+        if os.getenv("ANALYSIS_ENGINE_FALLBACK", "true").lower() != "true":
+            raise
+        logger.exception("analysis_engine_event event=rust_fallback primary=rust")
+        return _run_python_analysis(request, days, user_id, user_exercise_maps)
+
+    rust_duration_ms = (_time.perf_counter() - rust_start) * 1000
+    if not _should_shadow_compare(mode):
+        return rust_response
+
+    python_start = _time.perf_counter()
+    try:
+        python_response = _run_python_analysis(request, days, user_id, user_exercise_maps)
+    except Exception:
+        logger.exception("analysis_engine_event event=rust_shadow_python_error primary=rust")
+        return rust_response
+
+    difference = compare_analysis_responses(python_response, rust_response)
+    _log_engine_event(
+        "rust_shadow_match" if difference is None else "rust_shadow_mismatch",
+        primary="rust",
+        primary_duration_ms=rust_duration_ms,
+        secondary_duration_ms=(_time.perf_counter() - python_start) * 1000,
+        difference=difference,
+    )
+    return rust_response
+
+
+# ============================================================================
 # ANALYSIS ENDPOINTS
 # ============================================================================
 
 @router.post("/analyze-split", response_model=AnalysisResponse)
-async def analyze_split(
+def analyze_split(
     request: SplitRequest,
     current_user: AuthUser = Depends(get_current_user),
 ):
@@ -103,12 +254,17 @@ async def analyze_split(
     (prime/secondary/tertiary movers).
     """
     try:
-        return _run_split_analysis(request, current_user.id)
+        supabase = get_supabase_client_with_token(current_user.access_token)
+        return _run_split_analysis(request, current_user.id, supabase)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error analyzing split: {str(e)}")
 
 
-def _run_split_analysis(request: SplitRequest, user_id: Optional[str] = None) -> AnalysisResponse:
+def _run_split_analysis(
+    request: SplitRequest,
+    user_id: Optional[str] = None,
+    supabase=None,
+) -> AnalysisResponse:
     if user_id:
         cache_key = _split_analysis_cache_key(user_id, request)
         now_mono = _time.monotonic()
@@ -131,21 +287,14 @@ def _run_split_analysis(request: SplitRequest, user_id: Optional[str] = None) ->
 
     user_exercise_maps = None
     if user_id:
-        user_exercise_maps = preload_user_exercise_maps(user_id)
+        user_exercise_maps = preload_user_exercise_maps(user_id, supabase=supabase)
 
-    split = Split(
-        name=request.name,
-        days=days,
-        stimulus_duration=request.stimulus_duration,
-        maintenance_volume=request.maintenance_volume,
-        dataset=request.dataset,
-        cycle_length=request.cycle_length,
-        user_id=user_id,
-        user_exercise_maps=user_exercise_maps,
+    response = _run_analysis_engine(
+        request,
+        days,
+        user_id,
+        user_exercise_maps,
     )
-    split.simulate_split(collect_breakdowns=request.include_breakdowns)
-
-    response = _build_response(split, request)
 
     if user_id:
         with _analysis_cache_lock:
@@ -155,7 +304,7 @@ def _run_split_analysis(request: SplitRequest, user_id: Optional[str] = None) ->
 
 
 @router.post("/analyze-workouts", response_model=AnalysisResponse)
-async def analyze_workouts(
+def analyze_workouts(
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
     end_date: Optional[date] = Query(None, description="Inclusive end date for the workout window"),
     timezone_offset_minutes: int = Query(0, ge=-840, le=840, description="Client local offset from UTC in minutes"),
@@ -220,6 +369,10 @@ async def analyze_workouts(
             .execute()
         )
 
+        user_exercise_maps = preload_user_exercise_maps(
+            current_user.id,
+            supabase=supabase,
+        )
         result = _build_workout_analysis(
             workouts_result.data,
             exercises_result.data or [],
@@ -229,6 +382,7 @@ async def analyze_workouts(
             dataset=dataset,
             now=window_end,
             user_id=current_user.id,
+            user_exercise_maps=user_exercise_maps,
         )
 
         # Store in cache
@@ -278,6 +432,7 @@ def _build_workout_analysis(
     dataset: str = "schoenfeld",
     now: Optional[datetime] = None,
     user_id: Optional[str] = None,
+    user_exercise_maps=None,
 ) -> AnalysisResponse:
     """Pure transform: workout + exercise rows → AnalysisResponse.
 
@@ -320,9 +475,13 @@ def _build_workout_analysis(
 
         session_name = workout.get("session_name", f"Day {day_number}")
         split_days.append((session_name, day_number, exercises_dict))
-        sessions_for_request.append(SessionInput(
+        # This is an internal canonical request, not a client payload.  Use
+        # model_construct so a 90-day analysis window can retain its real day
+        # positions and more than 14 logged sessions without weakening the
+        # public SplitRequest validation contract.
+        sessions_for_request.append(SessionInput.model_construct(
             name=session_name,
-            day=min(day_number, 14),
+            day=day_number,
             exercises=exercise_inputs if exercise_inputs else [ExerciseInput(name="Rest", sets=1)],
         ))
 
@@ -333,33 +492,24 @@ def _build_workout_analysis(
     # engine correctly models atrophy for the gap between sessions and now.
     effective_cycle = days
 
-    user_exercise_maps = None
-    if user_id:
+    if user_id and user_exercise_maps is None:
         user_exercise_maps = preload_user_exercise_maps(user_id)
 
-    split = Split(
+    synthetic_request = SplitRequest.model_construct(
         name="Logged Workouts",
-        days=split_days,
+        sessions=sessions_for_request,
         stimulus_duration=stimulus_duration,
         maintenance_volume=maintenance_volume,
         dataset=dataset,
         cycle_length=effective_cycle,
-        user_id=user_id,
-        user_exercise_maps=user_exercise_maps,
-    )
-    split.simulate_split(collect_breakdowns=False)
-
-    synthetic_request = SplitRequest(
-        name="Logged Workouts",
-        sessions=sessions_for_request,
-        cycle_length=min(effective_cycle, 14),
-        stimulus_duration=stimulus_duration,
-        maintenance_volume=maintenance_volume,
-        dataset=dataset,
         include_breakdowns=False,
     )
-
-    return _build_response(split, synthetic_request)
+    return _run_analysis_engine(
+        synthetic_request,
+        split_days,
+        user_id,
+        user_exercise_maps,
+    )
 
 
 def _build_response(split: Split, request: SplitRequest) -> AnalysisResponse:
