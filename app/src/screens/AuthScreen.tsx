@@ -15,7 +15,13 @@ import FadeIn from '../ui/FadeIn';
 import Glass from '../ui/Glass';
 import PrivacyScreen from './PrivacyScreen';
 import { authErrorMessageForDisplay, type SocialProvider } from '../api/backend';
-import { isSocialAuthCancellation, socialProviderVisible } from '../auth/socialAuth';
+import {
+  isSocialAuthCancellation,
+  socialAuthConfigured,
+  socialAuthErrorMessageForDisplay,
+  socialProviderVisible,
+} from '../auth/socialAuth';
+import SocialProviderIcon from '../ui/SocialProviderIcon';
 
 export default function AuthScreen() {
   const account = useAccountState();
@@ -26,6 +32,7 @@ export default function AuthScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [socialBusy, setSocialBusy] = useState<SocialProvider | null>(null);
+  const socialConfigured = socialAuthConfigured();
 
   const submit = async () => {
     if (!email.trim() || (mode !== 'forgot' && !password)) {
@@ -72,7 +79,12 @@ export default function AuthScreen() {
       await account.signInWithProvider(provider);
     } catch (cause) {
       if (!isSocialAuthCancellation(cause)) {
-        setError(authErrorMessageForDisplay(cause, 'Could not sign in. Try again.'));
+        setError(
+          authErrorMessageForDisplay(
+            cause,
+            socialAuthErrorMessageForDisplay(cause, 'Could not sign in. Try again.')
+          )
+        );
       }
     } finally {
       setSocialBusy(null);
@@ -203,31 +215,47 @@ export default function AuthScreen() {
               </View>
               <Pressable
                 accessibilityLabel="Continue with Google"
+                accessibilityState={{ disabled: socialBusy !== null || !socialConfigured }}
                 onPress={() => submitSocial('google')}
-                disabled={socialBusy !== null}
+                disabled={socialBusy !== null || !socialConfigured}
+                style={!socialConfigured ? styles.socialDisabled : undefined}
               >
                 <Glass style={styles.socialButton} interactive>
                   {socialBusy === 'google' ? (
                     <ActivityIndicator color={theme.accent} />
                   ) : (
-                    <Text style={styles.socialText}>Continue with Google</Text>
+                    <View style={styles.socialButtonContent}>
+                      <SocialProviderIcon provider="google" />
+                      <Text style={styles.socialText}>Continue with Google</Text>
+                    </View>
                   )}
                 </Glass>
               </Pressable>
               {socialProviderVisible('apple') && (
                 <Pressable
                   accessibilityLabel="Continue with Apple"
+                  accessibilityState={{ disabled: socialBusy !== null || !socialConfigured }}
                   onPress={() => submitSocial('apple')}
-                  disabled={socialBusy !== null}
+                  disabled={socialBusy !== null || !socialConfigured}
+                  style={!socialConfigured ? styles.socialDisabled : undefined}
                 >
                   <Glass style={styles.socialButton} interactive>
                     {socialBusy === 'apple' ? (
                       <ActivityIndicator color={theme.accent} />
                     ) : (
-                      <Text style={styles.socialText}>Continue with Apple</Text>
+                      <View style={styles.socialButtonContent}>
+                        <SocialProviderIcon provider="apple" />
+                        <Text style={styles.socialText}>Continue with Apple</Text>
+                      </View>
                     )}
                   </Glass>
                 </Pressable>
+              )}
+              {!socialConfigured && (
+                <Text style={styles.socialConfigurationHint}>
+                  Social sign-in is not configured for this build. Add the public Supabase URL and
+                  publishable key, then restart or rebuild the app.
+                </Text>
               )}
             </View>
           )}
@@ -347,7 +375,16 @@ const styles = StyleSheet.create({
   divider: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: 'rgba(255,255,255,0.13)' },
   dividerText: { color: theme.textDim, fontSize: 11 },
   socialButton: { borderRadius: 16, paddingVertical: 12, alignItems: 'center' },
+  socialButtonContent: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  socialDisabled: { opacity: 0.45 },
   socialText: { color: theme.text, fontSize: 14, fontWeight: '700' },
+  socialConfigurationHint: {
+    color: theme.textDim,
+    fontSize: 10,
+    lineHeight: 15,
+    textAlign: 'center',
+    marginTop: 2,
+  },
   switchText: {
     color: theme.textDim,
     fontSize: 12,

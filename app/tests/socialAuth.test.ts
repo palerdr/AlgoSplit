@@ -28,6 +28,8 @@ import {
   clearTemporaryOAuthCredentials,
   maybeCompleteWebAuthSession,
   oauthCodeFromCallbackUrl,
+  socialAuthConfigured,
+  socialAuthErrorMessageForDisplay,
   socialProviderVisible,
   socialSessionForProvider,
   temporaryOAuthStorage,
@@ -60,6 +62,19 @@ describe('social auth bridge', () => {
     expect(socialProviderVisible('apple', 'android')).toBe(false);
     expect(socialProviderVisible('apple', 'ios')).toBe(true);
     expect(socialProviderVisible('apple', 'web')).toBe(true);
+  });
+
+  it('reports whether the public client configuration is present', () => {
+    expect(socialAuthConfigured()).toBe(true);
+    delete process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    expect(socialAuthConfigured()).toBe(false);
+  });
+
+  it('shows deliberate social-auth errors without exposing unknown errors', () => {
+    expect(
+      socialAuthErrorMessageForDisplay(new SocialAuthError('Provider setup is missing.'), 'Fallback')
+    ).toBe('Provider setup is missing.');
+    expect(socialAuthErrorMessageForDisplay(new Error('internal detail'), 'Fallback')).toBe('Fallback');
   });
 
   it('parses a PKCE callback without treating provider errors as codes', () => {

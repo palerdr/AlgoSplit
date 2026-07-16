@@ -122,15 +122,31 @@ export function isSocialAuthCancellation(error: unknown): boolean {
   return error instanceof SocialAuthCancelledError;
 }
 
-function publicEnv(name: string): string | undefined {
-  const value = process.env[name] as string | undefined;
+/** Surface only errors deliberately written for end users. */
+export function socialAuthErrorMessageForDisplay(error: unknown, fallback: string): string {
+  return error instanceof SocialAuthError ? error.message : fallback;
+}
+
+function normalizedPublicEnv(value: string | undefined): string | undefined {
   const normalized = value?.trim();
   return normalized || undefined;
 }
 
-function callbackEnvName(kind: CallbackKind): string {
-  const platform = Platform.OS === 'web' ? 'WEB' : 'NATIVE';
-  return `EXPO_PUBLIC_ALGOSPLIT_${kind.toUpperCase()}_${platform}_CALLBACK_URL`;
+function configuredCallbackUrl(kind: CallbackKind): string | undefined {
+  // Expo replaces only statically referenced EXPO_PUBLIC_* properties at bundle
+  // time. Do not turn these names into a dynamic process.env lookup.
+  if (Platform.OS === 'web') {
+    return normalizedPublicEnv(
+      kind === 'oauth'
+        ? process.env.EXPO_PUBLIC_ALGOSPLIT_OAUTH_WEB_CALLBACK_URL
+        : process.env.EXPO_PUBLIC_ALGOSPLIT_IDENTITY_WEB_CALLBACK_URL
+    );
+  }
+  return normalizedPublicEnv(
+    kind === 'oauth'
+      ? process.env.EXPO_PUBLIC_ALGOSPLIT_OAUTH_NATIVE_CALLBACK_URL
+      : process.env.EXPO_PUBLIC_ALGOSPLIT_IDENTITY_NATIVE_CALLBACK_URL
+  );
 }
 
 function callbackPath(kind: CallbackKind): string {
@@ -142,7 +158,7 @@ function callbackPath(kind: CallbackKind): string {
  * canonical value via env; the fallback keeps local development ergonomic.
  */
 export function callbackUrl(kind: CallbackKind): string {
-  const configured = publicEnv(callbackEnvName(kind));
+  const configured = configuredCallbackUrl(kind);
   if (configured) return configured;
   if (Platform.OS === 'web') {
     const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
@@ -203,13 +219,14 @@ function isExpectedCallback(url: string, expected: string): boolean {
 
 export function socialAuthConfigured(): boolean {
   return Boolean(
-    publicEnv('EXPO_PUBLIC_SUPABASE_URL') && publicEnv('EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY')
+    normalizedPublicEnv(process.env.EXPO_PUBLIC_SUPABASE_URL) &&
+      normalizedPublicEnv(process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY)
   );
 }
 
 function getOAuthClient(): ReturnType<typeof createClient> {
-  const supabaseUrl = publicEnv('EXPO_PUBLIC_SUPABASE_URL');
-  const supabaseKey = publicEnv('EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY');
+  const supabaseUrl = normalizedPublicEnv(process.env.EXPO_PUBLIC_SUPABASE_URL);
+  const supabaseKey = normalizedPublicEnv(process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
   if (!supabaseUrl || !supabaseKey) {
     throw new SocialAuthError('Social sign-in is not configured for this build.');
   }

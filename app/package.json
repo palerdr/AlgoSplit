@@ -12,6 +12,7 @@
     "expo-auth-session": "~7.0.11",
     "expo-blur": "~15.0.8",
     "expo-crypto": "~15.0.9",
+    "expo-dev-client": "~6.0.21",
     "expo-file-system": "~19.0.23",
     "expo-gl": "~16.0.10",
     "expo-glass-effect": "~0.1.10",
@@ -44,6 +45,7 @@
   },
   "scripts": {
     "start": "expo start",
+    "start:dev-client": "expo start --dev-client",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",

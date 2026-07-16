@@ -143,7 +143,7 @@ npm run android
 
 Production web uses same-origin Vercel rewrites. The EAS production profile supplies the native API URL; use `EXPO_PUBLIC_ALGOSPLIT_API` locally when pointing at a different backend.
 
-### Running on a Phone (Expo Go)
+### Running on a Phone
 
 Account features need a backend the phone can reach. In development the app
 defaults `EXPO_PUBLIC_ALGOSPLIT_API` to `http://localhost:8000`, which on a
@@ -158,6 +158,10 @@ Point the dev bundle at the deployed API instead:
 
    ```env
    EXPO_PUBLIC_ALGOSPLIT_API=https://algosplit-api-staging.vercel.app
+   EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+   EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-public-key
+   EXPO_PUBLIC_ALGOSPLIT_OAUTH_NATIVE_CALLBACK_URL=algosplit://oauth/callback
+   EXPO_PUBLIC_ALGOSPLIT_IDENTITY_NATIVE_CALLBACK_URL=algosplit://identity/callback
    ```
 
 2. Make sure the backend Vercel Production environment sets
@@ -177,8 +181,27 @@ Point the dev bundle at the deployed API instead:
    ```
 
 4. Scan the QR code with Expo Go (phone and dev machine on the same network)
-   and sign in with your production account. The phone talks to the production
-   API and data.
+   to test email/password auth and the rest of the app. The phone talks to the
+   production API and data.
+
+Google browser OAuth cannot be accepted in Expo Go because Expo Go does not own
+AlgoSplit's `algosplit://` callback scheme. Install the AlgoSplit development
+client for social auth:
+
+```bash
+cd app
+npm install --global eas-cli
+eas login
+eas build --platform android --profile development
+# A physical iPhone build requires Apple Developer enrollment:
+eas build --platform ios --profile development
+npm run start:dev-client -- -c
+```
+
+Use `--profile development-simulator` only for an iOS Simulator. Configure the
+five public values above in the Expo project's `development`, `preview`, and
+`production` environments before building. See [SOCIAL_AUTH_SETUP.md](SOCIAL_AUTH_SETUP.md)
+for provider and callback registration.
 
 Pointing a phone at a *local* backend does not currently work: in
 non-production the backend's `TrustedHostMiddleware` (`backend/main.py`) only

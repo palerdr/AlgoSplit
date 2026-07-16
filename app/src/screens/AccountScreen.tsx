@@ -17,6 +17,7 @@ import { useAppState } from '../state/AppState';
 import { theme } from '../theme';
 import FadeIn from '../ui/FadeIn';
 import Glass from '../ui/Glass';
+import SocialProviderIcon from '../ui/SocialProviderIcon';
 
 interface AccountScreenProps {
   onBack: () => void;
@@ -189,18 +190,21 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
               const isLast = index === socialProviders.length - 1;
               return (
                 <View key={provider} style={[styles.identityRow, isLast && styles.identityRowLast]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.controlTitle}>{label}</Text>
-                    <Text style={styles.identityStatus}>
-                      {identity
-                        ? identity.email
-                          ? `Connected as ${identity.email}`
-                          : 'Connected'
-                        : 'Not connected'}
-                    </Text>
-                    {identity && !identity.can_disconnect && (
-                      <Text style={styles.identityHint}>Connect another method to remove this one.</Text>
-                    )}
+                  <View style={styles.identityProvider}>
+                    <SocialProviderIcon provider={provider} size={26} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.controlTitle}>{label}</Text>
+                      <Text style={styles.identityStatus}>
+                        {identity
+                          ? identity.email
+                            ? `Connected as ${identity.email}`
+                            : 'Connected'
+                          : 'Not connected'}
+                      </Text>
+                      {identity && !identity.can_disconnect && (
+                        <Text style={styles.identityHint}>Connect another method to remove this one.</Text>
+                      )}
+                    </View>
                   </View>
                   {!identity ? (
                     <Pressable
@@ -536,6 +540,7 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(255,255,255,0.1)',
   },
   identityRowLast: { paddingBottom: 2 },
+  identityProvider: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
   identityStatus: { color: theme.textDim, fontSize: 11, lineHeight: 16, marginTop: 3 },
   identityHint: { color: theme.textDim, fontSize: 10, lineHeight: 14, marginTop: 5 },
   identityFixed: { color: theme.textDim, fontSize: 10, textAlign: 'right' },
