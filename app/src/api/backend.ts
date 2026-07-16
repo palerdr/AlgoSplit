@@ -75,6 +75,9 @@ const PUBLIC_AUTH_DETAILS = new Set([
   'Invalid email or password',
   'Please check your email and confirm your account before signing in',
   'Invalid or expired refresh token',
+  'Could not validate social sign-in. Try again.',
+  'Connect another sign-in method before disconnecting this one.',
+  'Choose a supported account connection.',
   'Unable to reset password. Request a new link and try again.',
   'Enter a valid email and a password of at least 8 characters.',
   'Enter a valid email and password.',
@@ -99,6 +102,12 @@ export function safeAuthErrorMessage(status: number, path: string, detail?: unkn
   if (publicDetail && PUBLIC_AUTH_DETAILS.has(publicDetail)) return publicDetail;
 
   if (status === 422) {
+    if (path === '/auth/oauth/complete') {
+      return 'Could not validate social sign-in. Try again.';
+    }
+    if (path.startsWith('/auth/identities/')) {
+      return 'Could not update your connected accounts. Please try again.';
+    }
     if (path === '/auth/signup') {
       return 'Enter a valid email and a password of at least 8 characters.';
     }
@@ -115,6 +124,12 @@ export function safeAuthErrorMessage(status: number, path: string, detail?: unkn
   }
   if (path === '/auth/user' || path === '/auth/refresh') {
     return 'Your session has expired. Please sign in again.';
+  }
+  if (path === '/auth/oauth/complete') {
+    return 'Could not validate social sign-in. Try again.';
+  }
+  if (path.startsWith('/auth/identities/')) {
+    return 'Could not update your connected accounts. Please try again.';
   }
   return 'Authentication failed. Please try again.';
 }
@@ -289,6 +304,7 @@ const AUTH_ROUTES_WITHOUT_REFRESH = new Set([
   '/auth/forgot-password',
   '/auth/reset-password',
   '/auth/refresh',
+  '/auth/oauth/complete',
 ]);
 
 async function storeNativeAuthResponse(response: AuthResponse): Promise<void> {
@@ -572,6 +588,37 @@ export interface AuthResponse {
   expires_in: number;
   user: UserInfo;
   email_confirmation_required?: boolean;
+}
+
+/** Supported social provider names (backend/schemas/auth.py:SocialProvider). */
+export type SocialProvider = 'google' | 'apple';
+
+/** A sign-in method shown in the Connected accounts settings section. */
+export type SignInProvider = 'email' | SocialProvider;
+
+/** Client family used by the server to select its fixed identity-link callback. */
+export type AuthClientPlatform = 'web' | 'native';
+
+/** Short-lived Supabase credentials sent once to the API after social sign-in. */
+export interface OAuthSessionCompleteRequest {
+  access_token: string;
+  refresh_token: string;
+}
+
+/** Safe identity data returned by GET /auth/identities. */
+export interface AuthIdentity {
+  provider: SignInProvider;
+  email?: string | null;
+  created_at?: string | null;
+  can_disconnect: boolean;
+}
+
+export interface IdentityListResponse {
+  identities: AuthIdentity[];
+}
+
+export interface IdentityLinkResponse {
+  url: string;
 }
 
 /** schemas/auth.py:109 — error body shape ({ detail }). */
@@ -1863,9 +1910,35 @@ export const auth = {
     return response;
   },
 
+  /** POST /auth/oauth/complete — adopt a verified Supabase social session. */
+  async oauthComplete(session: OAuthSessionCompleteRequest): Promise<AuthResponse> {
+    const response = await request<AuthResponse>('POST', '/auth/oauth/complete', session);
+    await storeNativeAuthResponse(response);
+    return response;
+  },
+
   /** GET /auth/user — current user info, i.e. "me" (api/routes/auth.py:209). */
   me(): Promise<UserInfo> {
     return request<UserInfo>('GET', '/auth/user');
+  },
+
+  /** GET /auth/identities — connected email, Google, and Apple methods. */
+  identities(): Promise<IdentityListResponse> {
+    return request<IdentityListResponse>('GET', '/auth/identities');
+  },
+
+  /** POST /auth/identities/{provider}/link — get a server-brokered link URL. */
+  linkIdentity(provider: SocialProvider, platform: AuthClientPlatform): Promise<IdentityLinkResponse> {
+    return request<IdentityLinkResponse>(
+      'POST',
+      `/auth/identities/${encodeURIComponent(provider)}/link`,
+      { platform }
+    );
+  },
+
+  /** DELETE /auth/identities/{provider} — detach a non-final social method. */
+  unlinkIdentity(provider: SocialProvider): Promise<void> {
+    return request<void>('DELETE', `/auth/identities/${encodeURIComponent(provider)}`);
   },
 
   /** POST /auth/refresh — rotate tokens (api/routes/auth.py:234). Cookie clients send no body; native clients pass the refresh token. */

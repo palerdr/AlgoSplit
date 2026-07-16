@@ -12,7 +12,9 @@ import { AppState as NativeAppState, Platform } from 'react-native';
 import {
   BackendError,
   AnalysisResponse,
+  AuthIdentity,
   SessionCreate,
+  SocialProvider,
   SplitCreate,
   SplitResponse,
   UserInfo,
@@ -27,6 +29,12 @@ import {
   splits as splitsApi,
   workouts as workoutsApi,
 } from '../api/backend';
+import {
+  clearTemporaryOAuthCredentials,
+  completeIdentityLink,
+  isSocialAuthCancellation,
+  socialSessionForProvider,
+} from '../auth/socialAuth';
 import {
   clearSplitAnalysisCache,
   loadAllWorkoutProgress,
@@ -65,6 +73,7 @@ interface AccountState {
   status: AccountStatus;
   user: UserInfo | null;
   sessionError: string | null;
+  identities: RemoteResource<AuthIdentity[]>;
   splits: RemoteResource<SplitResponse[]>;
   workoutRanges: Record<string, RemoteResource<WorkoutLogResponse[]>>;
   workoutOverview: RemoteResource<WorkoutOverviewPoint[]>;
@@ -77,6 +86,10 @@ interface AccountState {
   refreshSession: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string) => Promise<string | null>;
+  signInWithProvider: (provider: SocialProvider) => Promise<void>;
+  refreshIdentities: () => Promise<void>;
+  linkIdentity: (provider: SocialProvider) => Promise<void>;
+  unlinkIdentity: (provider: SocialProvider) => Promise<void>;
   forgotPassword: (email: string) => Promise<string>;
   resetPassword: (accessToken: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -115,6 +128,7 @@ const EMPTY_SPLITS = emptyResource<SplitResponse[]>([]);
 const EMPTY_STIMULUS = emptyResource<AnalysisResponse | null>(null);
 const EMPTY_OVERVIEW = emptyResource<WorkoutOverviewPoint[]>([]);
 const EMPTY_SUMMARIES = emptyResource<WorkoutSummaryListResponse>({ workouts: [], total: 0 });
+const EMPTY_IDENTITIES = emptyResource<AuthIdentity[]>([]);
 
 export function emptyWorkoutResource(): RemoteResource<WorkoutLogResponse[]> {
   return emptyResource<WorkoutLogResponse[]>([]);
@@ -157,6 +171,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   );
   const [user, setUser] = useState<UserInfo | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [identityResource, setIdentityResource] = useState(EMPTY_IDENTITIES);
   const [splitResource, setSplitResource] = useState(EMPTY_SPLITS);
   const [workoutRanges, setWorkoutRanges] = useState<
     Record<string, RemoteResource<WorkoutLogResponse[]>>
@@ -182,6 +197,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   const detailsRef = useRef(workoutDetails);
   const progressRef = useRef(workoutProgress);
   const stimulusRef = useRef(recentStimulus);
+  const identitiesRef = useRef(identityResource);
   splitRef.current = splitResource;
   rangesRef.current = workoutRanges;
   overviewRef.current = workoutOverview;
@@ -189,6 +205,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   detailsRef.current = workoutDetails;
   progressRef.current = workoutProgress;
   stimulusRef.current = recentStimulus;
+  identitiesRef.current = identityResource;
 
   const generationRef = useRef(0);
   const splitInFlight = useRef<Promise<void> | null>(null);
@@ -198,6 +215,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   const detailsInFlight = useRef(new Map<string, Promise<void>>());
   const progressInFlight = useRef(new Map<string, Promise<void>>());
   const stimulusInFlight = useRef<Promise<void> | null>(null);
+  const identitiesInFlight = useRef<Promise<void> | null>(null);
   const stimulusRequestRef = useRef(0);
 
   const clearRemoteData = useCallback(() => {
@@ -209,6 +227,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     detailsInFlight.current.clear();
     progressInFlight.current.clear();
     stimulusInFlight.current = null;
+    identitiesInFlight.current = null;
     clearSplitAnalysisCache();
     setSplitResource(EMPTY_SPLITS);
     setWorkoutRanges({});
@@ -217,6 +236,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     setWorkoutDetails({});
     setWorkoutProgress({});
     setRecentStimulus(EMPTY_STIMULUS);
+    setIdentityResource(EMPTY_IDENTITIES);
     stimulusRequestRef.current += 1;
   }, []);
 
@@ -249,6 +269,47 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       );
     }
   }, [clearRemoteData, markSignedOut]);
+
+  const loadIdentities = useCallback(
+    (force: boolean): Promise<void> => {
+      if (!force && isFresh(identitiesRef.current)) return Promise.resolve();
+      if (identitiesInFlight.current) return identitiesInFlight.current;
+      const generation = generationRef.current;
+      setIdentityResource((previous) => ({ ...previous, loading: true, error: null }));
+      const promise = auth
+        .identities()
+        .then((response) => {
+          if (generation !== generationRef.current) return;
+          setIdentityResource({
+            data: response.identities,
+            loading: false,
+            loaded: true,
+            error: null,
+            fetchedAt: Date.now(),
+          });
+        })
+        .catch((error) => {
+          if (generation !== generationRef.current) return;
+          if (isSignedOutError(error)) return markSignedOut();
+          setIdentityResource((previous) => ({
+            ...previous,
+            loading: false,
+            loaded: true,
+            error: authErrorMessageForDisplay(
+              error,
+              'Could not load your connected accounts. Please try again.'
+            ),
+          }));
+        })
+        .finally(() => {
+          if (identitiesInFlight.current === promise) identitiesInFlight.current = null;
+        });
+      identitiesInFlight.current = promise;
+      return promise;
+    },
+    [markSignedOut]
+  );
+  const refreshIdentities = useCallback(() => loadIdentities(true), [loadIdentities]);
 
   const loadSplits = useCallback(
     (force: boolean): Promise<void> => {
@@ -776,6 +837,56 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     }
   }, [markSignedOut]);
 
+  const signInWithProvider = useCallback(async (provider: SocialProvider) => {
+    setStatus('checking');
+    setSessionError(null);
+    try {
+      const socialSession = await socialSessionForProvider(provider);
+      const response = await auth.oauthComplete(socialSession);
+      setUser(response.user);
+      setStatus('authenticated');
+    } catch (error) {
+      setStatus('signedOut');
+      setUser(null);
+      if (!isSocialAuthCancellation(error)) {
+        setSessionError(authErrorMessageForDisplay(error, 'Could not sign in. Try again.'));
+      }
+      throw error;
+    } finally {
+      await clearTemporaryOAuthCredentials();
+    }
+  }, []);
+
+  const linkIdentity = useCallback(
+    async (provider: SocialProvider) => {
+      try {
+        const response = await auth.linkIdentity(
+          provider,
+          Platform.OS === 'web' ? 'web' : 'native'
+        );
+        await completeIdentityLink(response.url);
+        await refreshIdentities();
+      } catch (error) {
+        if (isSignedOutError(error)) markSignedOut();
+        throw error;
+      }
+    },
+    [markSignedOut, refreshIdentities]
+  );
+
+  const unlinkIdentity = useCallback(
+    async (provider: SocialProvider) => {
+      try {
+        await auth.unlinkIdentity(provider);
+        await refreshIdentities();
+      } catch (error) {
+        if (isSignedOutError(error)) markSignedOut();
+        throw error;
+      }
+    },
+    [markSignedOut, refreshIdentities]
+  );
+
   const forgotPassword = useCallback(async (email: string) => {
     const response = await auth.forgotPassword(email);
     return response.message;
@@ -885,6 +996,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       status,
       user,
       sessionError,
+      identities: identityResource,
       splits: splitResource,
       workoutRanges,
       workoutOverview,
@@ -897,6 +1009,10 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       refreshSession,
       login,
       signup,
+      signInWithProvider,
+      refreshIdentities,
+      linkIdentity,
+      unlinkIdentity,
       forgotPassword,
       resetPassword,
       logout,
@@ -926,6 +1042,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       status,
       user,
       sessionError,
+      identityResource,
       splitResource,
       workoutRanges,
       workoutOverview,
@@ -938,6 +1055,10 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       refreshSession,
       login,
       signup,
+      signInWithProvider,
+      refreshIdentities,
+      linkIdentity,
+      unlinkIdentity,
       forgotPassword,
       resetPassword,
       logout,

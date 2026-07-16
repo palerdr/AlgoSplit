@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -11,7 +11,8 @@ import {
   View,
 } from 'react-native';
 import { useAccountState } from '../state/AccountState';
-import { authErrorMessageForDisplay } from '../api/backend';
+import { authErrorMessageForDisplay, type SocialProvider } from '../api/backend';
+import { isSocialAuthCancellation } from '../auth/socialAuth';
 import { useAppState } from '../state/AppState';
 import { theme } from '../theme';
 import FadeIn from '../ui/FadeIn';
@@ -31,6 +32,47 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
   const [confirmation, setConfirmation] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [identityBusy, setIdentityBusy] = useState<SocialProvider | null>(null);
+  const [confirmDisconnect, setConfirmDisconnect] = useState<SocialProvider | null>(null);
+  const [identityError, setIdentityError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void account.refreshIdentities();
+  }, [account.refreshIdentities]);
+
+  const identitiesByProvider = new Map(
+    account.identities.data.map((identity) => [identity.provider, identity])
+  );
+  const emailIdentity = identitiesByProvider.get('email');
+  const socialProviders: SocialProvider[] =
+    Platform.OS === 'android' ? ['google'] : ['google', 'apple'];
+
+  const connectIdentity = async (provider: SocialProvider) => {
+    setIdentityBusy(provider);
+    setIdentityError(null);
+    try {
+      await account.linkIdentity(provider);
+    } catch (cause) {
+      if (!isSocialAuthCancellation(cause)) {
+        setIdentityError(authErrorMessageForDisplay(cause, 'Could not connect this account.'));
+      }
+    } finally {
+      setIdentityBusy(null);
+    }
+  };
+
+  const disconnectIdentity = async (provider: SocialProvider) => {
+    setIdentityBusy(provider);
+    setIdentityError(null);
+    try {
+      await account.unlinkIdentity(provider);
+      setConfirmDisconnect(null);
+    } catch (cause) {
+      setIdentityError(authErrorMessageForDisplay(cause, 'Could not disconnect this account.'));
+    } finally {
+      setIdentityBusy(null);
+    }
+  };
 
   const logout = async () => {
     setBusy('logout');
@@ -115,6 +157,104 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
         )}
 
         <FadeIn delay={75}>
+          <Glass style={styles.card}>
+            <View style={styles.settingsHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardTitle}>Connected accounts</Text>
+                <Text style={styles.body}>
+                  Add a sign-in method before removing another. Your training data stays in this account.
+                </Text>
+              </View>
+              {account.identities.loading && <ActivityIndicator size="small" color={theme.accent} />}
+            </View>
+
+            <View style={styles.identityRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.controlTitle}>Email &amp; password</Text>
+                <Text style={styles.identityStatus}>
+                  {emailIdentity
+                    ? emailIdentity.email
+                      ? `Connected as ${emailIdentity.email}`
+                      : 'Connected'
+                    : 'Not connected'}
+                </Text>
+              </View>
+              <Text style={styles.identityFixed}>Managed from sign-in</Text>
+            </View>
+
+            {socialProviders.map((provider, index) => {
+              const identity = identitiesByProvider.get(provider);
+              const label = provider === 'google' ? 'Google' : 'Apple';
+              const busyWithProvider = identityBusy === provider;
+              const isLast = index === socialProviders.length - 1;
+              return (
+                <View key={provider} style={[styles.identityRow, isLast && styles.identityRowLast]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.controlTitle}>{label}</Text>
+                    <Text style={styles.identityStatus}>
+                      {identity
+                        ? identity.email
+                          ? `Connected as ${identity.email}`
+                          : 'Connected'
+                        : 'Not connected'}
+                    </Text>
+                    {identity && !identity.can_disconnect && (
+                      <Text style={styles.identityHint}>Connect another method to remove this one.</Text>
+                    )}
+                  </View>
+                  {!identity ? (
+                    <Pressable
+                      onPress={() => connectIdentity(provider)}
+                      disabled={identityBusy !== null}
+                      style={styles.identityAction}
+                    >
+                      {busyWithProvider ? (
+                        <ActivityIndicator size="small" color={theme.accent} />
+                      ) : (
+                        <Text style={styles.identityActionText}>Connect</Text>
+                      )}
+                    </Pressable>
+                  ) : confirmDisconnect === provider ? (
+                    <View style={styles.disconnectConfirm}>
+                      <Text style={styles.disconnectConfirmText}>Disconnect {label}?</Text>
+                      <View style={styles.disconnectActions}>
+                        <Pressable
+                          onPress={() => setConfirmDisconnect(null)}
+                          disabled={busyWithProvider}
+                        >
+                          <Text style={styles.cancelInline}>Cancel</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => disconnectIdentity(provider)}
+                          disabled={busyWithProvider}
+                        >
+                          {busyWithProvider ? (
+                            <ActivityIndicator size="small" color="#E27878" />
+                          ) : (
+                            <Text style={styles.disconnectAction}>Disconnect</Text>
+                          )}
+                        </Pressable>
+                      </View>
+                    </View>
+                  ) : identity.can_disconnect ? (
+                    <Pressable
+                      onPress={() => setConfirmDisconnect(provider)}
+                      disabled={identityBusy !== null}
+                      style={styles.identityAction}
+                    >
+                      <Text style={styles.disconnectAction}>Disconnect</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              );
+            })}
+            {(identityError || account.identities.error) && (
+              <Text style={styles.error}>{identityError ?? account.identities.error}</Text>
+            )}
+          </Glass>
+        </FadeIn>
+
+        <FadeIn delay={110}>
           <Glass style={styles.card}>
             <View style={styles.settingsHeader}>
               <View style={{ flex: 1 }}>
@@ -259,7 +399,7 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
           </Glass>
         </FadeIn>
 
-        <FadeIn delay={110}>
+        <FadeIn delay={145}>
           <Glass style={styles.card}>
             <Pressable onPress={onPrivacy} style={styles.row}>
               <View style={{ flex: 1 }}>
@@ -271,7 +411,7 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
           </Glass>
         </FadeIn>
 
-        <FadeIn delay={145}>
+        <FadeIn delay={180}>
           <Glass style={styles.card}>
             <Text style={styles.cardTitle}>Active sessions</Text>
             <Text style={styles.body}>
@@ -315,7 +455,7 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
           </Glass>
         </FadeIn>
 
-        <FadeIn delay={180}>
+        <FadeIn delay={215}>
           <Glass style={[styles.card, styles.dangerCard]}>
             <Text style={styles.dangerTitle}>Delete account</Text>
             <Text style={styles.body}>
@@ -387,6 +527,25 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },
   cardTitle: { color: theme.text, fontSize: 15, fontWeight: '700', marginBottom: 6 },
   body: { color: theme.textDim, fontSize: 13, lineHeight: 19 },
+  identityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  identityRowLast: { paddingBottom: 2 },
+  identityStatus: { color: theme.textDim, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  identityHint: { color: theme.textDim, fontSize: 10, lineHeight: 14, marginTop: 5 },
+  identityFixed: { color: theme.textDim, fontSize: 10, textAlign: 'right' },
+  identityAction: { minWidth: 76, alignItems: 'flex-end', paddingVertical: 7 },
+  identityActionText: { color: theme.accent, fontSize: 12, fontWeight: '700' },
+  disconnectConfirm: { minWidth: 126, alignItems: 'flex-end' },
+  disconnectConfirmText: { color: theme.textDim, fontSize: 10, marginBottom: 6 },
+  disconnectActions: { flexDirection: 'row', gap: 10, alignItems: 'center' },
+  cancelInline: { color: theme.textDim, fontSize: 11, fontWeight: '600' },
+  disconnectAction: { color: '#E27878', fontSize: 12, fontWeight: '700' },
   settingsHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18 },
   controlBlock: {
     paddingVertical: 14,

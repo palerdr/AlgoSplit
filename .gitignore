@@ -63,6 +63,7 @@ nul
 !README.md
 !DATA_FLOW.md
 !DEPLOYMENT.md
+!SOCIAL_AUTH_SETUP.md
 app/AGENTS.md
 app/agentic/**/*.md
 !sync/**/*.md

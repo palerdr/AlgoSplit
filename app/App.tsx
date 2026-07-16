@@ -15,6 +15,11 @@ import AccountScreen from './src/screens/AccountScreen';
 import PrivacyScreen from './src/screens/PrivacyScreen';
 import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
 import { recoveryTokenFromUrl } from './src/auth/recoveryLink';
+import { maybeCompleteWebAuthSession } from './src/auth/socialAuth';
+
+// A web OAuth/link callback opens this same app in a popup. Complete it before
+// React mounts so WebBrowser.openAuthSessionAsync resolves in the opener.
+maybeCompleteWebAuthSession();
 
 // Deliberately barebones navigation: one state value, no navigator dependency.
 // Screens hand off through a quick, subtle fade: a dark overlay fades over the

@@ -65,6 +65,26 @@ describe('web session restoration', () => {
     });
   });
 
+  it('hands a short-lived social session to the API without retaining browser tokens', async () => {
+    const fetchMock = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(response(200, webSession()));
+
+    await auth.oauthComplete({
+      access_token: 'social-access-token',
+      refresh_token: 'social-refresh-token',
+    });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/auth/oauth/complete');
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({
+      credentials: 'include',
+      body: JSON.stringify({
+        access_token: 'social-access-token',
+        refresh_token: 'social-refresh-token',
+      }),
+    });
+  });
+
   it('shares one refresh across simultaneous expired requests', async () => {
     let initialUserRequests = 0;
     let refreshRequests = 0;

@@ -74,6 +74,29 @@ class FakeSupabaseAuth:
         self.sign_out_called = False
         self.sign_out_calls: list[tuple[str | None, str]] = []
         self._users: dict[str, dict[str, str]] = {}
+        self.current_user = type(
+            "ProviderUser",
+            (),
+            {
+                "id": "user-123",
+                "email": "tester@example.com",
+                "identities": [
+                    type(
+                        "Identity",
+                        (),
+                        {
+                            "provider": "email",
+                            "identity_data": {"email": "tester@example.com"},
+                            "created_at": datetime.now(timezone.utc),
+                            "identity_id": "identity-email",
+                        },
+                    )()
+                ],
+            },
+        )()
+        self.link_identity_calls: list[dict[str, Any]] = []
+        self.unlink_identity_calls: list[Any] = []
+        self.set_session_calls: list[tuple[str, str]] = []
 
     def sign_up(self, payload: dict[str, str]) -> FakeAuthResponse:
         if self.raise_on_signup:
@@ -101,8 +124,38 @@ class FakeSupabaseAuth:
     def refresh_session(self, refresh_token: str) -> FakeAuthResponse:
         if self.raise_on_refresh:
             raise self.raise_on_refresh
+        if refresh_token.startswith("social-refresh-token"):
+            return FakeAuthResponse(
+                user_id="user-123",
+                email="tester@example.com",
+                token="token-social-rotated",
+            )
         # Accept any refresh token in tests and return a new session
         return FakeAuthResponse(user_id="user-refreshed", email="refreshed@example.com", token="token-refreshed")
+
+    def get_user(self, _access_token: str):
+        return type("UserResponse", (), {"user": self.current_user})()
+
+    def set_session(self, access_token: str, refresh_token: str):
+        self.set_session_calls.append((access_token, refresh_token))
+        return type("AuthResponse", (), {"user": self.current_user})()
+
+    def link_identity(self, payload: dict[str, Any]):
+        self.link_identity_calls.append(copy.deepcopy(payload))
+        provider = payload["provider"]
+        return type(
+            "OAuthResponse",
+            (),
+            {"url": f"http://localhost:54321/auth/v1/authorize?provider={provider}"},
+        )()
+
+    def unlink_identity(self, identity: Any):
+        self.unlink_identity_calls.append(identity)
+        self.current_user.identities = [
+            candidate
+            for candidate in self.current_user.identities
+            if candidate is not identity
+        ]
 
     def sign_out(self, jwt: str | None = None, scope: str = "global") -> None:
         if self.raise_on_sign_out:
