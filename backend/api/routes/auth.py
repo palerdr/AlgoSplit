@@ -4,10 +4,12 @@ Handles user signup, login, and user info retrieval
 """
 
 import logging
+from time import perf_counter
 from fastapi import APIRouter, HTTPException, Depends, status, Request, Response
+from fastapi.responses import JSONResponse
 
 logger = logging.getLogger("algosplit.auth")
-from db.supabase import get_supabase_client, get_supabase_admin, get_supabase_client_with_token
+from db.supabase import get_supabase_auth_client, get_supabase_admin
 from schemas.auth import (
     SignUpRequest,
     LoginRequest,
@@ -23,6 +25,7 @@ from api.security import (
     AUTH_REFRESH_COOKIE_NAME,
     clear_auth_cookies,
     set_auth_cookies,
+    set_csrf_cookie,
     should_expose_auth_tokens,
     validate_csrf_request,
 )
@@ -53,6 +56,77 @@ def _provider_failure_status(error_text: str) -> tuple[int, str]:
     return status.HTTP_503_SERVICE_UNAVAILABLE, AUTH_SERVICE_UNAVAILABLE
 
 
+def _client_kind(request: Request) -> str:
+    return "native" if should_expose_auth_tokens(request) else "web"
+
+
+def _invalid_refresh_response() -> JSONResponse:
+    response = JSONResponse(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        content={"detail": "Invalid or expired refresh token"},
+    )
+    clear_auth_cookies(response)
+    return response
+
+
+def _is_invalid_refresh_error(error_text: str) -> bool:
+    return any(
+        marker in error_text
+        for marker in (
+            "invalid refresh token",
+            "refresh_token_not_found",
+            "refresh token not found",
+            "refresh_token_already_used",
+            "session_not_found",
+            "session_expired",
+            "invalid grant",
+        )
+    )
+
+
+def _logout_response(current_user: AuthUser, scope: str) -> Response:
+    started = perf_counter()
+    try:
+        get_supabase_auth_client().admin.sign_out(current_user.access_token, scope=scope)
+    except Exception as error:
+        logger.warning(
+            "auth_event=logout scope=%s result=provider_error provider_error_type=%s",
+            scope,
+            type(error).__name__,
+        )
+        response = JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Signed out locally, but server revocation could not be confirmed."},
+        )
+        clear_auth_cookies(response)
+        logger.info(
+            "auth_event=logout scope=%s result=provider_error latency_ms=%.1f",
+            scope,
+            (perf_counter() - started) * 1000,
+        )
+        return response
+
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    clear_auth_cookies(response)
+    logger.info(
+        "auth_event=logout scope=%s result=success latency_ms=%.1f",
+        scope,
+        (perf_counter() - started) * 1000,
+    )
+    return response
+
+
+@router.get(
+    "/csrf",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Bootstrap a browser CSRF token",
+)
+def bootstrap_csrf(response: Response):
+    set_csrf_cookie(response)
+    logger.info("auth_event=csrf_bootstrap result=success")
+    return None
+
+
 @router.post(
     "/signup",
     response_model=AuthResponse,
@@ -65,7 +139,7 @@ def _provider_failure_status(error_text: str) -> tuple[int, str]:
     summary="Sign up a new user",
     description="Create a new user account with email and password",
 )
-async def signup(request: SignUpRequest, http_request: Request, http_response: Response):
+def signup(request: SignUpRequest, http_request: Request, http_response: Response):
     """
     Create a new user account
 
@@ -79,10 +153,10 @@ async def signup(request: SignUpRequest, http_request: Request, http_response: R
         HTTPException: If sign up fails
     """
     try:
-        supabase = get_supabase_client()
+        auth_client = get_supabase_auth_client()
 
         # Sign up the user using Supabase Auth
-        sign_up_response = supabase.auth.sign_up(
+        sign_up_response = auth_client.sign_up(
             {
                 "email": request.email,
                 "password": request.password,
@@ -150,7 +224,10 @@ async def signup(request: SignUpRequest, http_request: Request, http_response: R
                 detail="Password does not meet security requirements",
             )
         provider_status, public_message = _provider_failure_status(error_message)
-        logger.exception("Signup provider failure")
+        logger.warning(
+            "auth_event=signup result=provider_error provider_error_type=%s",
+            type(error).__name__,
+        )
         raise HTTPException(status_code=provider_status, detail=public_message)
 
 
@@ -165,7 +242,7 @@ async def signup(request: SignUpRequest, http_request: Request, http_response: R
     summary="Log in a user",
     description="Authenticate a user with email and password",
 )
-async def login(request: LoginRequest, http_request: Request, http_response: Response):
+def login(request: LoginRequest, http_request: Request, http_response: Response):
     """
     Log in a user
 
@@ -179,10 +256,10 @@ async def login(request: LoginRequest, http_request: Request, http_response: Res
         HTTPException: If login fails
     """
     try:
-        supabase = get_supabase_client()
+        auth_client = get_supabase_auth_client()
 
         # Sign in the user using Supabase Auth
-        login_response = supabase.auth.sign_in_with_password(
+        login_response = auth_client.sign_in_with_password(
             {
                 "email": request.email,
                 "password": request.password,
@@ -229,7 +306,10 @@ async def login(request: LoginRequest, http_request: Request, http_response: Res
                 detail="Please check your email and confirm your account before signing in",
             )
         provider_status, public_message = _provider_failure_status(error_message)
-        logger.exception("Login provider failure")
+        logger.warning(
+            "auth_event=login result=provider_error provider_error_type=%s",
+            type(error).__name__,
+        )
         raise HTTPException(status_code=provider_status, detail=public_message)
 
 
@@ -267,7 +347,7 @@ async def get_user(current_user: AuthUser = Depends(get_current_user)):
     summary="Refresh access token",
     description="Exchange a refresh token for a new access token",
 )
-async def refresh(
+def refresh(
     http_request: Request,
     http_response: Response,
     request: RefreshRequest | None = None,
@@ -275,55 +355,65 @@ async def refresh(
     """
     Refresh an expired access token using a Supabase refresh token.
     """
+    started = perf_counter()
+    refresh_token = request.refresh_token if request else None
+    refresh_cookie = http_request.cookies.get(AUTH_REFRESH_COOKIE_NAME)
+    if refresh_cookie:
+        # Refresh rotates credentials, so it is a state-changing operation
+        # when performed with browser cookies and must be CSRF protected.
+        validate_csrf_request(http_request)
+        refresh_token = refresh_cookie
+    if not refresh_token:
+        logger.info("auth_event=refresh result=invalid client=%s", _client_kind(http_request))
+        return _invalid_refresh_response()
+
     try:
-        refresh_token = request.refresh_token if request else None
-        refresh_cookie = http_request.cookies.get(AUTH_REFRESH_COOKIE_NAME)
-        if refresh_cookie:
-            # Refresh rotates credentials, so it is a state-changing operation
-            # when performed with browser cookies and must be CSRF protected.
-            validate_csrf_request(http_request)
-            refresh_token = refresh_cookie
-        if not refresh_token:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired refresh token",
+        session_response = get_supabase_auth_client().refresh_session(refresh_token)
+    except Exception as error:
+        error_message = _provider_error_text(error)
+        if _is_invalid_refresh_error(error_message):
+            logger.info(
+                "auth_event=refresh result=invalid client=%s latency_ms=%.1f",
+                _client_kind(http_request),
+                (perf_counter() - started) * 1000,
             )
-
-        supabase = get_supabase_client()
-        session_response = supabase.auth.refresh_session(refresh_token)
-
-        if not session_response.user or not session_response.session:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired refresh token",
-            )
-
-        set_auth_cookies(
-            http_response,
-            session_response.session.access_token,
-            session_response.session.refresh_token,
-            session_response.session.expires_in,
+            return _invalid_refresh_response()
+        logger.warning(
+            "auth_event=refresh result=provider_error client=%s provider_error_type=%s latency_ms=%.1f",
+            _client_kind(http_request),
+            type(error).__name__,
+            (perf_counter() - started) * 1000,
         )
-        expose_tokens = should_expose_auth_tokens(http_request) and not refresh_cookie
-        return AuthResponse(
-            access_token=session_response.session.access_token if expose_tokens else "",
-            refresh_token=session_response.session.refresh_token if expose_tokens else "",
-            token_type="bearer",
-            expires_in=session_response.session.expires_in,
-            user=UserInfo(
-                id=session_response.user.id,
-                email=session_response.user.email,
-            ),
-        )
-
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception("Token refresh provider failure")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired refresh token",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=AUTH_SERVICE_UNAVAILABLE,
         )
+
+    if not session_response.user or not session_response.session:
+        return _invalid_refresh_response()
+
+    set_auth_cookies(
+        http_response,
+        session_response.session.access_token,
+        session_response.session.refresh_token,
+        session_response.session.expires_in,
+    )
+    expose_tokens = should_expose_auth_tokens(http_request) and not refresh_cookie
+    logger.info(
+        "auth_event=refresh result=success client=%s latency_ms=%.1f",
+        _client_kind(http_request),
+        (perf_counter() - started) * 1000,
+    )
+    return AuthResponse(
+        access_token=session_response.session.access_token if expose_tokens else "",
+        refresh_token=session_response.session.refresh_token if expose_tokens else "",
+        token_type="bearer",
+        expires_in=session_response.session.expires_in,
+        user=UserInfo(
+            id=session_response.user.id,
+            email=session_response.user.email,
+        ),
+    )
 
 
 @router.post(
@@ -335,7 +425,7 @@ async def refresh(
     summary="Request a password reset email",
     description="Send a password reset link to the user's email address",
 )
-async def forgot_password(request: ForgotPasswordRequest):
+def forgot_password(request: ForgotPasswordRequest):
     """
     Request a password reset email.
 
@@ -343,8 +433,8 @@ async def forgot_password(request: ForgotPasswordRequest):
     to prevent email enumeration attacks.
     """
     try:
-        supabase = get_supabase_client()
-        supabase.auth.reset_password_email(request.email)
+        auth_client = get_supabase_auth_client()
+        auth_client.reset_password_email(request.email)
     except Exception:
         # Swallow the error AND do not log the email — logging it would create a
         # PII trail in production logs, and the failure itself is not
@@ -365,7 +455,7 @@ async def forgot_password(request: ForgotPasswordRequest):
     summary="Reset password with token",
     description="Set a new password using the access token from the reset email link",
 )
-async def reset_password(request: ResetPasswordRequest):
+def reset_password(request: ResetPasswordRequest):
     """
     Reset a user's password using the access token from the Supabase reset link.
 
@@ -404,7 +494,10 @@ async def reset_password(request: ResetPasswordRequest):
         raise
     except Exception as error:
         error_message = _provider_error_text(error)
-        logger.exception("Password reset provider failure")
+        logger.warning(
+            "auth_event=password_reset result=provider_error provider_error_type=%s",
+            type(error).__name__,
+        )
         if any(marker in error_message for marker in ("invalid", "expired", "jwt")):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -423,10 +516,7 @@ async def reset_password(request: ResetPasswordRequest):
     summary="Log out the current user",
     description="Invalidate the current user's session",
 )
-async def logout(
-    response: Response,
-    current_user: AuthUser = Depends(get_current_user),
-):
+def logout(current_user: AuthUser = Depends(get_current_user)):
     """
     Log out the current user
 
@@ -439,16 +529,21 @@ async def logout(
     Returns:
         204 No Content on success
     """
-    try:
-        # Use a token-scoped client so the caller's session is revoked.
-        supabase = get_supabase_client_with_token(current_user.access_token)
-        supabase.auth.sign_out()
-    except Exception:
-        # Even if sign out fails server-side, clear browser cookies.
-        pass
+    return _logout_response(current_user, "local")
 
-    clear_auth_cookies(response)
-    return None
+
+@router.post(
+    "/logout-all",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+        503: {"model": ErrorResponse, "description": "Session revocation unavailable"},
+    },
+    summary="Log out all sessions",
+    description="Invalidate all sessions belonging to the current user",
+)
+def logout_all(current_user: AuthUser = Depends(get_current_user)):
+    return _logout_response(current_user, "global")
 
 
 @router.delete(
@@ -461,7 +556,7 @@ async def logout(
     summary="Delete the current user's account",
     description="Permanently delete the authenticated user and all associated data",
 )
-async def delete_account(
+def delete_account(
     response: Response,
     current_user: AuthUser = Depends(get_current_user),
 ):
@@ -475,8 +570,11 @@ async def delete_account(
     try:
         admin = get_supabase_admin()
         admin.auth.admin.delete_user(current_user.id)
-    except Exception as e:
-        logger.exception("Failed to delete account for user %s", current_user.id)
+    except Exception as error:
+        logger.warning(
+            "auth_event=account_delete result=provider_error provider_error_type=%s",
+            type(error).__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete account",

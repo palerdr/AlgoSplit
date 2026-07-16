@@ -8,6 +8,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
+import { AppState as NativeAppState, Platform } from 'react-native';
 import {
   BackendError,
   AnalysisResponse,
@@ -79,6 +80,7 @@ interface AccountState {
   forgotPassword: (email: string) => Promise<string>;
   resetPassword: (accessToken: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  logoutAll: () => Promise<void>;
   deleteAccount: () => Promise<void>;
   ensureSplits: () => Promise<void>;
   refreshSplits: () => Promise<void>;
@@ -238,12 +240,10 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       setStatus('authenticated');
     } catch (error) {
       if (isSignedOutError(error)) return markSignedOut();
-      setUser(null);
       setStatus('error');
       setSessionError(
         authErrorMessageForDisplay(error, 'Could not connect to your account. Try again.')
       );
-      clearRemoteData();
     }
   }, [clearRemoteData, markSignedOut]);
 
@@ -728,6 +728,23 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     }
   }, [markSignedOut, user?.id]);
 
+  const logoutAll = useCallback(async () => {
+    const userId = user?.id;
+    let logoutError: unknown;
+    try {
+      await auth.logoutAll();
+    } catch (error) {
+      logoutError = error;
+    }
+    if (userId) await clearPersistedAccountData(userId).catch(() => {});
+    markSignedOut();
+    if (logoutError) {
+      setSessionError(
+        'Signed out on this device, but other sessions could not be revoked. Try again after signing in.'
+      );
+    }
+  }, [markSignedOut, user?.id]);
+
   const deleteAccount = useCallback(async () => {
     const userId = user?.id;
     await auth.deleteAccount();
@@ -738,6 +755,31 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshSession();
   }, [refreshSession]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const subscription = NativeAppState.addEventListener('change', (nextState) => {
+      // Retain and retry a known account after a transient offline/provider
+      // error; only a definitive refresh rejection clears the user/session.
+      if (nextState !== 'active' || !user?.id) return;
+      auth
+        .refreshIfNeeded()
+        .then((refreshed) => {
+          if (refreshed) return refreshSession();
+        })
+        .catch((error) => {
+          if (isSignedOutError(error)) {
+            markSignedOut();
+            return;
+          }
+          setStatus('error');
+          setSessionError(
+            authErrorMessageForDisplay(error, 'Could not reconnect to your account. Try again.')
+          );
+        });
+    });
+    return () => subscription.remove();
+  }, [markSignedOut, refreshSession, user?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -787,6 +829,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       forgotPassword,
       resetPassword,
       logout,
+      logoutAll,
       deleteAccount,
       ensureSplits,
       refreshSplits,
@@ -824,6 +867,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       forgotPassword,
       resetPassword,
       logout,
+      logoutAll,
       deleteAccount,
       ensureSplits,
       refreshSplits,

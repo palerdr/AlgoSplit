@@ -66,9 +66,13 @@ class FakeAuthResponse:
 
 class FakeSupabaseAuth:
     def __init__(self):
+        self.admin = self
         self.raise_on_signup: Exception | None = None
         self.raise_on_login: Exception | None = None
+        self.raise_on_refresh: Exception | None = None
+        self.raise_on_sign_out: Exception | None = None
         self.sign_out_called = False
+        self.sign_out_calls: list[tuple[str | None, str]] = []
         self._users: dict[str, dict[str, str]] = {}
 
     def sign_up(self, payload: dict[str, str]) -> FakeAuthResponse:
@@ -95,11 +99,16 @@ class FakeSupabaseAuth:
         return FakeAuthResponse(user_id=user["id"], email=user["email"], token=f"token-{user['id']}")
 
     def refresh_session(self, refresh_token: str) -> FakeAuthResponse:
+        if self.raise_on_refresh:
+            raise self.raise_on_refresh
         # Accept any refresh token in tests and return a new session
         return FakeAuthResponse(user_id="user-refreshed", email="refreshed@example.com", token="token-refreshed")
 
-    def sign_out(self) -> None:
+    def sign_out(self, jwt: str | None = None, scope: str = "global") -> None:
+        if self.raise_on_sign_out:
+            raise self.raise_on_sign_out
         self.sign_out_called = True
+        self.sign_out_calls.append((jwt, scope))
 
 
 class FakeTableQuery:
@@ -466,8 +475,7 @@ def auth_user() -> AuthUser:
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch, fake_supabase: FakeSupabaseClient, auth_user: AuthUser):
-    monkeypatch.setattr(auth_routes, "get_supabase_client", lambda: fake_supabase)
-    monkeypatch.setattr(auth_routes, "get_supabase_client_with_token", lambda _token: fake_supabase)
+    monkeypatch.setattr(auth_routes, "get_supabase_auth_client", lambda: fake_supabase.auth)
     monkeypatch.setattr(splits_routes, "get_supabase_client_with_token", lambda _token: fake_supabase)
     monkeypatch.setattr(
         splits_routes,

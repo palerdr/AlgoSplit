@@ -278,7 +278,7 @@ def test_compact_overview_is_gzipped_and_no_store(client, fake_supabase, monkeyp
     response = client.get("/api/workouts/overview?days=180", headers={"Accept-Encoding": "gzip"})
 
     assert response.status_code == 200
-    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["cache-control"] == "private, no-store"
     assert response.headers["content-encoding"] == "gzip"
     assert len(response.json()["workouts"]) == 80
 

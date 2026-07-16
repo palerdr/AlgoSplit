@@ -10,15 +10,15 @@ screen or shared app state consumes it. Nothing is omitted from the client.
 
 | Metric | Count |
 | --- | --- |
-| Total backend endpoints (method + path) | **93** |
-| Total client functions in `backend.ts` | **93** (1:1 with endpoints) |
+| Total backend endpoints (method + path) | **95** |
+| Total endpoint client functions in `backend.ts` | **95** (1:1 with endpoints; lifecycle helpers excluded) |
 | Endpoints without a client function | **0** |
 | Routers covered | 16 of 16 (misc/root, auth, splits, imports, workouts, overrides, custom exercises, comparisons, programs, session templates, program sessions, program diagnostics, periodization, meso templates, bodyweight, analysis) |
 
 Notes:
 - `bodyweight.list()` and `customExercises.list()` unwrap the backend's `{ entries|exercises, total }` envelope to a plain array per the app API contract; the endpoints are still called 1:1.
 - `overrides.update()` sends `pattern_override` as a **query** parameter — that is how the backend declares it (bare `str` param, overrides.py:198).
-- Browser mutations attach the `X-CSRF-Token` header from the `algosplit_csrf_token` cookie. Native sessions use Keychain-backed Bearer tokens and automatically rotate them once on 401.
+- Browser mutations bootstrap and attach the persistent `X-CSRF-Token` header, while HttpOnly credentials rotate on 401. Native sessions use one versioned, device-bound SecureStore envelope and rotate before expiry or once on 401.
 
 ## misc — `backend/main.py`
 
@@ -36,10 +36,12 @@ Notes:
 | POST | `/auth/signup` | api/routes/auth.py:33 | `auth.signup(email, password)` | wired |
 | POST | `/auth/login` | api/routes/auth.py:124 | `auth.login(email, password)` | wired (dedicated app entry screen) |
 | GET | `/auth/user` | api/routes/auth.py:209 | `auth.me()` | wired |
+| GET | `/auth/csrf` | api/routes/auth.py | `auth.csrf()` | wired internally (browser CSRF bootstrap) |
 | POST | `/auth/refresh` | api/routes/auth.py:234 | `auth.refresh(refreshToken?)` | wired (automatic native and browser session rotation) |
 | POST | `/auth/forgot-password` | api/routes/auth.py:301 | `auth.forgotPassword(email)` | wired (sign-in recovery flow) |
 | POST | `/auth/reset-password` | api/routes/auth.py:329 | `auth.resetPassword(accessToken, newPassword)` | wired (web and app recovery-link screen) |
-| POST | `/auth/logout` | api/routes/auth.py:384 | `auth.logout()` | wired |
+| POST | `/auth/logout` | api/routes/auth.py | `auth.logout()` | wired (current device only) |
+| POST | `/auth/logout-all` | api/routes/auth.py | `auth.logoutAll()` | wired (confirmed global sign-out in Account) |
 | DELETE | `/auth/account` | api/routes/auth.py:421 | `auth.deleteAccount()` | wired (confirmed destructive action in Account) |
 
 ## splits — `backend/api/routes/splits.py` (prefix `/api/splits`)

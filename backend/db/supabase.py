@@ -12,6 +12,7 @@ from typing import Optional, Union
 import httpx
 from supabase import create_client, Client
 from postgrest import SyncPostgrestClient
+from supabase_auth import SyncGoTrueClient
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -42,6 +43,8 @@ _supabase_admin: Optional[Client] = None
 # ── Shared connection pool for per-request PostgREST clients ──────────
 _postgrest_http: Optional[httpx.Client] = None
 _postgrest_rest_url: Optional[str] = None
+_auth_http: Optional[httpx.Client] = None
+_auth_url: Optional[str] = None
 
 
 def _get_postgrest_pool() -> tuple[httpx.Client, str]:
@@ -72,6 +75,35 @@ def get_supabase_client() -> Client:
         _supabase_client = create_client(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY)
 
     return _supabase_client
+
+
+def get_supabase_auth_client() -> SyncGoTrueClient:
+    """Return an isolated Auth client backed by a shared HTTP connection pool.
+
+    GoTrue clients retain session state in memory. A process-wide client can
+    therefore mix concurrent users' login and refresh state. Each auth request
+    gets its own state container while still reusing the thread-safe HTTP pool.
+    """
+    global _auth_http, _auth_url
+    if _auth_http is None:
+        _auth_url = f"{SUPABASE_URL}/auth/v1"
+        _auth_http = httpx.Client(
+            base_url=_auth_url,
+            http2=True,
+            follow_redirects=True,
+            timeout=httpx.Timeout(15.0),
+        )
+    return SyncGoTrueClient(
+        url=_auth_url,
+        headers={
+            "apiKey": SUPABASE_PUBLISHABLE_KEY,
+            "Authorization": f"Bearer {SUPABASE_PUBLISHABLE_KEY}",
+            "X-Client-Info": "algosplit-api/1.0",
+        },
+        persist_session=False,
+        auto_refresh_token=False,
+        http_client=_auth_http,
+    )
 
 
 def get_supabase_admin() -> Client:
@@ -105,12 +137,17 @@ def reset_clients():
     Reset client instances (useful for testing)
     """
     global _supabase_client, _supabase_admin, _postgrest_http, _postgrest_rest_url
+    global _auth_http, _auth_url
     _supabase_client = None
     _supabase_admin = None
     if _postgrest_http is not None:
         _postgrest_http.close()
     _postgrest_http = None
     _postgrest_rest_url = None
+    if _auth_http is not None:
+        _auth_http.close()
+    _auth_http = None
+    _auth_url = None
 
 
 def get_supabase_client_with_token(access_token: str) -> SyncPostgrestClient:

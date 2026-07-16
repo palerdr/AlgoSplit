@@ -81,7 +81,7 @@ async def security_headers_middleware(request: Request, call_next):
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if request.url.path.startswith(("/auth/", "/api/")):
-        response.headers["Cache-Control"] = "no-store"
+        response.headers["Cache-Control"] = "private, no-store"
     if IS_PRODUCTION:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Content-Security-Policy"] = "default-src 'none'; base-uri 'none'; frame-ancestors 'none'"
@@ -287,7 +287,9 @@ def read_root():
                 "signup": "/auth/signup",
                 "login": "/auth/login",
                 "user": "/auth/user",
-                "logout": "/auth/logout"
+                "csrf": "/auth/csrf",
+                "logout": "/auth/logout",
+                "logout_all": "/auth/logout-all",
             },
             "splits": {
                 "list": "/api/splits",

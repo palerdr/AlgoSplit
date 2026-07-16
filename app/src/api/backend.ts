@@ -130,6 +130,16 @@ const CSRF_HEADER_NAME = 'X-CSRF-Token';
 const NATIVE_CLIENT_HEADER_NAME = 'X-AlgoSplit-Client';
 const ACCESS_TOKEN_KEY = 'algosplit_access_token';
 const REFRESH_TOKEN_KEY = 'algosplit_refresh_token';
+const NATIVE_SESSION_KEY = 'algosplit_native_session_v1';
+const NATIVE_SESSION_VERSION = 1;
+const NATIVE_REFRESH_SKEW_MS = 5 * 60_000;
+
+interface NativeSessionEnvelope {
+  version: 1;
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+}
 
 const SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
@@ -137,31 +147,93 @@ const SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
 
 /** Authentication credentials never enter web-accessible storage. */
 export const nativeTokenStore = {
-  async getAccessToken(): Promise<string | null> {
+  async getSession(): Promise<NativeSessionEnvelope | null> {
     if (IS_WEB) return null;
     try {
-      return await SecureStore.getItemAsync(ACCESS_TOKEN_KEY);
+      const serialized = await SecureStore.getItemAsync(NATIVE_SESSION_KEY);
+      if (serialized) {
+        let parsed: Partial<NativeSessionEnvelope> | null = null;
+        try {
+          parsed = JSON.parse(serialized) as Partial<NativeSessionEnvelope>;
+        } catch {
+          // Corrupt local state is not a provider or connectivity failure. Drop
+          // only the unusable envelope and let the normal signed-out flow run.
+        }
+        if (
+          parsed?.version === NATIVE_SESSION_VERSION &&
+          typeof parsed.accessToken === 'string' &&
+          typeof parsed.refreshToken === 'string' &&
+          typeof parsed.expiresAt === 'number'
+        ) {
+          return parsed as NativeSessionEnvelope;
+        }
+        await SecureStore.deleteItemAsync(NATIVE_SESSION_KEY);
+        return null;
+      }
+
+      const [legacyAccessToken, legacyRefreshToken] = await Promise.all([
+        SecureStore.getItemAsync(ACCESS_TOKEN_KEY),
+        SecureStore.getItemAsync(REFRESH_TOKEN_KEY),
+      ]);
+      if (!legacyAccessToken || !legacyRefreshToken) return null;
+
+      // Legacy storage did not retain expiry, so force one safe rotation as
+      // soon as the migrated session is used.
+      const migrated: NativeSessionEnvelope = {
+        version: NATIVE_SESSION_VERSION,
+        accessToken: legacyAccessToken,
+        refreshToken: legacyRefreshToken,
+        expiresAt: 0,
+      };
+      await SecureStore.setItemAsync(
+        NATIVE_SESSION_KEY,
+        JSON.stringify(migrated),
+        SECURE_STORE_OPTIONS
+      );
+      await Promise.all([
+        SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY),
+        SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
+      ]);
+      return migrated;
     } catch {
-      return null;
+      throw new BackendError(
+        0,
+        'Secure account storage is temporarily unavailable. Unlock this device and try again.'
+      );
     }
+  },
+  async getAccessToken(): Promise<string | null> {
+    return (await this.getSession())?.accessToken ?? null;
   },
   async getRefreshToken(): Promise<string | null> {
-    if (IS_WEB) return null;
-    try {
-      return await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
-    } catch {
-      return null;
-    }
+    return (await this.getSession())?.refreshToken ?? null;
   },
-  async save(accessToken: string, refreshToken: string): Promise<void> {
+  async needsRefresh(skewMs = NATIVE_REFRESH_SKEW_MS): Promise<boolean> {
+    const session = await this.getSession();
+    return Boolean(session && session.expiresAt <= Date.now() + skewMs);
+  },
+  async save(accessToken: string, refreshToken: string, expiresIn = 3600): Promise<void> {
     if (IS_WEB) return;
+    const envelope: NativeSessionEnvelope = {
+      version: NATIVE_SESSION_VERSION,
+      accessToken,
+      refreshToken,
+      expiresAt: Date.now() + Math.max(0, expiresIn) * 1000,
+    };
     try {
+      await SecureStore.setItemAsync(
+        NATIVE_SESSION_KEY,
+        JSON.stringify(envelope),
+        SECURE_STORE_OPTIONS
+      );
       await Promise.all([
-        SecureStore.setItemAsync(ACCESS_TOKEN_KEY, accessToken, SECURE_STORE_OPTIONS),
-        SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken, SECURE_STORE_OPTIONS),
+        SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY),
+        SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
       ]);
     } catch (error) {
-      await this.clear();
+      // A locked keychain or transient device-storage failure must not turn a
+      // recoverable condition into a logout. The previous envelope, if any,
+      // remains authoritative until a complete rotated envelope is persisted.
       throw error;
     }
   },
@@ -169,6 +241,7 @@ export const nativeTokenStore = {
     if (IS_WEB) return;
     try {
       await Promise.all([
+        SecureStore.deleteItemAsync(NATIVE_SESSION_KEY),
         SecureStore.deleteItemAsync(ACCESS_TOKEN_KEY),
         SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
       ]);
@@ -210,6 +283,7 @@ function qs(params: Record<string, QueryValue>): string {
  * - 204 / empty bodies resolve to undefined.
  */
 const AUTH_ROUTES_WITHOUT_REFRESH = new Set([
+  '/auth/csrf',
   '/auth/login',
   '/auth/signup',
   '/auth/forgot-password',
@@ -227,7 +301,11 @@ async function storeNativeAuthResponse(response: AuthResponse): Promise<void> {
     );
   }
   try {
-    await nativeTokenStore.save(response.access_token, response.refresh_token);
+    await nativeTokenStore.save(
+      response.access_token,
+      response.refresh_token,
+      response.expires_in
+    );
   } catch {
     throw new BackendError(
       0,
@@ -264,12 +342,43 @@ async function parseResponse<T>(res: Response, method: HttpMethod, path: string)
   }
 }
 
+let csrfPromise: Promise<string> | null = null;
+
+async function ensureCsrfToken(force = false): Promise<string | null> {
+  if (!IS_WEB || API_URL === null) return null;
+  const existing = readCsrfToken();
+  if (existing && !force) return existing;
+  if (!csrfPromise) {
+    csrfPromise = fetch(`${API_URL}/auth/csrf`, {
+      method: 'GET',
+      credentials: 'include',
+      headers: { accept: 'application/json' },
+    })
+      .then(async (response) => {
+        await parseResponse<void>(response, 'GET', '/auth/csrf');
+        const token = readCsrfToken();
+        if (!token) {
+          throw new BackendError(0, AUTH_SERVICE_UNAVAILABLE);
+        }
+        return token;
+      })
+      .catch((error) => {
+        if (error instanceof BackendError) throw error;
+        throw new BackendError(0, AUTH_SERVICE_UNAVAILABLE);
+      })
+      .finally(() => {
+        csrfPromise = null;
+      });
+  }
+  return csrfPromise;
+}
+
 type RefreshOutcome = 'refreshed' | 'invalid';
 let refreshPromise: Promise<RefreshOutcome> | null = null;
 
-async function refreshCredentials(): Promise<RefreshOutcome> {
+async function refreshCredentials(retriedCsrf = false): Promise<RefreshOutcome> {
   if (API_URL === null) return 'invalid';
-  const refreshToken = await nativeTokenStore.getRefreshToken();
+  const refreshToken = IS_WEB ? null : await nativeTokenStore.getRefreshToken();
   if (!IS_WEB && !refreshToken) {
     await nativeTokenStore.clear();
     return 'invalid';
@@ -278,8 +387,9 @@ async function refreshCredentials(): Promise<RefreshOutcome> {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (!IS_WEB) headers[NATIVE_CLIENT_HEADER_NAME] = 'native';
   if (IS_WEB) {
-    const csrf = readCsrfToken();
-    if (csrf) headers[CSRF_HEADER_NAME] = csrf;
+    const csrf = await ensureCsrfToken();
+    if (!csrf) throw new BackendError(0, AUTH_SERVICE_UNAVAILABLE);
+    headers[CSRF_HEADER_NAME] = csrf;
   }
 
   let res: Response;
@@ -294,6 +404,10 @@ async function refreshCredentials(): Promise<RefreshOutcome> {
     throw new BackendError(0, safeAuthErrorMessage(0, '/auth/refresh'));
   }
 
+  if (IS_WEB && res.status === 403 && !retriedCsrf) {
+    await ensureCsrfToken(true);
+    return refreshCredentials(true);
+  }
   if ([400, 401, 403].includes(res.status)) {
     await nativeTokenStore.clear();
     return 'invalid';
@@ -301,6 +415,15 @@ async function refreshCredentials(): Promise<RefreshOutcome> {
   const response = await parseResponse<AuthResponse>(res, 'POST', '/auth/refresh');
   await storeNativeAuthResponse(response);
   return 'refreshed';
+}
+
+async function refreshOnce(): Promise<RefreshOutcome> {
+  if (!refreshPromise) {
+    refreshPromise = refreshCredentials().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
 }
 
 async function request<T>(
@@ -316,12 +439,26 @@ async function request<T>(
     );
   }
 
+  if (
+    !IS_WEB &&
+    allowRefresh &&
+    !AUTH_ROUTES_WITHOUT_REFRESH.has(path) &&
+    (await nativeTokenStore.needsRefresh())
+  ) {
+    await refreshOnce();
+  }
+
+  const isMutation = method !== 'GET' && method !== 'HEAD';
+  if (IS_WEB && isMutation && !AUTH_ROUTES_WITHOUT_REFRESH.has(path)) {
+    await ensureCsrfToken();
+  }
+
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (!IS_WEB) {
     headers[NATIVE_CLIENT_HEADER_NAME] = 'native';
     const accessToken = await nativeTokenStore.getAccessToken();
     if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-  } else if (method !== 'GET' && method !== 'HEAD') {
+  } else if (isMutation) {
     const csrf = readCsrfToken();
     if (csrf) headers[CSRF_HEADER_NAME] = csrf;
   }
@@ -348,12 +485,7 @@ async function request<T>(
     allowRefresh &&
     !AUTH_ROUTES_WITHOUT_REFRESH.has(path)
   ) {
-    if (!refreshPromise) {
-      refreshPromise = refreshCredentials().finally(() => {
-        refreshPromise = null;
-      });
-    }
-    const outcome = await refreshPromise;
+    const outcome = await refreshOnce();
     if (outcome === 'refreshed') return request<T>(method, path, body, false);
   }
 
@@ -1701,6 +1833,20 @@ export interface KeepaliveResponse {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const auth = {
+  /** GET /auth/csrf — issue a readable browser double-submit token. */
+  csrf(): Promise<void> {
+    return request<void>('GET', '/auth/csrf', undefined, false);
+  },
+
+  async refreshIfNeeded(): Promise<boolean> {
+    if (IS_WEB || !(await nativeTokenStore.needsRefresh())) return false;
+    const outcome = await refreshOnce();
+    if (outcome === 'invalid') {
+      throw new BackendError(401, 'Your session has expired. Please sign in again.');
+    }
+    return true;
+  },
+
   /** POST /auth/signup — create an account (api/routes/auth.py:33). 201 → AuthResponse; also sets auth cookies. */
   async signup(email: string, password: string): Promise<AuthResponse> {
     const body: SignUpRequest = { email, password };
@@ -1747,6 +1893,15 @@ export const auth = {
   async logout(): Promise<void> {
     try {
       await request<void>('POST', '/auth/logout');
+    } finally {
+      await nativeTokenStore.clear();
+    }
+  },
+
+  /** POST /auth/logout-all — revoke every session belonging to the account. */
+  async logoutAll(): Promise<void> {
+    try {
+      await request<void>('POST', '/auth/logout-all');
     } finally {
       await nativeTokenStore.clear();
     }

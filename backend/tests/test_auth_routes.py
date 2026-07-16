@@ -14,6 +14,17 @@ def test_signup_sets_auth_and_csrf_cookies(client):
     assert "algosplit_access_token" in response.cookies
     assert "algosplit_refresh_token" in response.cookies
     assert "algosplit_csrf_token" in response.cookies
+    cookie_headers = response.headers.get_list("set-cookie")
+    access_cookie = next(value for value in cookie_headers if value.startswith("algosplit_access_token="))
+    refresh_cookie = next(value for value in cookie_headers if value.startswith("algosplit_refresh_token="))
+    csrf_cookie = next(value for value in cookie_headers if value.startswith("algosplit_csrf_token="))
+    assert "Max-Age=3600" in access_cookie
+    assert "HttpOnly" in access_cookie
+    assert "Max-Age=2592000" in refresh_cookie
+    assert "HttpOnly" in refresh_cookie
+    assert "Max-Age=2592000" in csrf_cookie
+    assert "HttpOnly" not in csrf_cookie
+    assert all("Domain=" not in value for value in cookie_headers)
 
 
 def test_signup_without_provider_session_requires_email_confirmation(client, fake_supabase):
@@ -166,14 +177,48 @@ def test_get_current_user_returns_dependency_user(client):
     }
 
 
-def test_logout_returns_204_and_clears_cookies(client):
+def test_logout_returns_204_revokes_locally_and_clears_cookies(client, fake_supabase):
     response = client.post("/auth/logout")
 
     assert response.status_code == 204
+    assert fake_supabase.auth.sign_out_calls == [("token-user-123", "local")]
     set_cookie = response.headers.get("set-cookie", "")
     assert "algosplit_access_token" in set_cookie
     assert "algosplit_refresh_token" in set_cookie
     assert "algosplit_csrf_token" in set_cookie
+
+
+def test_logout_all_revokes_every_session(client, fake_supabase):
+    response = client.post("/auth/logout-all")
+
+    assert response.status_code == 204
+    assert fake_supabase.auth.sign_out_calls == [("token-user-123", "global")]
+
+
+def test_logout_revocation_failure_still_clears_local_cookies(client, fake_supabase):
+    fake_supabase.auth.raise_on_sign_out = Exception("provider unavailable")
+
+    response = client.post("/auth/logout")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Signed out locally, but server revocation could not be confirmed."
+    )
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "algosplit_access_token" in set_cookie
+    assert "algosplit_refresh_token" in set_cookie
+    assert "algosplit_csrf_token" in set_cookie
+
+
+def test_csrf_bootstrap_is_anonymous_persistent_and_non_cacheable(client):
+    response = client.get("/auth/csrf")
+
+    assert response.status_code == 204
+    cookie = response.headers.get("set-cookie", "")
+    assert "algosplit_csrf_token=" in cookie
+    assert "Max-Age=2592000" in cookie
+    assert "SameSite=lax" in cookie
+    assert response.headers["cache-control"] == "private, no-store"
 
 
 def test_cookie_refresh_requires_csrf_and_rotates_session(client):
@@ -195,7 +240,11 @@ def test_cookie_refresh_requires_csrf_and_rotates_session(client):
 
     assert response.status_code == 200
     assert response.json()["access_token"] == ""
-    assert "algosplit_refresh_token" in response.headers.get("set-cookie", "")
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "algosplit_access_token" in set_cookie
+    assert "algosplit_refresh_token" in set_cookie
+    assert "algosplit_csrf_token" in set_cookie
+    assert "Max-Age=2592000" in set_cookie
 
     native_spoof = client.post(
         "/auth/refresh",
@@ -222,10 +271,64 @@ def test_native_refresh_returns_rotated_tokens_from_body(client):
     assert response.json()["refresh_token"] == "refresh-token-refreshed"
 
 
+def test_invalid_refresh_clears_browser_cookies(client, fake_supabase):
+    fake_supabase.auth.raise_on_refresh = Exception("refresh_token_not_found")
+    response = client.post(
+        "/auth/refresh",
+        json={},
+        cookies={
+            "algosplit_refresh_token": "invalid",
+            "algosplit_csrf_token": "csrf-token",
+        },
+        headers={"X-CSRF-Token": "csrf-token"},
+    )
+
+    assert response.status_code == 401
+    set_cookie = response.headers.get("set-cookie", "")
+    assert "algosplit_access_token" in set_cookie
+    assert "algosplit_refresh_token" in set_cookie
+    assert "algosplit_csrf_token" in set_cookie
+
+
+def test_refresh_provider_outage_does_not_clear_session_cookies(client, fake_supabase):
+    fake_supabase.auth.raise_on_refresh = Exception("upstream connection timed out")
+    response = client.post(
+        "/auth/refresh",
+        json={},
+        cookies={
+            "algosplit_refresh_token": "still-valid",
+            "algosplit_csrf_token": "csrf-token",
+        },
+        headers={"X-CSRF-Token": "csrf-token"},
+    )
+
+    assert response.status_code == 503
+    assert "set-cookie" not in response.headers
+
+
+def test_browser_origin_cannot_spoof_native_token_response(client):
+    client.post(
+        "/auth/signup",
+        json={"email": "user@example.com", "password": "StrongPass123!"},
+    )
+    response = client.post(
+        "/auth/login",
+        json={"email": "user@example.com", "password": "StrongPass123!"},
+        headers={
+            "X-AlgoSplit-Client": "native",
+            "Origin": "https://algo-split.vercel.app",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["access_token"] == ""
+    assert response.json()["refresh_token"] == ""
+
+
 def test_api_responses_include_baseline_security_headers(client):
     response = client.get("/auth/user")
 
     assert response.status_code == 200
     assert response.headers["x-content-type-options"] == "nosniff"
     assert response.headers["x-frame-options"] == "DENY"
-    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["cache-control"] == "private, no-store"

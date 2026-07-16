@@ -9,6 +9,8 @@ def test_openapi_contains_core_paths():
         "/auth/signup",
         "/auth/login",
         "/auth/user",
+        "/auth/csrf",
+        "/auth/logout-all",
         "/api/splits",
         "/api/splits/{split_id}",
         "/api/splits/{split_id}/analyze",

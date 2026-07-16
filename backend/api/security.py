@@ -4,9 +4,13 @@ Security configuration helpers shared across auth modules.
 
 import os
 import secrets
+import logging
 from typing import Optional
 
 from fastapi import HTTPException, Request, Response, status
+
+
+logger = logging.getLogger("algosplit.auth")
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -30,7 +34,7 @@ CSRF_PROTECTED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 AUTH_COOKIE_SECURE = True if IS_PRODUCTION else _env_bool("AUTH_COOKIE_SECURE", False)
 AUTH_COOKIE_HTTPONLY = True if IS_PRODUCTION else _env_bool("AUTH_COOKIE_HTTPONLY", True)
 AUTH_COOKIE_PATH = os.getenv("AUTH_COOKIE_PATH", "/")
-AUTH_COOKIE_DOMAIN: Optional[str] = os.getenv("AUTH_COOKIE_DOMAIN")
+AUTH_COOKIE_DOMAIN: Optional[str] = os.getenv("AUTH_COOKIE_DOMAIN") or None
 AUTH_COOKIE_SAMESITE = os.getenv(
     "AUTH_COOKIE_SAMESITE",
     "lax",  # Lax is correct: Vercel rewrites make API calls same-origin
@@ -39,6 +43,12 @@ if AUTH_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
     AUTH_COOKIE_SAMESITE = "lax"
 if AUTH_COOKIE_SAMESITE == "none" and not AUTH_COOKIE_SECURE:
     raise RuntimeError("AUTH_COOKIE_SAMESITE=none requires AUTH_COOKIE_SECURE=true")
+if IS_PRODUCTION and AUTH_COOKIE_DOMAIN:
+    raise RuntimeError("Production auth cookies must be host-only; unset AUTH_COOKIE_DOMAIN")
+if IS_PRODUCTION and AUTH_COOKIE_PATH != "/":
+    raise RuntimeError("Production auth cookies must use AUTH_COOKIE_PATH=/")
+if IS_PRODUCTION and AUTH_COOKIE_SAMESITE != "lax":
+    raise RuntimeError("Production auth cookies must use AUTH_COOKIE_SAMESITE=lax")
 
 # Browser sessions use HttpOnly cookies by default in production, keeping both
 # access and refresh tokens out of localStorage and JavaScript. Native-only
@@ -58,6 +68,7 @@ def should_expose_auth_tokens(request: Request) -> bool:
     """
     return (
         AUTH_EXPOSE_ACCESS_TOKEN
+        and not request.headers.get("origin")
         and request.headers.get(NATIVE_CLIENT_HEADER_NAME, "").strip().lower() == "native"
     )
 
@@ -98,15 +109,22 @@ def set_auth_cookies(
             **refresh_cookie,
         )
 
+    set_csrf_cookie(response, csrf_token=csrf_token)
+    return csrf_token
+
+
+def set_csrf_cookie(response: Response, csrf_token: Optional[str] = None) -> str:
+    """Set a readable double-submit token for the full refresh-session lifetime."""
+    token = csrf_token or secrets.token_urlsafe(32)
     csrf_cookie = _cookie_common()
     response.set_cookie(
         key=CSRF_COOKIE_NAME,
-        value=csrf_token,
-        max_age=max_age,
+        value=token,
+        max_age=AUTH_REFRESH_COOKIE_MAX_AGE_SECONDS,
         httponly=False,
         **csrf_cookie,
     )
-    return csrf_token
+    return token
 
 
 def clear_auth_cookies(response: Response) -> None:
@@ -124,6 +142,7 @@ def validate_csrf_request(request: Request) -> None:
     csrf_cookie = request.cookies.get(CSRF_COOKIE_NAME)
     csrf_header = request.headers.get(CSRF_HEADER_NAME)
     if not csrf_cookie or not csrf_header or not secrets.compare_digest(csrf_cookie, csrf_header):
+        logger.info("auth_event=csrf_validation result=failure")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid CSRF token",

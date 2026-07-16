@@ -59,12 +59,17 @@ ANALYSIS_ENGINE_FALLBACK=false
 ANALYSIS_SHADOW_SAMPLE_RATE=0
 
 AUTH_EXPOSE_ACCESS_TOKEN=false
+AUTH_COOKIE_PATH=/
 AUTH_COOKIE_SAMESITE=lax
+AUTH_REFRESH_COOKIE_MAX_AGE_SECONDS=2592000
 ```
+
+Do not set `AUTH_COOKIE_DOMAIN` in production. Cookies are host-only and the
+production web client reaches the API through same-origin Vercel rewrites.
 
 Set `AUTH_EXPOSE_ACCESS_TOKEN=true` before distributing a native build. Native
 tokens are returned only for requests carrying the explicit native-client
-header; browser authentication remains cookie based.
+header without a browser `Origin`; browser authentication remains cookie based.
 
 After deployment, verify:
 
@@ -112,6 +117,21 @@ In Supabase Authentication URL Configuration:
 3. Add any custom production domain before moving traffic to it.
 4. Remove retired frontend domains only after the rollback window closes.
 
+In Supabase Authentication, Sessions, configure:
+
+```text
+Single session per user: disabled
+Inactivity timeout: 30 days
+Time-box user sessions: 180 days
+JWT expiry: 3600 seconds
+Refresh token rotation: enabled
+Refresh token reuse interval: 10 seconds
+```
+
+The inactivity and time-box controls require a Supabase plan that supports
+advanced session settings. Do not lengthen JWT expiry to achieve persistent
+login; browser and native clients rotate the short-lived token instead.
+
 ## Release sequence
 
 1. Open a pull request from the release branch to `main`.
@@ -131,7 +151,11 @@ In Supabase Authentication URL Configuration:
 - Analyze and edit a split, including an empty Rest session.
 - Start, save, and reopen a workout.
 - Confirm split and workout mutations survive a hard reload.
-- Test logout, login, request retry, and signed-out behavior.
+- Close and reopen the browser after the access token expires and confirm the
+  refresh cookie restores the account without another login.
+- Confirm ordinary logout affects only the current browser/device, then confirm
+  “Sign out all devices” prevents every session from refreshing.
+- Test login, request retry, provider-outage, and signed-out behavior.
 - Inspect backend logs for failed imports, authentication errors, analysis
   fallback, and database migration errors.
 
@@ -143,7 +167,9 @@ The EAS production profile uses
 1. Set `AUTH_EXPOSE_ACCESS_TOKEN=true` in the backend Vercel Production
    environment and redeploy it.
 2. Confirm `app/app.json` contains the correct EAS project ID and iOS bundle ID.
-3. Run the app checks and TestFlight smoke test.
+3. Confirm a native login creates one versioned SecureStore session envelope,
+   survives app termination, and rotates before expiry on foreground resume.
+4. Run the app checks and TestFlight smoke test.
 
 ```bash
 cd app

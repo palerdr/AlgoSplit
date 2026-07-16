@@ -25,7 +25,8 @@ interface AccountScreenProps {
 export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps) {
   const account = useAccountState();
   const app = useAppState();
-  const [busy, setBusy] = useState<'logout' | 'delete' | null>(null);
+  const [busy, setBusy] = useState<'logout' | 'logoutAll' | 'delete' | null>(null);
+  const [confirmLogoutAll, setConfirmLogoutAll] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmation, setConfirmation] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +51,17 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
       await account.deleteAccount();
     } catch (cause) {
       setError(authErrorMessageForDisplay(cause, 'Could not delete the account.'));
+      setBusy(null);
+    }
+  };
+
+  const logoutAll = async () => {
+    setBusy('logoutAll');
+    setError(null);
+    try {
+      await account.logoutAll();
+    } catch (cause) {
+      setError(authErrorMessageForDisplay(cause, 'Could not sign out all devices.'));
       setBusy(null);
     }
   };
@@ -260,15 +272,47 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
         </FadeIn>
 
         <FadeIn delay={145}>
-          <Pressable onPress={logout} disabled={busy !== null}>
-            <Glass style={styles.button} interactive>
-              {busy === 'logout' ? (
-                <ActivityIndicator color={theme.accent} />
-              ) : (
-                <Text style={styles.buttonText}>Sign out</Text>
-              )}
-            </Glass>
-          </Pressable>
+          <Glass style={styles.card}>
+            <Text style={styles.cardTitle}>Active sessions</Text>
+            <Text style={styles.body}>
+              Signing out here leaves your other browsers and devices connected.
+            </Text>
+            <Pressable onPress={logout} disabled={busy !== null}>
+              <Glass style={styles.button} interactive>
+                {busy === 'logout' ? (
+                  <ActivityIndicator color={theme.accent} />
+                ) : (
+                  <Text style={styles.buttonText}>Sign out this device</Text>
+                )}
+              </Glass>
+            </Pressable>
+            {!confirmLogoutAll ? (
+              <Pressable onPress={() => setConfirmLogoutAll(true)} disabled={busy !== null}>
+                <Text style={styles.sessionDangerAction}>Sign out all devices</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.confirmArea}>
+                <Text style={styles.confirmLabel}>
+                  This ends every browser and mobile session for your account.
+                </Text>
+                <View style={styles.confirmActions}>
+                  <Pressable
+                    onPress={() => setConfirmLogoutAll(false)}
+                    disabled={busy !== null}
+                  >
+                    <Text style={styles.cancel}>Cancel</Text>
+                  </Pressable>
+                  <Pressable onPress={logoutAll} disabled={busy !== null}>
+                    {busy === 'logoutAll' ? (
+                      <ActivityIndicator color="#E27878" />
+                    ) : (
+                      <Text style={styles.dangerAction}>Confirm sign out all</Text>
+                    )}
+                  </Pressable>
+                </View>
+              </View>
+            )}
+          </Glass>
         </FadeIn>
 
         <FadeIn delay={180}>
@@ -399,6 +443,7 @@ const styles = StyleSheet.create({
   actionText: { color: theme.accent, fontSize: 13, fontWeight: '700', marginTop: 14 },
   button: { borderRadius: 20, paddingVertical: 15, alignItems: 'center', marginBottom: 12 },
   buttonText: { color: theme.accent, fontSize: 15, fontWeight: '700' },
+  sessionDangerAction: { color: '#E27878', fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: 3 },
   dangerCard: { borderColor: 'rgba(226,120,120,0.28)' },
   dangerTitle: { color: '#E27878', fontSize: 15, fontWeight: '700', marginBottom: 7 },
   dangerAction: { color: '#E27878', fontSize: 13, fontWeight: '700', marginTop: 15 },
