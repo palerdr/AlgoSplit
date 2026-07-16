@@ -1,6 +1,6 @@
 # AlgoSplit
 
-AlgoSplit is a training split planner, workout tracker, and analysis app. It combines a React Native/Expo client with a FastAPI backend that models muscle stimulus, fatigue, recovery, and training history against user-created splits.
+AlgoSplit is a training split planner, workout tracker, and analysis app. It combines a React Native/Expo client with a FastAPI (Python + Rust) backend that models muscle stimulus, fatigue, recovery, and training history against user-created splits.
 
 The project is no longer an API-only prototype. It now includes authentication, Supabase-backed persistence, split editing/importing, logged workout history, progress charts, custom exercise overrides, comparisons, bodyweight tracking, and program/session-template workflows.
 
