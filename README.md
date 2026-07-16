@@ -143,6 +143,50 @@ npm run android
 
 Production web uses same-origin Vercel rewrites. The EAS production profile supplies the native API URL; use `EXPO_PUBLIC_ALGOSPLIT_API` locally when pointing at a different backend.
 
+### Running on a Phone (Expo Go)
+
+Account features need a backend the phone can reach. In development the app
+defaults `EXPO_PUBLIC_ALGOSPLIT_API` to `http://localhost:8000`, which on a
+physical device is the phone itself — every `/auth/*` request fails and the app
+shows "Account connection failed / Account service is temporarily unavailable.
+Please try again later."
+
+Point the dev bundle at the deployed API instead:
+
+1. Create `app/.env.local` (gitignored, and it overrides any existing
+   `app/.env` so a `localhost` value for web work can stay in place):
+
+   ```env
+   EXPO_PUBLIC_ALGOSPLIT_API=https://algosplit-api-staging.vercel.app
+   ```
+
+2. Make sure the backend Vercel Production environment sets
+   `AUTH_EXPOSE_ACCESS_TOKEN=true` and has been redeployed since (see
+   DEPLOYMENT.md). Without it, login on the phone fails with "The backend did
+   not return native session credentials": native clients authenticate with
+   Bearer tokens, which the backend only includes in the JSON body when this
+   flag is enabled. Browser authentication is unaffected — requests carrying an
+   `Origin` header always stay cookie-only.
+
+3. Restart the dev server with a clean cache (`EXPO_PUBLIC_*` values are
+   inlined at bundle time, so a plain reload is not enough):
+
+   ```bash
+   cd app
+   npx expo start -c
+   ```
+
+4. Scan the QR code with Expo Go (phone and dev machine on the same network)
+   and sign in with your production account. The phone talks to the production
+   API and data.
+
+Pointing a phone at a *local* backend does not currently work: in
+non-production the backend's `TrustedHostMiddleware` (`backend/main.py`) only
+accepts `localhost`/`127.0.0.1` hosts, so requests to a LAN address such as
+`http://192.168.x.x:8000` are rejected with `400 Invalid host header` before
+any route runs. Use the deployed API for on-device work, or extend the dev
+`allowed_hosts` list locally.
+
 ## Scripts and Checks
 
 ### App
