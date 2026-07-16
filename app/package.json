@@ -42,7 +42,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "build:web": "expo export --platform web && node scripts/copy-public.mjs",
-    "test": "jest"
+    "test": "jest",
+    "test:ci": "jest --runInBand --coverage"
   },
   "jest": {
     "preset": "jest-expo",
