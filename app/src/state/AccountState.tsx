@@ -86,11 +86,13 @@ interface AccountState {
   refreshSplits: () => Promise<void>;
   createSplit: (split: SplitCreate) => Promise<SplitResponse>;
   replaceSplit: (splitId: string, split: SplitCreate) => Promise<SplitResponse>;
+  deleteSplit: (splitId: string) => Promise<void>;
   saveSplitSession: (
     splitId: string,
     sessionId: string | null,
     session: SessionCreate
   ) => Promise<SplitResponse>;
+  deleteSplitSession: (splitId: string, sessionId: string) => Promise<SplitResponse>;
   ensureWorkouts: (days?: number) => Promise<void>;
   refreshWorkouts: (days?: number) => Promise<void>;
   ensureWorkoutOverview: () => Promise<void>;
@@ -646,6 +648,26 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     [markSignedOut]
   );
 
+  const deleteSplit = useCallback(
+    async (splitId: string) => {
+      try {
+        await splitsApi.remove(splitId);
+        clearSplitAnalysisCache();
+        setSplitResource((previous) => ({
+          data: previous.data.filter((candidate) => candidate.id !== splitId),
+          loading: false,
+          loaded: true,
+          error: null,
+          fetchedAt: Date.now(),
+        }));
+      } catch (error) {
+        if (isSignedOutError(error)) markSignedOut();
+        throw error;
+      }
+    },
+    [markSignedOut]
+  );
+
   const saveSplitSession = useCallback(
     async (splitId: string, sessionId: string | null, session: SessionCreate) => {
       try {
@@ -662,6 +684,33 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
         const patched = {
           ...currentSplit,
           sessions: sessions.sort((left, right) => left.day_number - right.day_number),
+        };
+        clearSplitAnalysisCache();
+        setSplitResource((previous) => ({
+          data: previous.data.map((candidate) => (candidate.id === splitId ? patched : candidate)),
+          loading: false,
+          loaded: true,
+          error: null,
+          fetchedAt: Date.now(),
+        }));
+        return patched;
+      } catch (error) {
+        if (isSignedOutError(error)) markSignedOut();
+        throw error;
+      }
+    },
+    [markSignedOut]
+  );
+
+  const deleteSplitSession = useCallback(
+    async (splitId: string, sessionId: string) => {
+      try {
+        const currentSplit = splitRef.current.data.find((candidate) => candidate.id === splitId);
+        if (!currentSplit) throw new Error('Saved split is no longer loaded. Refresh and retry.');
+        await splitsApi.removeSession(splitId, sessionId);
+        const patched = {
+          ...currentSplit,
+          sessions: currentSplit.sessions.filter((candidate) => candidate.id !== sessionId),
         };
         clearSplitAnalysisCache();
         setSplitResource((previous) => ({
@@ -857,7 +906,9 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       refreshSplits,
       createSplit,
       replaceSplit,
+      deleteSplit,
       saveSplitSession,
+      deleteSplitSession,
       ensureWorkouts,
       refreshWorkouts,
       ensureWorkoutOverview,
@@ -896,7 +947,9 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       refreshSplits,
       createSplit,
       replaceSplit,
+      deleteSplit,
       saveSplitSession,
+      deleteSplitSession,
       ensureWorkouts,
       refreshWorkouts,
       ensureWorkoutOverview,

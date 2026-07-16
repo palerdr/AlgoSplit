@@ -379,6 +379,31 @@ def test_session_routes_preserve_id_order_profiles_and_allow_rest(client):
     ]
 
 
+def test_delete_split_session_removes_only_requested_day(client):
+    created = client.post("/api/splits", json=_create_payload("Delete one day")).json()
+    split_id = created["id"]
+    deleted_session_id = created["sessions"][0]["id"]
+    kept_session_id = created["sessions"][1]["id"]
+
+    response = client.delete(f"/api/splits/{split_id}/sessions/{deleted_session_id}")
+
+    assert response.status_code == 204
+    refreshed = client.get(f"/api/splits/{split_id}").json()
+    assert [session["id"] for session in refreshed["sessions"]] == [kept_session_id]
+
+
+def test_delete_split_session_rejects_session_from_another_split(client):
+    first = client.post("/api/splits", json=_create_payload("First")).json()
+    second = client.post("/api/splits", json=_create_payload("Second")).json()
+
+    response = client.delete(
+        f"/api/splits/{first['id']}/sessions/{second['sessions'][0]['id']}"
+    )
+
+    assert response.status_code == 404
+    assert len(client.get(f"/api/splits/{second['id']}").json()["sessions"]) == 2
+
+
 def test_session_route_maps_duplicate_day_to_conflict(client):
     split_id = client.post("/api/splits", json=_create_payload("Duplicate Session")).json()["id"]
     response = client.post(

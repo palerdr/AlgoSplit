@@ -1957,6 +1957,13 @@ export const splits = {
     );
   },
 
+  removeSession(splitId: string, sessionId: string): Promise<void> {
+    return request<void>(
+      'DELETE',
+      `/api/splits/${encodeURIComponent(splitId)}/sessions/${encodeURIComponent(sessionId)}`
+    );
+  },
+
   /** PUT /api/splits/{id} — update split metadata only (api/routes/splits.py:512). */
   update(splitId: string, update: SplitUpdate): Promise<SplitResponse> {
     return request<SplitResponse>('PUT', `/api/splits/${encodeURIComponent(splitId)}`, update);

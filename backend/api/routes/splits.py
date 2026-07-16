@@ -557,6 +557,50 @@ def update_split_session(
         _raise_rpc_http_error(exc, "Session")
 
 
+@router.delete(
+    "/{split_id}/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        401: {"model": ErrorResponse, "description": "Not authenticated"},
+        404: {"model": ErrorResponse, "description": "Split or session not found"},
+    },
+    summary="Delete one split session",
+)
+def delete_split_session(
+    split_id: str,
+    session_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """Delete one stored workout/rest day without replacing the split."""
+    try:
+        supabase = get_supabase_client_with_token(current_user.access_token)
+        split_result = supabase.table("splits").select("id").eq("id", split_id).limit(1).execute()
+        if not split_result.data:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Split not found")
+
+        session_result = (
+            supabase.table("sessions")
+            .select("id")
+            .eq("id", session_id)
+            .eq("split_id", split_id)
+            .limit(1)
+            .execute()
+        )
+        if not session_result.data:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+        supabase.table("sessions").delete().eq("id", session_id).eq("split_id", split_id).execute()
+        return None
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Failed to delete session %s from split %s", session_id, split_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete workout day",
+        ) from exc
+
+
 @router.get(
     "",
     response_model=SplitListResponse,
