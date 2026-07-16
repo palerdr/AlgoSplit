@@ -7,7 +7,7 @@ import {
   RenderItemParams,
   ScaleDecorator,
 } from 'react-native-draggable-flatlist';
-import type { SessionResponse, SplitResponse } from '../../api/backend';
+import type { SessionCreate, SessionResponse, SplitResponse } from '../../api/backend';
 import { EXERCISES, type Exercise } from '../../data/exercises';
 import { useAccountState } from '../../state/AccountState';
 import { theme } from '../../theme';
@@ -23,13 +23,24 @@ import {
   workoutDraftFromSession,
 } from '../../workout/splitEditing';
 
-interface WorkoutEditorProps {
+interface WorkoutEditorBaseProps {
   split: SplitResponse;
   session?: SessionResponse;
   initialRestDay?: number;
   onCancel: () => void;
-  onSaved: (split: SplitResponse) => void;
 }
+
+type WorkoutEditorProps = WorkoutEditorBaseProps &
+  (
+    | {
+        onSaved: (split: SplitResponse) => void;
+        onDraftSaved?: never;
+      }
+    | {
+        onSaved?: never;
+        onDraftSaved: (sessionId: string | null, session: SessionCreate) => void;
+      }
+  );
 
 const tick = () => Haptics.selectionAsync().catch(() => {});
 const RESISTANCE_PROFILES = [
@@ -44,9 +55,11 @@ export default function WorkoutEditor({
   initialRestDay,
   onCancel,
   onSaved,
+  onDraftSaved,
 }: WorkoutEditorProps) {
   const account = useAccountState();
   const nextKey = useRef(0);
+  const savingRef = useRef(false);
   const [draft, setDraft] = useState<WorkoutDraft>(() =>
     session
       ? workoutDraftFromSession(split.id, session)
@@ -198,24 +211,34 @@ export default function WorkoutEditor({
   };
 
   const save = async () => {
+    if (savingRef.current) return;
     const validation = workoutDraftError(split, draft);
     if (validation) {
       setError(validation);
       return;
     }
+    savingRef.current = true;
     setSaving(true);
     setError(null);
     try {
+      const sessionCreate = workoutDraftToSessionCreate(draft);
+      if (onDraftSaved) {
+        onDraftSaved(draft.sessionId, sessionCreate);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        return;
+      }
+      if (!onSaved) throw new Error('Workout editor is missing a save destination.');
       const saved = await account.saveSplitSession(
         split.id,
         draft.sessionId,
-        workoutDraftToSessionCreate(draft)
+        sessionCreate
       );
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       onSaved(saved);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Workout could not be saved.');
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
