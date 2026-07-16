@@ -4,6 +4,14 @@ AlgoSplit is a training split planner, workout tracker, and analysis app. It com
 
 The project is no longer an API-only prototype. It now includes authentication, Supabase-backed persistence, split editing/importing, logged workout history, progress charts, custom exercise overrides, comparisons, bodyweight tracking, and program/session-template workflows.
 
+## Production
+
+- Web app: [algo-split.vercel.app](https://algo-split.vercel.app)
+- API health: [algosplit-api-staging.vercel.app/health](https://algosplit-api-staging.vercel.app/health)
+
+The frontend and backend are separate Vercel projects deployed from `main`,
+with Supabase providing authentication and persistent account data.
+
 ## What It Does
 
 - Build and edit weekly or custom-cycle training splits.

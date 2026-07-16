@@ -8,12 +8,12 @@ Expo web/native client -> FastAPI + Rust analysis -> Supabase Auth/Postgres
 
 | Component | Repository root | Production URL |
 | --- | --- | --- |
-| Web client | `app` | `https://algosplit-mobile-staging.vercel.app` |
+| Web client | `app` | `https://algo-split.vercel.app` |
 | API | `backend` | `https://algosplit-api-staging.vercel.app` |
 
-The generated domains retain `staging` in their names, but both projects can
-track `main` as their production branch. Custom domains can be attached later
-without changing the repository layout.
+The current API alias retains `staging` in its name, but both projects track
+`main` as their production branch. Custom domains can be attached later without
+changing the repository layout.
 
 ## Prerequisites
 
@@ -49,7 +49,7 @@ SUPABASE_JWT_AUDIENCE=authenticated
 SUPABASE_JWT_ISSUER=https://your-project.supabase.co/auth/v1
 
 APP_ENV=production
-FRONTEND_URL=https://algosplit-mobile-staging.vercel.app
+FRONTEND_URL=https://algo-split.vercel.app
 ALLOWED_HOSTS=algosplit-api-staging.vercel.app
 TRUST_PROXY=true
 RATE_LIMIT_ENABLED=true
@@ -98,7 +98,7 @@ the same-origin `/api` and `/auth` paths.
 After deployment, verify the frontend's rewritten health endpoint:
 
 ```text
-GET https://algosplit-mobile-staging.vercel.app/health
+GET https://algo-split.vercel.app/health
 ```
 
 It should return the same backend health JSON.
@@ -108,7 +108,7 @@ It should return the same backend health JSON.
 In Supabase Authentication URL Configuration:
 
 1. Set the Site URL to the production frontend URL.
-2. Add `https://algosplit-mobile-staging.vercel.app/**` to Redirect URLs.
+2. Add `https://algo-split.vercel.app/**` to Redirect URLs.
 3. Add any custom production domain before moving traffic to it.
 4. Remove retired frontend domains only after the rollback window closes.
 
