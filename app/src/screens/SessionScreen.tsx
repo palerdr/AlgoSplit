@@ -3,7 +3,10 @@ import {
   Animated,
   Easing,
   FlatList,
+  Keyboard,
   Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   PanResponder,
   Pressable,
   StyleSheet,
@@ -11,6 +14,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { useAccountState } from '../state/AccountState';
 import { EXERCISES } from '../data/exercises';
@@ -21,7 +25,6 @@ import {
   PreviousExerciseData,
   previousLocalExercise,
   previousRemoteExercise,
-  validateSetDraft,
 } from '../workout/logging';
 import RestTimer from './RestTimer';
 
@@ -40,43 +43,155 @@ interface SessionScreenProps {
   onDiscard: () => void;
 }
 
+const DEFAULT_SET: SetRecord = { weight: 50, reps: 10 };
+// Kept lean — fewer rows keeps the set screen cheap to mount mid-transition.
+const WEIGHT_VALUES = Array.from({ length: 61 }, (_, i) => i * 5); // 0–300 by 5
+const REP_VALUES = Array.from({ length: 30 }, (_, i) => i + 1); // 1–30
+// RIR 0 means the set was taken to failure — the row reads “Failure”, not “0”.
+const RIR_VALUES = [0, 1, 2, 3, 4, 5];
+
 const tick = () => Haptics.selectionAsync().catch(() => {});
 
-function EntryField({
+// History logged by other entry UIs can hold off-grid values (187.5 lb, 405 lb).
+// Everything fed to a wheel — initial state AND the ★ marker — must first snap
+// to a row, so the value displayed is always exactly the value logged.
+const snapTo = (values: number[], target: number): number => {
+  let best = values[0];
+  for (const v of values) {
+    if (Math.abs(v - target) < Math.abs(best - target)) best = v;
+  }
+  return best;
+};
+
+// ── Drag wheel (Apple clock style, glass lens over the selection) ─
+const ITEM_H = 40;
+const WHEEL_VISIBLE = 5;
+const WHEEL_H = ITEM_H * WHEEL_VISIBLE;
+
+function Wheel({
   label,
-  value,
-  shadow,
-  error,
-  onChangeText,
-  onBlur,
-  decimal = false,
+  values,
+  initial,
+  markedValue,
+  format = String,
+  onChange,
 }: {
   label: string;
-  value: string;
-  shadow?: number;
-  error?: string;
-  onChangeText: (value: string) => void;
-  onBlur: () => void;
-  decimal?: boolean;
+  values: number[];
+  initial: number;
+  /** Row that gets a subtle star marker (e.g. last weight used) */
+  markedValue?: number;
+  /** Row label override (e.g. the RIR unset sentinel renders as “—”) */
+  format?: (value: number) => string;
+  onChange: (v: number) => void;
 }) {
+  // Start the animated offset AT the initial row so the selected value renders
+  // solid white immediately — no dimmed state until first touch. Off-grid
+  // values (legacy/foreign data) snap to the nearest row instead of row 0.
+  const initialIdx = (() => {
+    const exact = values.indexOf(initial);
+    if (exact >= 0) return exact;
+    let best = 0;
+    for (let i = 1; i < values.length; i++) {
+      if (Math.abs(values[i] - initial) < Math.abs(values[best] - initial)) best = i;
+    }
+    return best;
+  })();
+  const scrollY = useRef(new Animated.Value(initialIdx * ITEM_H)).current;
+  const lastIdxRef = useRef(initialIdx);
+  // A flick fires onScrollEndDrag with the UN-snapped offset, then momentum
+  // carries on — settling there would record a value the wheel doesn't land
+  // on. Delay the drag-settle a beat and cancel it if momentum starts.
+  const dragSettleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const settle = (y: number) => {
+    const idx = Math.min(values.length - 1, Math.max(0, Math.round(y / ITEM_H)));
+    onChange(values[idx]);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (dragSettleRef.current) clearTimeout(dragSettleRef.current);
+    };
+  }, []);
+
   return (
-    <View style={styles.entryColumn}>
-      <Text style={styles.entryLabel}>{label}</Text>
-      <Glass style={[styles.entryGlass, error ? styles.entryGlassError : undefined]}>
-        <TextInput
-          accessibilityLabel={label}
-          value={value}
-          onChangeText={onChangeText}
-          onBlur={onBlur}
-          keyboardType={decimal ? 'decimal-pad' : 'number-pad'}
-          inputMode={decimal ? 'decimal' : 'numeric'}
-          placeholder={shadow == null ? '—' : String(shadow)}
-          placeholderTextColor={theme.textDim}
-          selectTextOnFocus
-          style={styles.entryInput}
-        />
-      </Glass>
-    </View>
+    <Glass style={styles.wheelPanel}>
+      <Text style={styles.wheelLabel}>{label}</Text>
+      <View style={styles.wheelWindow}>
+        {/* Selection lens — deliberately NOT a nested GlassView: glass inside
+            glass renders unreliably on iOS 26, so this is a crisp overlay. */}
+        <View pointerEvents="none" style={styles.wheelLens} />
+        <Animated.ScrollView
+          showsVerticalScrollIndicator={false}
+          snapToInterval={ITEM_H}
+          decelerationRate="fast"
+          contentOffset={{ x: 0, y: initialIdx * ITEM_H }}
+          contentContainerStyle={{ paddingVertical: (WHEEL_H - ITEM_H) / 2 }}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            {
+              useNativeDriver: true,
+              listener: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+                const idx = Math.round(e.nativeEvent.contentOffset.y / ITEM_H);
+                if (idx !== lastIdxRef.current) {
+                  lastIdxRef.current = idx;
+                  tick();
+                }
+              },
+            }
+          )}
+          scrollEventThrottle={16}
+          onMomentumScrollBegin={() => {
+            if (dragSettleRef.current) {
+              clearTimeout(dragSettleRef.current);
+              dragSettleRef.current = null;
+            }
+          }}
+          onMomentumScrollEnd={(e) => settle(e.nativeEvent.contentOffset.y)}
+          onScrollEndDrag={(e) => {
+            const y = e.nativeEvent.contentOffset.y;
+            if (dragSettleRef.current) clearTimeout(dragSettleRef.current);
+            dragSettleRef.current = setTimeout(() => {
+              dragSettleRef.current = null;
+              settle(y);
+            }, 64);
+          }}
+        >
+          {values.map((v, i) => {
+            const rowLabel = format(v);
+            const isWord = !/^[\d.,]+$/.test(rowLabel);
+            return (
+              <Animated.View
+                key={v}
+                style={{
+                  height: ITEM_H,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: scrollY.interpolate({
+                    inputRange: [(i - 2) * ITEM_H, i * ITEM_H, (i + 2) * ITEM_H],
+                    outputRange: [0.15, 1, 0.15],
+                    extrapolate: 'clamp',
+                  }),
+                  transform: [
+                    {
+                      scale: scrollY.interpolate({
+                        inputRange: [(i - 2) * ITEM_H, i * ITEM_H, (i + 2) * ITEM_H],
+                        outputRange: [0.78, 1, 0.78],
+                        extrapolate: 'clamp',
+                      }),
+                    },
+                  ],
+                }}
+              >
+                <Text style={isWord ? styles.wheelWord : styles.wheelValue}>{rowLabel}</Text>
+                {markedValue === v && <Text style={styles.wheelStar}>★</Text>}
+              </Animated.View>
+            );
+          })}
+        </Animated.ScrollView>
+      </View>
+    </Glass>
   );
 }
 
@@ -91,10 +206,13 @@ function SlideToComplete({
   frac,
   onComplete,
   resetKey,
+  revealLabel,
 }: {
   frac: Animated.Value;
   onComplete: () => void;
   resetKey: string;
+  /** Subtle text (e.g. “+450 lb”) cross-faded in as the thumb travels */
+  revealLabel?: string;
 }) {
   const [trackW, setTrackW] = useState(0);
   const maxX = Math.max(1, trackW - THUMB - TRACK_PAD * 2);
@@ -205,6 +323,25 @@ function SlideToComplete({
         >
           slide to complete
         </Animated.Text>
+        {revealLabel ? (
+          // The set's volume surfaces as “slide to complete” recedes.
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              StyleSheet.absoluteFillObject,
+              styles.sliderRevealWrap,
+              {
+                opacity: frac.interpolate({
+                  inputRange: [0.12, 0.6],
+                  outputRange: [0, 0.6],
+                  extrapolate: 'clamp',
+                }),
+              },
+            ]}
+          >
+            <Text style={styles.sliderReveal}>{revealLabel}</Text>
+          </Animated.View>
+        ) : null}
       </Glass>
       {/* Liquid glass thumb — a SIBLING of the track glass (nesting glass
           inside glass renders unreliably), floating above it. */}
@@ -280,6 +417,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     editExercise,
     updateExerciseNotes,
     discardSession,
+    lastUsed,
   } = useAppState();
   const account = useAccountState();
   const [resting, setResting] = useState(false);
@@ -328,18 +466,32 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     return null;
   }, [account.status, current, history, remoteHistory?.data, view]);
 
-  const [draft, setDraft] = useState({ weight: '', reps: '', rir: '' });
-  const [touched, setTouched] = useState({ weight: false, reps: false, rir: false });
-  const [attempted, setAttempted] = useState(false);
-  const draftKey = `${view?.startedAt ?? 'none'}-${view?.currentIndex ?? 0}-${setNumber}`;
-  useEffect(() => {
-    setDraft({ weight: '', reps: '', rir: '' });
-    setTouched({ weight: false, reps: false, rir: false });
-    setAttempted(false);
-  }, [draftKey]);
-
-  const validation = useMemo(() => validateSetDraft(draft), [draft]);
   const shadow = previous?.records[setNumber - 1];
+
+  // The wheels remount when the exercise changes or when previous-set data
+  // first arrives (async account history) — NOT between sets, so the user's
+  // tweaks carry from set to set exactly like the original wheel UI.
+  const wheelEpoch = `${currentId ?? 'none'}-${previous ? 'shadowed' : 'bare'}`;
+  const initialRecord: SetRecord = (() => {
+    const fallback = (currentId ? lastUsed[currentId] : undefined) ?? DEFAULT_SET;
+    const base = previous?.records[setNumber - 1] ?? previous?.records[0] ?? fallback;
+    return {
+      weight: snapTo(WEIGHT_VALUES, base.weight),
+      reps: snapTo(REP_VALUES, base.reps),
+      rir: snapTo(RIR_VALUES, base.rir ?? 0),
+    };
+  })();
+  const [weight, setWeight] = useState(initialRecord.weight);
+  const [reps, setReps] = useState(initialRecord.reps);
+  const [rir, setRir] = useState(initialRecord.rir ?? 0);
+  useEffect(() => {
+    setWeight(initialRecord.weight);
+    setReps(initialRecord.reps);
+    setRir(initialRecord.rir ?? 0);
+    // Only when the wheels remount — keep the user's tweaks between sets.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wheelEpoch]);
+
   const notesInitialized = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!view || !currentId || !previous) return;
@@ -350,6 +502,41 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
       updateExerciseNotes(currentId, previous.notes);
     }
   }, [current?.notes, currentId, previous, updateExerciseNotes, view]);
+
+  // Notes edit in a glass card that extends up out of the collapsed box over
+  // a blurred, tinted backdrop. Edits are draft-local: ✓ commits them, ✕ or a
+  // backdrop tap discards. One 0..1 value drives backdrop opacity and the
+  // card's rise; an easy spring keeps the motion smooth.
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [notesDraft, setNotesDraft] = useState('');
+  const notesAnim = useRef(new Animated.Value(0)).current;
+  const openNotes = () => {
+    tick();
+    setNotesDraft(current?.notes ?? '');
+    setNotesOpen(true);
+    Animated.spring(notesAnim, {
+      toValue: 1,
+      stiffness: 240,
+      damping: 27,
+      mass: 0.9,
+      useNativeDriver: true,
+    }).start();
+  };
+  const closeNotes = () => {
+    Keyboard.dismiss();
+    Animated.timing(notesAnim, {
+      toValue: 0,
+      duration: 210,
+      easing: Easing.inOut(Easing.quad),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setNotesOpen(false);
+    });
+  };
+  const saveNotes = () => {
+    if (currentId) updateExerciseNotes(currentId, notesDraft);
+    closeNotes();
+  };
 
   // The finished set is held as PENDING while the rest screen fades in over
   // the untouched set screen (thumb parked, segment full). It commits — and
@@ -381,6 +568,9 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
       : view.exercises[view.currentIndex + 1]?.exercise.name ?? null
     : null;
 
+  // Wheels only land on valid API values, so no draft validation is needed.
+  const wheelRecord = (): SetRecord => ({ weight, reps, rir });
+
   const commitPendingSet = () => {
     if (!pendingSetRef.current) return;
     completeSet(pendingSetRef.current);
@@ -389,12 +579,6 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   };
 
   const handleSetComplete = () => {
-    if (!validation.record) {
-      setAttempted(true);
-      slideFrac.setValue(0);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
-      return;
-    }
     const willFinishWorkout =
       view.planned &&
       current !== undefined &&
@@ -404,23 +588,17 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     if (willFinishWorkout) {
       // Last set: no rest — fold the final record into the finish atomically.
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      finishSession(validation.record);
+      finishSession(wheelRecord());
       onComplete();
     } else {
-      pendingSetRef.current = validation.record;
+      pendingSetRef.current = wheelRecord();
       setResting(true);
     }
   };
 
   const finishNow = () => {
-    const hasDraft = Boolean(draft.weight.trim() || draft.reps.trim() || draft.rir.trim());
-    if (hasDraft && !validation.record) {
-      setAttempted(true);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => {});
-      return;
-    }
-    finishSession(hasDraft ? validation.record ?? undefined : undefined);
-    if (anyWork || hasDraft) {
+    finishSession();
+    if (anyWork) {
       onComplete();
     } else {
       onDiscard();
@@ -479,31 +657,31 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
           </View>
 
           <View style={styles.entryArea}>
-            <View style={styles.entryRow}>
-              <EntryField
+            <View style={styles.wheelsRow}>
+              <Wheel
+                key={`${wheelEpoch}-w`}
                 label="LBS"
-                decimal
-                value={draft.weight}
-                shadow={shadow?.weight}
-                error={attempted || touched.weight ? validation.errors.weight : undefined}
-                onChangeText={(weight) => setDraft((previousDraft) => ({ ...previousDraft, weight }))}
-                onBlur={() => setTouched((previous) => ({ ...previous, weight: true }))}
+                values={WEIGHT_VALUES}
+                initial={initialRecord.weight}
+                markedValue={shadow ? snapTo(WEIGHT_VALUES, shadow.weight) : undefined}
+                onChange={setWeight}
               />
-              <EntryField
+              <Wheel
+                key={`${wheelEpoch}-r`}
                 label="REPS"
-                value={draft.reps}
-                shadow={shadow?.reps}
-                error={attempted || touched.reps ? validation.errors.reps : undefined}
-                onChangeText={(reps) => setDraft((previousDraft) => ({ ...previousDraft, reps }))}
-                onBlur={() => setTouched((previous) => ({ ...previous, reps: true }))}
+                values={REP_VALUES}
+                initial={initialRecord.reps}
+                markedValue={shadow ? snapTo(REP_VALUES, shadow.reps) : undefined}
+                onChange={setReps}
               />
-              <EntryField
+              <Wheel
+                key={`${wheelEpoch}-i`}
                 label="RIR"
-                value={draft.rir}
-                shadow={shadow?.rir}
-                error={attempted || touched.rir ? validation.errors.rir : undefined}
-                onChangeText={(rir) => setDraft((previousDraft) => ({ ...previousDraft, rir }))}
-                onBlur={() => setTouched((previous) => ({ ...previous, rir: true }))}
+                values={RIR_VALUES}
+                initial={initialRecord.rir ?? 0}
+                markedValue={shadow?.rir == null ? undefined : snapTo(RIR_VALUES, shadow.rir)}
+                format={(v) => (v === 0 ? 'Failure' : String(v))}
+                onChange={setRir}
               />
             </View>
             {account.status === 'authenticated' && remoteHistory?.error ? (
@@ -516,43 +694,41 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
             ) : (
               <Text style={styles.shadowHint}>
                 {account.status === 'authenticated' && remoteHistory?.loading
-                  ? 'Loading last-session shadows…'
+                  ? 'Loading last-session values…'
                   : shadow
-                    ? 'Dim values are your matching set from last time'
-                    : 'Enter 0 lb for bodyweight · RIR is optional (0–5)'}
+                    ? '★ marks your matching set from last time'
+                    : '0 lb = bodyweight · Failure = no reps left'}
               </Text>
             )}
-            {(attempted || touched.weight || touched.reps || touched.rir) &&
-              Object.values(validation.errors)[0] && (
-                <Text style={styles.validationText}>{Object.values(validation.errors)[0]}</Text>
-              )}
           </View>
 
-          <View style={styles.notesBlock}>
-            <View style={styles.notesHeader}>
-              <Text style={styles.notesLabel}>EXERCISE NOTES</Text>
-              <Text style={styles.notesCarry}>Carries forward</Text>
-            </View>
-            <Glass style={styles.notesGlass}>
-              <TextInput
-                accessibilityLabel="Exercise notes"
-                value={current.notes}
-                onChangeText={(notes) => currentId && updateExerciseNotes(currentId, notes)}
-                placeholder="Cues, setup, pain, tempo…"
-                placeholderTextColor={theme.textDim}
-                multiline
-                maxLength={500}
-                textAlignVertical="top"
-                style={styles.notesInput}
-              />
-            </Glass>
-          </View>
+          {/* The collapsed box recedes as the editor card takes its place —
+              inverse of the popup's opacity so the two never show together. */}
+          <Animated.View
+            style={{
+              opacity: notesAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+            }}
+          >
+            <Pressable accessibilityLabel="Notes" onPress={openNotes} disabled={notesOpen}>
+              <Glass style={styles.notesGlass} interactive>
+                <Text
+                  numberOfLines={3}
+                  style={current.notes.trim() ? styles.notesPreview : styles.notesPlaceholder}
+                >
+                  {current.notes.trim() || 'Notes'}
+                </Text>
+              </Glass>
+            </Pressable>
+          </Animated.View>
 
           <View style={styles.sliderZone}>
             <SlideToComplete
               frac={slideFrac}
               resetKey={`${view.currentIndex}-${setNumber}`}
               onComplete={handleSetComplete}
+              revealLabel={
+                weight > 0 ? `+${(weight * reps).toLocaleString()} lb` : undefined
+              }
             />
           </View>
         </View>
@@ -597,6 +773,87 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
             <Text style={styles.headerAction}>Cancel</Text>
           </Pressable>
         </View>
+      )}
+
+      {notesOpen && current && (
+        <Animated.View
+          style={[StyleSheet.absoluteFillObject, styles.notesLayer, { opacity: notesAnim }]}
+        >
+          {/* Tap the tinted blur to put the card away */}
+          <Pressable
+            accessibilityLabel="Close notes"
+            style={StyleSheet.absoluteFillObject}
+            onPress={closeNotes}
+          >
+            <BlurView intensity={28} tint="dark" style={StyleSheet.absoluteFillObject} />
+            <View style={styles.notesDim} />
+          </Pressable>
+          <Animated.View
+            style={[
+              styles.notesPopupWrap,
+              {
+                transform: [
+                  {
+                    scale: notesAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.96, 1],
+                    }),
+                  },
+                  {
+                    translateY: notesAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [140, 0],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            {/* Plain BlurView card, NOT native liquid glass — GlassView can
+                fail to composite when mounted inside an animating layer,
+                leaving an invisible card over the blurred backdrop. */}
+            <BlurView intensity={44} tint="dark" style={styles.notesPopup}>
+              <View style={styles.notesActions}>
+                <Pressable
+                  accessibilityLabel="Discard note edits"
+                  onPress={closeNotes}
+                  hitSlop={8}
+                  style={styles.notesActionBtn}
+                >
+                  {SymbolView ? (
+                    <SymbolView name="xmark" size={14} tintColor={theme.textDim} />
+                  ) : (
+                    <Text style={styles.notesActionGlyph}>✕</Text>
+                  )}
+                </Pressable>
+                <Pressable
+                  accessibilityLabel="Save note"
+                  onPress={saveNotes}
+                  hitSlop={8}
+                  style={styles.notesActionBtn}
+                >
+                  {SymbolView ? (
+                    <SymbolView name="checkmark" size={14} tintColor={theme.accent} />
+                  ) : (
+                    <Text style={[styles.notesActionGlyph, { color: theme.accent }]}>✓</Text>
+                  )}
+                </Pressable>
+              </View>
+              <TextInput
+                accessibilityLabel="Notes"
+                autoFocus
+                value={notesDraft}
+                onChangeText={setNotesDraft}
+                placeholder="Notes"
+                placeholderTextColor={theme.textDim}
+                multiline
+                maxLength={500}
+                textAlignVertical="top"
+                style={styles.notesPopupInput}
+              />
+            </BlurView>
+          </Animated.View>
+        </Animated.View>
       )}
 
       <Modal
@@ -741,39 +998,60 @@ const styles = StyleSheet.create({
   entryArea: {
     gap: 8,
   },
-  entryRow: {
+  wheelsRow: {
     flexDirection: 'row',
     gap: 10,
   },
-  entryColumn: {
+  wheelPanel: {
     flex: 1,
+    borderRadius: 24,
+    paddingVertical: 14,
+    alignItems: 'center',
   },
-  entryLabel: {
+  wheelLabel: {
     color: theme.textDim,
     fontSize: 11,
-    letterSpacing: 1.6,
-    marginBottom: 7,
-    textAlign: 'center',
+    letterSpacing: 2,
+    marginBottom: 6,
   },
-  entryGlass: {
-    borderRadius: 20,
+  wheelWindow: {
+    height: WHEEL_H,
+    width: '100%',
+  },
+  wheelLens: {
+    position: 'absolute',
+    top: (WHEEL_H - ITEM_H) / 2 - 2,
+    left: 12,
+    right: 12,
+    height: ITEM_H + 4,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.07)',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.16)',
+    borderColor: 'rgba(255,255,255,0.3)',
   },
-  entryGlassError: {
-    borderColor: '#E27878',
-  },
-  entryInput: {
+  wheelValue: {
     color: theme.text,
-    fontSize: 25,
+    fontSize: 26,
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
-    paddingHorizontal: 10,
-    paddingVertical: 17,
-    textAlign: 'center',
+  },
+  // Word rows (“Failure”) shrink to fit the narrow wheel panels.
+  wheelWord: {
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+  },
+  wheelStar: {
+    position: 'absolute',
+    right: 10,
+    color: theme.accent,
+    fontSize: 11,
+    opacity: 0.85,
   },
   shadowHint: {
     color: theme.textDim,
+    opacity: 0.55,
     fontSize: 11,
     textAlign: 'center',
     minHeight: 14,
@@ -794,42 +1072,69 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
-  validationText: {
-    color: '#E27878',
-    fontSize: 12,
-    textAlign: 'center',
+  notesGlass: {
+    borderRadius: 24,
+    minHeight: 84,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
-  notesBlock: {
-    gap: 7,
+  notesPreview: {
+    color: theme.text,
+    fontSize: 15,
+    lineHeight: 20,
   },
-  notesHeader: {
+  notesPlaceholder: {
+    color: theme.textDim,
+    fontSize: 15,
+  },
+  notesLayer: {
+    zIndex: 6,
+  },
+  notesDim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+  notesPopupWrap: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    top: 110,
+  },
+  notesPopup: {
+    borderRadius: 24,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  notesActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingTop: 12,
+  },
+  notesActionBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
-    paddingHorizontal: 3,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.09)',
   },
-  notesLabel: {
+  notesActionGlyph: {
     color: theme.textDim,
-    fontSize: 10,
-    letterSpacing: 1.3,
+    fontSize: 15,
+    fontWeight: '600',
   },
-  notesCarry: {
-    color: theme.accent,
-    fontSize: 11,
-  },
-  notesGlass: {
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  notesInput: {
+  notesPopupInput: {
     color: theme.text,
     fontSize: 16,
     lineHeight: 21,
-    minHeight: 76,
-    maxHeight: 112,
-    paddingHorizontal: 15,
-    paddingVertical: 12,
+    minHeight: 150,
+    maxHeight: 240,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 14,
   },
   sliderZone: {
     marginTop: 16,
@@ -854,6 +1159,17 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
     letterSpacing: 0.4,
+  },
+  sliderRevealWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sliderReveal: {
+    color: theme.accent,
+    fontSize: 15,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+    letterSpacing: 0.3,
   },
   thumbWrap: {
     position: 'absolute',
