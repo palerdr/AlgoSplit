@@ -1,320 +1,149 @@
-# Split.AI Production Deployment Guide
+# AlgoSplit Deployment Guide
 
-## Architecture Overview
+AlgoSplit is deployed as two Vercel projects backed by Supabase:
 
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Vercel        │────▶│   Render/Fly    │────▶│   Supabase      │
-│   (Frontend)    │     │   (Backend)     │     │   (Database)    │
-│   React SPA     │     │   FastAPI       │     │   PostgreSQL    │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
+```text
+Expo web/native client -> FastAPI + Rust analysis -> Supabase Auth/Postgres
 ```
 
----
+| Component | Repository root | Production URL |
+| --- | --- | --- |
+| Web client | `app` | `https://algosplit-mobile-staging.vercel.app` |
+| API | `backend` | `https://algosplit-api-staging.vercel.app` |
 
-## 1. Supabase (Database) - Already Configured
+The generated domains retain `staging` in their names, but both projects can
+track `main` as their production branch. Custom domains can be attached later
+without changing the repository layout.
 
-Your Supabase project should already be set up with:
-- Tables: users, splits, sessions, exercises, workout_logs, workout_exercises, exercise_overrides
-- Row-Level Security (RLS) policies
-- Authentication enabled
+## Prerequisites
 
-**Environment Variables Needed:**
+- Apply the Supabase migrations in `backend/db/migrations` through migration
+  `012_performance_rpcs.sql`.
+- Keep `backend/uv.lock` committed and synchronized with
+  `backend/pyproject.toml`.
+- Never upload either local `.env` file to GitHub. Enter production secrets in
+  the backend Vercel project's Environment Variables settings.
+
+## Backend Vercel project
+
+Configure the project as follows:
+
+```text
+Root Directory: backend
+Framework: FastAPI
+Production Branch: main
 ```
-SUPABASE_URL=https://xxx.supabase.co
+
+Vercel reads `backend/vercel.json`, `backend/app.py`, `backend/.python-version`,
+and `backend/uv.lock`. The uv workspace builds the PyO3 Rust analysis extension
+as a required backend dependency.
+
+Set these Production environment variables:
+
+```env
+SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 SUPABASE_SECRET_KEY=sb_secret_...
-SUPABASE_JWT_SECRET=your-jwt-secret
+SUPABASE_JWT_SECRET=...
+SUPABASE_JWT_AUDIENCE=authenticated
+SUPABASE_JWT_ISSUER=https://your-project.supabase.co/auth/v1
+
+APP_ENV=production
+FRONTEND_URL=https://algosplit-mobile-staging.vercel.app
+ALLOWED_HOSTS=algosplit-api-staging.vercel.app
+TRUST_PROXY=true
+RATE_LIMIT_ENABLED=true
+
+ANALYSIS_ENGINE=rust
+ANALYSIS_ENGINE_FALLBACK=false
+ANALYSIS_SHADOW_SAMPLE_RATE=0
+
+AUTH_EXPOSE_ACCESS_TOKEN=false
+AUTH_COOKIE_SAMESITE=lax
 ```
 
----
+Set `AUTH_EXPOSE_ACCESS_TOKEN=true` before distributing a native build. Native
+tokens are returned only for requests carrying the explicit native-client
+header; browser authentication remains cookie based.
 
-## 2. Backend Deployment (Render.com - Recommended)
+After deployment, verify:
 
-### Option A: Render.com (Easiest)
-
-1. **Create a Render Account** at https://render.com
-
-2. **Connect GitHub Repository**
-   - Go to Dashboard → New → Web Service
-   - Connect your GitHub repo
-   - Select the repository
-
-3. **Configure Service**
-   ```
-   Name: split-ai-api
-   Region: Oregon (US West) or closest to users
-   Branch: main
-   Root Directory: backend
-   Runtime: Python 3
-   Build Command: uv sync --frozen --no-dev
-   Start Command: uv run --frozen uvicorn main:app --host 0.0.0.0 --port $PORT
-   ```
-
-4. **Add Environment Variables**
-   In Render dashboard → Environment:
-   ```
-   SUPABASE_URL=https://xxx.supabase.co
-   SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
-   SUPABASE_SECRET_KEY=sb_secret_...
-   SUPABASE_JWT_SECRET=your-jwt-secret
-   ```
-
-5. **Deploy**
-   - Click "Create Web Service"
-   - Wait for build to complete
-   - Note the URL: `https://split-ai-api.onrender.com`
-
-### Option B: Fly.io (More Control)
-
-1. **Install Fly CLI**
-   ```bash
-   curl -L https://fly.io/install.sh | sh
-   fly auth login
-   ```
-
-2. **Create fly.toml in backend/**
-   ```toml
-   app = "split-ai-api"
-   primary_region = "sjc"
-
-   [build]
-     builder = "paketobuildpacks/builder:base"
-
-   [env]
-     PORT = "8080"
-
-   [http_service]
-     internal_port = 8080
-     force_https = true
-     auto_stop_machines = true
-     auto_start_machines = true
-     min_machines_running = 0
-
-   [[vm]]
-     cpu_kind = "shared"
-     cpus = 1
-     memory_mb = 256
-   ```
-
-3. **Deploy**
-   ```bash
-   cd backend
-   fly launch
-   fly secrets set SUPABASE_URL=xxx SUPABASE_PUBLISHABLE_KEY=xxx SUPABASE_SECRET_KEY=xxx ...
-   fly deploy
-   ```
-
-### Option C: Railway.app
-
-1. Go to https://railway.app
-2. New Project → Deploy from GitHub
-3. Select repo, set root directory to `backend`
-4. Add environment variables
-5. Deploy
-
----
-
-## 3. Frontend Deployment (Vercel)
-
-### Step-by-Step Vercel Deployment
-
-1. **Install Vercel CLI** (optional but helpful)
-   ```bash
-   npm i -g vercel
-   ```
-
-2. **Create Vercel Account**
-   - Go to https://vercel.com
-   - Sign up with GitHub
-
-3. **Import Project**
-   - Click "Add New Project"
-   - Import your GitHub repository
-   - Configure:
-     ```
-     Framework Preset: Vite
-     Root Directory: frontend
-     Build Command: npm run build
-     Output Directory: dist
-     Install Command: npm install
-     ```
-
-4. **Add Environment Variables**
-   In Vercel dashboard → Settings → Environment Variables:
-   ```
-   VITE_API_URL=https://split-ai-api.onrender.com
-   ```
-   (Use your actual backend URL from step 2)
-
-5. **Deploy**
-   - Click "Deploy"
-   - Wait for build
-   - Your app is live at: `https://split-ai.vercel.app`
-
-### Custom Domain (Optional)
-
-1. Go to Project Settings → Domains
-2. Add your domain: `split.ai` or `app.split.ai`
-3. Add DNS records as instructed:
-   ```
-   Type: CNAME
-   Name: app (or @)
-   Value: cname.vercel-dns.com
-   ```
-
-### vercel.json (Already Created)
-The `frontend/vercel.json` handles SPA routing so all routes redirect to index.html.
-
----
-
-## 4. CORS Configuration
-
-Update your backend `main.py` to allow your Vercel domain:
-
-```python
-from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "https://split-ai.vercel.app",      # Your Vercel URL
-        "https://your-custom-domain.com",   # Custom domain if any
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+```text
+GET https://algosplit-api-staging.vercel.app/health
+GET https://algosplit-api-staging.vercel.app/keepalive
+GET https://algosplit-api-staging.vercel.app/api/splits
 ```
 
----
+The first two requests should return `200`. The signed-out splits request should
+return a JSON `401`, proving the API route and authentication boundary are live.
 
-## 5. Environment Variables Summary
+## Frontend Vercel project
 
-### Backend (Render/Fly/Railway)
-```env
-SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
-SUPABASE_SECRET_KEY=sb_secret_...
-SUPABASE_JWT_SECRET=your-jwt-secret
+Configure the project as follows:
+
+```text
+Root Directory: app
+Framework Preset: Other
+Install Command: npm install
+Build Command: npm run build:web
+Output Directory: dist
+Production Branch: main
 ```
 
-### Frontend (Vercel)
-```env
-VITE_API_URL=https://split-ai-api.onrender.com
+`app/vercel.json` owns the build settings, single-page-app fallback, static asset
+headers, and same-origin rewrites to the Vercel API. Do not set
+`EXPO_PUBLIC_ALGOSPLIT_API` for the production web deployment; web requests use
+the same-origin `/api` and `/auth` paths.
+
+After deployment, verify the frontend's rewritten health endpoint:
+
+```text
+GET https://algosplit-mobile-staging.vercel.app/health
 ```
 
----
+It should return the same backend health JSON.
 
-## 6. Post-Deployment Checklist
+## Supabase Auth URLs
 
-- [ ] Backend health check: `curl https://your-api.com/health`
-- [ ] Frontend loads at Vercel URL
-- [ ] Sign up works
-- [ ] Login works
-- [ ] Create a split
-- [ ] Analyze split (29-region analysis)
-- [ ] Log a workout
-- [ ] Check workout history
+In Supabase Authentication URL Configuration:
 
----
+1. Set the Site URL to the production frontend URL.
+2. Add `https://algosplit-mobile-staging.vercel.app/**` to Redirect URLs.
+3. Add any custom production domain before moving traffic to it.
+4. Remove retired frontend domains only after the rollback window closes.
 
-## 7. CI/CD (Automatic Deployments)
+## Release sequence
 
-Both Vercel and Render automatically deploy when you push to main:
+1. Open a pull request from the release branch to `main`.
+2. Wait for CI and both Vercel preview deployments.
+3. Merge the pull request.
+4. In each Vercel project, open Settings, Environments, Production, then Branch
+   Tracking and select `main`.
+5. Promote or redeploy the merged `main` commit in both projects.
+6. Confirm both production deployments show the same Git commit.
+7. Run the production smoke tests below before removing old infrastructure.
 
-```bash
-git add .
-git commit -m "Deploy to production"
-git push origin main
-```
+## Production smoke tests
 
-Vercel and Render will automatically:
-1. Detect the push
-2. Build the project
-3. Deploy to production
+- Load the web client and sign in from the dedicated authentication screen.
+- Confirm saved splits, overview stimulus, workout templates, history, and
+  progress use account data.
+- Analyze and edit a split, including an empty Rest session.
+- Start, save, and reopen a workout.
+- Confirm split and workout mutations survive a hard reload.
+- Test logout, login, request retry, and signed-out behavior.
+- Inspect backend logs for failed imports, authentication errors, analysis
+  fallback, and database migration errors.
 
----
+## Native iOS build
 
-## 8. Monitoring & Logs
+The EAS production profile uses
+`https://algosplit-api-staging.vercel.app` directly. Before building:
 
-### Vercel
-- Dashboard → Project → Deployments → View Logs
-- Real-time function logs available
-
-### Render
-- Dashboard → Service → Logs
-- Metrics available for requests, CPU, memory
-
-### Supabase
-- Dashboard → Database → Logs
-- API logs and database queries visible
-
----
-
-## 9. Cost Estimates (Free Tiers)
-
-| Service | Free Tier |
-|---------|-----------|
-| Vercel | 100GB bandwidth, unlimited deploys |
-| Render | 750 hours/month (sleeps after 15min inactive) |
-| Supabase | 500MB database, 50k monthly active users |
-| Fly.io | 3 shared VMs, 160GB bandwidth |
-
-**Total for MVP: $0/month** using free tiers
-
-### Paid Upgrades (When Needed)
-- Render Pro: $7/month (no sleep, more resources)
-- Vercel Pro: $20/month (more bandwidth, analytics)
-- Supabase Pro: $25/month (more storage, no pause)
-
----
-
-## 10. iOS App Store Submission
-
-The mobile app is configured for submission; the items below are the
-human-only steps that must be done before / during submission.
-
-### Pre-build (required)
-
-1. **EAS project ID** — replace the placeholder in `app/app.json` →
-   `expo.extra.eas.projectId`. Run `eas init` from `app/` to mint one.
-
-2. **App Store Connect record** — create the app with bundle ID
-   `com.algosplit.app` (matches `app/app.json` → `ios.bundleIdentifier`).
-
-3. **Privacy policy URL** — Apple requires a hosted privacy policy. Paste
-   it into App Store Connect → App Privacy and link to it from the in-app
-   Settings screen.
-
-4. **Support URL** — required by App Store Connect; a landing page or
-   GitHub Issues link is fine for v1.
-
-### App Privacy form (App Store Connect)
-
-The privacy manifest in `app/app.json` already declares this. Mirror it:
-
-| Data type | Linked | Tracking | Purpose |
-|---|---|---|---|
-| Email Address | Yes | No | App Functionality |
-| Other User Content (workout data) | Yes | No | App Functionality |
-| Fitness | Yes | No | App Functionality |
-
-Answer "No" to the Tracking question — there are no tracking SDKs and
-the manifest reflects that.
-
-### Already handled in code
-
-- **Export compliance**: `app.json` → `ios.infoPlist.ITSAppUsesNonExemptEncryption: false`
-- **Required Reason APIs**: declared in `ios.privacyManifests.NSPrivacyAccessedAPITypes`
-  (UserDefaults `CA92.1`, FileTimestamp `C617.1`, SystemBootTime `35F9.1`, DiskSpace `E174.1`)
-- **Account deletion** (Apple requires since June 2022): `app/app/(tabs)/settings.tsx`
-- **Token storage in iOS Keychain**: `app/src/api/client.ts` via `expo-secure-store`
-- **HTTPS-only API**: `app/src/api/client.ts` (localhost only in dev)
-- **No service-role keys in the client bundle**
-
-### Build & submit
+1. Set `AUTH_EXPOSE_ACCESS_TOKEN=true` in the backend Vercel Production
+   environment and redeploy it.
+2. Confirm `app/app.json` contains the correct EAS project ID and iOS bundle ID.
+3. Run the app checks and TestFlight smoke test.
 
 ```bash
 cd app
@@ -322,33 +151,35 @@ eas build --platform ios --profile production
 eas submit --platform ios
 ```
 
-### Smoke-test before submitting
+Existing native binaries embed their API URL at build time. Do not retire an API
+host while a distributed build still references it.
 
-- [ ] Sign up → log in → log out → log back in
-- [ ] Create a split, log a workout, view analysis
-- [ ] Import a spreadsheet (DocumentPicker flow)
-- [ ] Delete account — confirm full data removal
-- [ ] Pull-to-refresh on dashboard while on cellular (ATS check)
-- [ ] Background the app for >30s, return — auth survives via Keychain
+## Rollback and retirement
 
----
+- Keep the release branch until the `main` deployments have been stable through
+  the rollback window.
+- Pause old Vercel projects before deleting them. Move custom domains first.
+- Suspend an old backend before deletion and monitor for unexpected traffic.
+- Delete retired projects only after web and native clients no longer reference
+  them.
+- Vercel deployment rollback remains available independently for the frontend
+  and backend projects.
 
-## 11. Troubleshooting
+## Local release checks
 
-### "CORS Error"
-- Check backend CORS origins include your Vercel URL
-- Ensure trailing slashes match
+```bash
+uv lock --check --project backend
+uv sync --project backend --frozen --all-groups
+uv run --project backend python -c "import analysis_engine_rs"
+uv run --project backend pytest backend/tests
 
-### "401 Unauthorized"
-- Check SUPABASE_JWT_SECRET matches between Supabase and backend
-- Verify token is being sent in Authorization header
+cd backend/rust/analysis_engine
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test
 
-### "502 Bad Gateway" on Render
-- Check build logs for errors
-- Ensure start command is correct
-- Verify environment variables are set
-
-### Frontend shows blank page
-- Check browser console for errors
-- Verify VITE_API_URL is set correctly
-- Check network tab for failed API requests
+cd ../../../app
+npm test -- --runInBand
+npx tsc --noEmit
+npm run build:web
+```

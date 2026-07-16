@@ -26,7 +26,7 @@ The project is no longer an API-only prototype. It now includes authentication, 
 | Database/auth | Supabase Postgres, Supabase Auth/JWT, RLS |
 | Analysis | Rust kernel with parity-gated Python fallback under `backend/core` |
 | Tests | Jest/Jest Expo, pytest |
-| Deployment | Expo/Vercel-style web export for app, Render/Fly/Railway for API, Supabase for data |
+| Deployment | Vercel web export and FastAPI functions, EAS for native builds, Supabase for data |
 
 ## Repository Layout
 
@@ -222,11 +222,9 @@ Typical production layout:
 Expo web/native app -> FastAPI API -> Supabase Auth/Postgres
 ```
 
-Backend hosting options used by the project:
-
-- Render
-- Fly.io
-- Railway
+The production web client and FastAPI backend are separate Vercel projects from
+this repository, rooted at `app/` and `backend/` respectively. See
+`DEPLOYMENT.md` for the current project settings and release sequence.
 
 Backend start command:
 

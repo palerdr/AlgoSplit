@@ -130,7 +130,7 @@ RATE_LIMIT_MAX_BUCKETS = int(os.getenv("RATE_LIMIT_MAX_BUCKETS", "50000"))
 RATE_LIMIT_CLEANUP_INTERVAL = int(os.getenv("RATE_LIMIT_CLEANUP_INTERVAL", "300"))
 
 # Set TRUST_PROXY=true only when running behind a verified reverse proxy
-# (e.g., Render, Railway, Vercel serverless functions, or your own nginx).
+# (e.g., Vercel serverless functions or your own nginx).
 TRUST_PROXY = os.getenv("TRUST_PROXY", "false").lower() == "true"
 
 rate_limiter = RateLimiter(
