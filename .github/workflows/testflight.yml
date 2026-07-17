@@ -20,6 +20,8 @@ on:
     paths:
       - 'app/**'
       - '.github/workflows/testflight.yml'
+  # Manual trigger from the Actions tab for rebuilds without a code change.
+  workflow_dispatch:
 
 concurrency:
   group: testflight
