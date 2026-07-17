@@ -18,6 +18,7 @@ import BodyHeatmap from '../3d/BodyHeatmap';
 import FireIcon from '../ui/FireIcon';
 import Glass from '../ui/Glass';
 import PopupLayer from '../ui/PopupLayer';
+import Tooltip from '../ui/Tooltip';
 import { levelsFromNet, stimulusScore } from '../analysis/stimulus';
 import { useAppState } from '../state/AppState';
 import { useAccountState } from '../state/AccountState';
@@ -461,11 +462,14 @@ export default function HomeScreen({
           >
             <StimulusDial value={loadedWeekEffort} />
           </Pressable>
-          {dialTipVisible && (
-            <View pointerEvents="none" style={styles.dialTipBubble}>
-              <Text style={styles.dialTipText}>Weekly training stimulus, scored 0–100</Text>
-            </View>
-          )}
+          <Tooltip
+            visible={dialTipVisible}
+            text="Weekly training stimulus, scored 0–100"
+            pointer="top"
+            caretOffset={DIAL_SIZE / 2}
+            maxWidth={150}
+            style={styles.dialTipPosition}
+          />
         </View>
         {account.status === 'authenticated' && (
           <Pressable
@@ -480,10 +484,19 @@ export default function HomeScreen({
             }}
           >
             <Glass style={styles.activeZone} interactive>
-              <Text style={styles.activeZoneLabel}>Active split</Text>
-              <Text style={styles.activeZoneName} numberOfLines={1}>
-                {activeSplit ? activeSplit.name : '+ Choose'}
-              </Text>
+              {activeSplit ? (
+                <View style={styles.activeZoneRow}>
+                  <Text style={styles.activeZoneName} numberOfLines={1}>
+                    {activeSplit.name}
+                  </Text>
+                  <FireIcon size={15} lit={activeStreak > 0} />
+                </View>
+              ) : (
+                <View style={styles.activeZoneRow}>
+                  <Text style={styles.activeZoneEmpty}>No active split</Text>
+                  <Text style={styles.activeZonePlus}>+</Text>
+                </View>
+              )}
             </Glass>
           </Pressable>
         )}
@@ -860,6 +873,7 @@ export default function HomeScreen({
         visible={splitPickerOpen}
         onDismiss={() => setSplitPickerOpen(false)}
         maxWidth={380}
+        cardRadius={24}
       >
         <Glass style={styles.pickerCard}>
           <Text style={styles.pickerTitle}>Active split</Text>
@@ -920,6 +934,7 @@ export default function HomeScreen({
         visible={forceStartPlan !== null}
         onDismiss={() => setForceStartPlan(null)}
         maxWidth={380}
+        cardRadius={24}
       >
         <Glass style={styles.pickerCard}>
           <Text style={styles.pickerTitle}>Already done for today</Text>
@@ -1040,7 +1055,7 @@ const styles = StyleSheet.create({
     left: 20,
     right: 20,
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: 10,
   },
   dialGlass: {
@@ -1069,46 +1084,46 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
-  dialTipBubble: {
+  dialTipPosition: {
     position: 'absolute',
     top: DIAL_SIZE + 8,
     left: 0,
-    width: 148,
-    paddingVertical: 8,
-    paddingHorizontal: 11,
-    borderRadius: 10,
-    backgroundColor: 'rgba(20,20,20,0.96)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.14)',
-  },
-  dialTipText: {
-    color: theme.text,
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: '600',
   },
   // Hugs the right edge and stays narrow so the body model keeps its space.
   activeZonePress: {
     marginLeft: 'auto',
-    maxWidth: 148,
+    maxWidth: 168,
   },
+  // Thick pill — same circular "format" as the stim dial beside it: radius
+  // is exactly half the height, same centered glass treatment.
   activeZone: {
-    borderRadius: 18,
-    paddingVertical: 9,
-    paddingHorizontal: 13,
+    height: 40,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  activeZoneLabel: {
-    color: theme.accent,
-    fontSize: 9,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.9,
+  activeZoneRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
   },
   activeZoneName: {
     color: theme.text,
     fontSize: 13.5,
     fontWeight: '700',
-    marginTop: 2,
+    flexShrink: 1,
+  },
+  activeZoneEmpty: {
+    color: theme.textDim,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  activeZonePlus: {
+    color: theme.textDim,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 15,
   },
   pickerCard: {
     borderRadius: 24,
