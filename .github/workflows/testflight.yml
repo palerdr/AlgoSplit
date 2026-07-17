@@ -1,14 +1,16 @@
-# Kicks off an EAS iOS production build for every push to main that touches
+# Builds an EAS iOS production build for every push to main that touches
 # the app, and auto-submits the finished build to TestFlight.
 #
-# Requirements (one-time setup):
-# - EXPO_TOKEN repository secret: an Expo access token with access to this
-#   project (expo.dev → Account settings → Access tokens).
-# - Apple submission credentials stored with EAS (`eas credentials` /
-#   App Store Connect API key), so `--auto-submit` can run unattended.
+# Requirements (one-time setup, all done):
+# - EXPO_TOKEN repository secret: a robot access token for the account that
+#   owns @aboufa2322/algosplit (expo.dev → Account settings → Access tokens).
+# - The app linked to the EAS project (extra.eas.projectId in app/app.json) —
+#   robot tokens cannot run `eas init` themselves.
+# - iOS signing credentials stored with EAS (distribution certificate +
+#   provisioning profile) and an App Store Connect API key for `--auto-submit`.
 #
-# The job queues the build with --no-wait: EAS builds and submits on its own
-# servers, so CI minutes aren't spent waiting the ~20 minutes a build takes.
+# The job waits for the EAS build and submission so a failure anywhere in the
+# chain turns this check red instead of failing silently on expo.dev.
 
 name: TestFlight
 
@@ -27,6 +29,8 @@ jobs:
   build-and-submit:
     name: EAS iOS build → TestFlight
     runs-on: ubuntu-latest
+    # EAS free-tier builds queue serially; leave room for a build ahead of us.
+    timeout-minutes: 120
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -49,5 +53,5 @@ jobs:
         working-directory: app
 
       - name: Build and submit to TestFlight
-        run: eas build --platform ios --profile production --non-interactive --no-wait --auto-submit
+        run: eas build --platform ios --profile production --non-interactive --auto-submit
         working-directory: app
