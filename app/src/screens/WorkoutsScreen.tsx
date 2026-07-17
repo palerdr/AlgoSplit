@@ -17,6 +17,7 @@ import { workoutsPrimaryCreateTarget } from '../workout/newSplitDraft';
 import { theme } from '../theme';
 import Glass from '../ui/Glass';
 import FadeIn from '../ui/FadeIn';
+import DeleteConfirmationModal from '../ui/DeleteConfirmationModal';
 import NewSplitEditor from '../components/workouts/NewSplitEditor';
 import WorkoutEditor from '../components/workouts/WorkoutEditor';
 
@@ -215,32 +216,6 @@ export default function WorkoutsScreen({
                 </Pressable>
               </FadeIn>
             )}
-            {deleteTarget && (
-              <Glass style={styles.deleteConfirm}>
-                <Text style={styles.deleteConfirmTitle}>Delete split?</Text>
-                <Text style={styles.deleteConfirmCopy}>
-                  “{deleteTarget.name}” will be permanently deleted.
-                </Text>
-                {actionError && <Text style={styles.errorText}>{actionError}</Text>}
-                <View style={styles.deleteActions}>
-                  <Pressable
-                    onPress={() => {
-                      setDeleteTarget(null);
-                      setActionError(null);
-                    }}
-                    disabled={deleting}
-                    hitSlop={8}
-                  >
-                    <Text style={styles.deleteCancel}>Cancel</Text>
-                  </Pressable>
-                  <Pressable onPress={confirmDelete} disabled={deleting} hitSlop={8}>
-                    <Text style={styles.deleteConfirmText}>
-                      {deleting ? 'Deleting…' : 'Delete'}
-                    </Text>
-                  </Pressable>
-                </View>
-              </Glass>
-            )}
             {account.splits.loading && !account.splits.loaded && (
               <Glass style={styles.newBtn} interactive>
                 <Text style={styles.noticeText}>Loading your saved workouts…</Text>
@@ -333,6 +308,22 @@ export default function WorkoutsScreen({
         )}
         contentContainerStyle={{ paddingBottom: 40 }}
       />
+      <DeleteConfirmationModal
+        visible={deleteTarget !== null}
+        title="Delete split?"
+        message={
+          deleteTarget
+            ? `“${deleteTarget.name}” and all of its workout days will be permanently deleted.`
+            : ''
+        }
+        busy={deleting}
+        error={actionError}
+        onCancel={() => {
+          setDeleteTarget(null);
+          setActionError(null);
+        }}
+        onConfirm={confirmDelete}
+      />
     </View>
   );
 }
@@ -423,39 +414,6 @@ const styles = StyleSheet.create({
     color: '#E27878',
     fontSize: 13,
     fontWeight: '700',
-  },
-  deleteConfirm: {
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 14,
-  },
-  deleteConfirmTitle: {
-    color: theme.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  deleteConfirmCopy: {
-    color: theme.textDim,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 4,
-    marginBottom: 12,
-  },
-  deleteActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-    gap: 22,
-  },
-  deleteCancel: {
-    color: theme.textDim,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  deleteConfirmText: {
-    color: '#E27878',
-    fontSize: 13,
-    fontWeight: '800',
   },
   card: {
     borderRadius: 20,

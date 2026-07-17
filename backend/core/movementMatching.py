@@ -184,6 +184,18 @@ class PatternMatcher:
         self._decline_tokens = {"decline"}
         self._overhead_tokens = {"overhead"}  # used for distinguishing press vs. extension
 
+        # Canonical catalog names whose short wording is too ambiguous for a
+        # broad token rule. These exact matches keep every exercise offered by
+        # the app saveable without misclassifying variants such as "Seated
+        # Dumbbell Press" as a chest press.
+        self.exact_patterns: Dict[str, str] = {
+            "dumbbell press": "humeral_adduction_compound",
+            "incline push up": "clavicular_humeral_adduction_compound",
+            "dumbbell kickback": "elbow_extension_isolation",
+            "stir the pot": "anti_extension",
+            "anti rotation press": "anti_rotation",
+        }
+
         # -------------------------
         # Rules: staged from specific -> general -> fallback
         # -------------------------
@@ -478,6 +490,8 @@ class PatternMatcher:
         for src, dst in self._phrase_aliases:
             vocab.update(src.split())
             vocab.update(dst.split())
+        for exact_name in self.exact_patterns:
+            vocab.update(exact_name.split())
         vocab.update(self.muscle_only.keys())
         # Unilateral cue words: not rule tokens, but typo-correcting them
         # preserves the unilateral flag ("singel leg press")
@@ -714,6 +728,10 @@ class PatternMatcher:
 
         tokens = self._token_set(normalized)
         is_unilateral = self._detect_unilateral(normalized, tokens)
+
+        exact_pattern = self.exact_patterns.get(normalized)
+        if exact_pattern:
+            return MatchResult(exact_pattern, is_unilateral, score=100)
 
         # 1) Rule-based selection with scoring
         base_pattern, score, ambiguous = self._choose_best_pattern(tokens)

@@ -8,6 +8,9 @@ spreadsheet-import column classifier, which scores columns by matcher
 hit-rate).
 """
 
+import re
+from pathlib import Path
+
 import pytest
 
 from core.granular_patterns import GRANULAR_PATTERNS
@@ -135,6 +138,11 @@ PROGRAM_PREFIXES = [
 ]
 
 POPULAR_COVERAGE = [
+    ("Dumbbell Press", "humeral_adduction_compound"),
+    ("Incline Push Up", "clavicular_humeral_adduction_compound"),
+    ("Dumbbell Kickback", "elbow_extension_isolation"),
+    ("Stir the Pot", "anti_extension"),
+    ("Anti-Rotation Press", "anti_rotation"),
     ("Front Squat", "squat_compound"),
     ("Goblet Squat", "squat_compound"),
     ("Box Squat", "squat_compound"),
@@ -219,6 +227,7 @@ POPULAR_COVERAGE = [
     ("Suitcase Carry", "wrist_flexion_isolation"),
     ("Behind The Back Wrist Curl", "wrist_flexion_isolation"),
     ("Seated DB Press", "pronated_vertical_press_compound"),
+    ("Seated Dumbbell Press", "pronated_vertical_press_compound"),
     ("Arnold Press", "pronated_vertical_press_compound"),
     ("Push Press", "pronated_vertical_press_compound"),
     ("Military Press", "pronated_vertical_press_compound"),
@@ -259,6 +268,25 @@ def test_recognized_exercise(name, expected):
     movement = move_match(name)
     assert movement is not None, f"{name!r} should be recognized"
     assert movement.name == expected
+
+
+def test_every_frontend_catalog_exercise_can_be_saved():
+    catalog_path = (
+        Path(__file__).resolve().parents[2]
+        / "app"
+        / "src"
+        / "data"
+        / "exerciseCatalog.gen.ts"
+    )
+    catalog_source = catalog_path.read_text(encoding="utf-8")
+    names = re.findall(r'\bname: "([^"]+)"', catalog_source)
+
+    assert len(names) >= 300, "Catalog contract test did not load the generated exercise list"
+    unsupported = [name for name in names if move_match(name) is None]
+    assert unsupported == [], (
+        "The app offers exercises that split validation rejects: "
+        + ", ".join(unsupported)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +378,10 @@ def test_rule_patterns_exist_in_granular_patterns():
     for token, pattern in _MATCHER.muscle_only.items():
         assert pattern in GRANULAR_PATTERNS, (
             f"muscle_only[{token!r}] maps to unknown pattern {pattern!r}"
+        )
+    for name, pattern in _MATCHER.exact_patterns.items():
+        assert pattern in GRANULAR_PATTERNS, (
+            f"exact_patterns[{name!r}] maps to unknown pattern {pattern!r}"
         )
 
 

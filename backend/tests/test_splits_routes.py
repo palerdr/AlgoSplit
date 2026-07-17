@@ -68,6 +68,29 @@ def test_create_list_get_update_and_delete_split(client):
     assert missing_resp.status_code == 404
 
 
+def test_create_split_saves_previously_rejected_catalog_exercises(client, fake_supabase):
+    names = [
+        "Dumbbell Press",
+        "Incline Push Up",
+        "Dumbbell Kickback",
+        "Stir the Pot",
+        "Anti-Rotation Press",
+    ]
+    payload = _create_payload("Catalog Coverage")
+    payload["sessions"] = [
+        {
+            "name": "Full Body",
+            "day_number": 1,
+            "exercises": [{"name": name, "sets": 3} for name in names],
+        }
+    ]
+
+    response = client.post("/api/splits", json=payload)
+
+    assert response.status_code == 201
+    assert [exercise["exercise_name"] for exercise in fake_supabase.tables["exercises"]] == names
+
+
 def test_replace_split_rewrites_sessions_and_exercises(client):
     create_resp = client.post("/api/splits", json=_create_payload("Replace Target"))
     split_id = create_resp.json()["id"]

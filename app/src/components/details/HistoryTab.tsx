@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import type { WorkoutSummaryResponse } from '../../api/backend';
 import { useAccountState } from '../../state/AccountState';
 import { theme } from '../../theme';
+import DeleteConfirmationModal from '../../ui/DeleteConfirmationModal';
 import FadeIn from '../../ui/FadeIn';
 import Glass from '../../ui/Glass';
 import { formatLoggedSet, workoutTotals } from './historyTransforms';
@@ -53,7 +55,15 @@ function Notice({
   );
 }
 
-function WorkoutCard({ workout, delay }: { workout: WorkoutSummaryResponse; delay: number }) {
+function WorkoutCard({
+  workout,
+  delay,
+  onDelete,
+}: {
+  workout: WorkoutSummaryResponse;
+  delay: number;
+  onDelete: (workout: WorkoutSummaryResponse) => void;
+}) {
   const account = useAccountState();
   const [expanded, setExpanded] = useState(false);
   const detailResource = account.workoutDetails[workout.id];
@@ -68,65 +78,78 @@ function WorkoutCard({ workout, delay }: { workout: WorkoutSummaryResponse; dela
 
   return (
     <FadeIn delay={delay}>
-      <Pressable onPress={toggle}>
-        <Glass style={styles.card} interactive>
-          <View style={styles.cardHeader}>
+      <Glass style={styles.card} interactive>
+        <View style={styles.cardHeader}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${expanded ? 'Collapse' : 'Expand'} ${workout.session_name}`}
+            onPress={toggle}
+            style={styles.cardToggle}
+          >
             <View style={styles.cardTitleBlock}>
               <Text style={styles.cardTitle}>{workout.session_name}</Text>
               <Text style={styles.cardDate}>{formatDate(workout.completed_at)}</Text>
             </View>
             <Text style={styles.chevron}>{expanded ? '⌃' : '⌄'}</Text>
-          </View>
-          <View style={styles.statRow}>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${workout.session_name} from history`}
+            onPress={() => onDelete(workout)}
+            hitSlop={8}
+          >
+            <Text style={styles.deleteAction}>Delete</Text>
+          </Pressable>
+        </View>
+        <View style={styles.statRow}>
+          <Text style={styles.stat}>
+            <Text style={styles.statValue}>{workout.total_sets}</Text> sets
+          </Text>
+          <Text style={styles.stat}>
+            <Text style={styles.statValue}>{workout.exercise_count}</Text> exercises
+          </Text>
+          {totals && <Text style={styles.stat}>
+            <Text style={styles.statValue}>{formatVolume(totals.volume)}</Text> lb
+          </Text>}
+          {workout.duration_minutes != null && (
             <Text style={styles.stat}>
-              <Text style={styles.statValue}>{workout.total_sets}</Text> sets
+              <Text style={styles.statValue}>{workout.duration_minutes}</Text> min
             </Text>
-            <Text style={styles.stat}>
-              <Text style={styles.statValue}>{workout.exercise_count}</Text> exercises
-            </Text>
-            {totals && <Text style={styles.stat}>
-              <Text style={styles.statValue}>{formatVolume(totals.volume)}</Text> lb
-            </Text>}
-            {workout.duration_minutes != null && (
-              <Text style={styles.stat}>
-                <Text style={styles.statValue}>{workout.duration_minutes}</Text> min
-              </Text>
-            )}
-          </View>
+          )}
+        </View>
 
-          {expanded && detailResource?.loading && !detail && (
-            <Text style={styles.exerciseNotes}>Loading workout details…</Text>
-          )}
-          {expanded && detailResource?.error && (
-            <Pressable onPress={() => account.ensureWorkoutDetail(workout.id)}>
-              <Text style={styles.action}>{detailResource.error} · Retry</Text>
-            </Pressable>
-          )}
-          {expanded && detail && (
-            <View style={styles.details}>
-              {detail.notes && <Text style={styles.workoutNotes}>{detail.notes}</Text>}
-              {detail.exercises.map((exercise, exerciseIndex) => (
-                <View
-                  key={exercise.id || `${exercise.exercise_name}-${exerciseIndex}`}
-                  style={[styles.exercise, exerciseIndex > 0 && styles.exerciseBorder]}
-                >
-                  <View style={styles.exerciseHeader}>
-                    <Text style={styles.exerciseName}>{exercise.exercise_name}</Text>
-                    <Text style={styles.exerciseCount}>{exercise.sets_completed} sets</Text>
-                  </View>
-                  {exercise.reps.map((_, setIndex) => (
-                    <View key={setIndex} style={styles.setRow}>
-                      <Text style={styles.setNumber}>{setIndex + 1}</Text>
-                      <Text style={styles.setValue}>{formatLoggedSet(exercise, setIndex)}</Text>
-                    </View>
-                  ))}
-                  {exercise.notes && <Text style={styles.exerciseNotes}>{exercise.notes}</Text>}
+        {expanded && detailResource?.loading && !detail && (
+          <Text style={styles.exerciseNotes}>Loading workout details…</Text>
+        )}
+        {expanded && detailResource?.error && (
+          <Pressable onPress={() => account.ensureWorkoutDetail(workout.id)}>
+            <Text style={styles.action}>{detailResource.error} · Retry</Text>
+          </Pressable>
+        )}
+        {expanded && detail && (
+          <View style={styles.details}>
+            {detail.notes && <Text style={styles.workoutNotes}>{detail.notes}</Text>}
+            {detail.exercises.map((exercise, exerciseIndex) => (
+              <View
+                key={exercise.id || `${exercise.exercise_name}-${exerciseIndex}`}
+                style={[styles.exercise, exerciseIndex > 0 && styles.exerciseBorder]}
+              >
+                <View style={styles.exerciseHeader}>
+                  <Text style={styles.exerciseName}>{exercise.exercise_name}</Text>
+                  <Text style={styles.exerciseCount}>{exercise.sets_completed} sets</Text>
                 </View>
-              ))}
-            </View>
-          )}
-        </Glass>
-      </Pressable>
+                {exercise.reps.map((_, setIndex) => (
+                  <View key={setIndex} style={styles.setRow}>
+                    <Text style={styles.setNumber}>{setIndex + 1}</Text>
+                    <Text style={styles.setValue}>{formatLoggedSet(exercise, setIndex)}</Text>
+                  </View>
+                ))}
+                {exercise.notes && <Text style={styles.exerciseNotes}>{exercise.notes}</Text>}
+              </View>
+            ))}
+          </View>
+        )}
+      </Glass>
     </FadeIn>
   );
 }
@@ -134,12 +157,30 @@ function WorkoutCard({ workout, delay }: { workout: WorkoutSummaryResponse; dela
 export default function HistoryTab() {
   const account = useAccountState();
   const remote = account.workoutSummaries;
+  const [deleteTarget, setDeleteTarget] = useState<WorkoutSummaryResponse | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     if (account.status === 'authenticated') account.ensureWorkoutSummaries();
   }, [account.status, account.ensureWorkoutSummaries]);
 
   const workouts = remote.data.workouts;
+
+  const confirmDelete = async () => {
+    if (!deleteTarget || deleting) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await account.deleteWorkout(deleteTarget.id);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      setDeleteTarget(null);
+    } catch (cause) {
+      setDeleteError(cause instanceof Error ? cause.message : 'Workout could not be deleted.');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   if (account.status === 'unconfigured') {
     return (
@@ -202,7 +243,15 @@ export default function HistoryTab() {
           keyExtractor={(workout) => workout.id}
           showsVerticalScrollIndicator={false}
           renderItem={({ item, index }) => (
-            <WorkoutCard workout={item} delay={45 + Math.min(index, 6) * 45} />
+            <WorkoutCard
+              workout={item}
+              delay={45 + Math.min(index, 6) * 45}
+              onDelete={(workout) => {
+                Haptics.selectionAsync().catch(() => {});
+                setDeleteError(null);
+                setDeleteTarget(workout);
+              }}
+            />
           )}
           contentContainerStyle={styles.listContent}
           onEndReached={() => account.loadMoreWorkoutSummaries()}
@@ -212,6 +261,22 @@ export default function HistoryTab() {
           }
         />
       )}
+      <DeleteConfirmationModal
+        visible={deleteTarget !== null}
+        title="Delete tracked workout?"
+        message={
+          deleteTarget
+            ? `“${deleteTarget.session_name}” will be permanently removed from your history.`
+            : ''
+        }
+        busy={deleting}
+        error={deleteError}
+        onCancel={() => {
+          setDeleteTarget(null);
+          setDeleteError(null);
+        }}
+        onConfirm={confirmDelete}
+      />
     </View>
   );
 }
@@ -254,11 +319,13 @@ const styles = StyleSheet.create({
   accountEmail: { color: theme.textDim, fontSize: 11, marginTop: 2 },
   accountAction: { color: theme.accent, fontSize: 12, fontWeight: '600' },
   card: { borderRadius: 20, padding: 16, marginBottom: 12 },
-  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 7 },
+  cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 7 },
+  cardToggle: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
   cardTitleBlock: { flex: 1 },
   cardTitle: { color: theme.text, fontSize: 16, fontWeight: '700' },
   cardDate: { color: theme.textDim, fontSize: 11, marginTop: 3 },
   chevron: { color: theme.textDim, fontSize: 16 },
+  deleteAction: { color: '#E27878', fontSize: 12, fontWeight: '700' },
   exerciseSummary: { color: theme.textDim, fontSize: 12, lineHeight: 17, marginBottom: 11 },
   statRow: {
     flexDirection: 'row',
