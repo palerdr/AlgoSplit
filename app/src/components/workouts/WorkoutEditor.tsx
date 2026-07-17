@@ -30,7 +30,6 @@ import {
   WorkoutDraftExercise,
   newWorkoutDraft,
   parseWorkoutDayInput,
-  reorderWorkoutDraftExercises,
   replaceWorkoutDraftExercise,
   splitDayLimit,
   workoutDraftError,
@@ -78,7 +77,6 @@ const RESISTANCE_PROFILES = [
   { value: 'mid', label: 'Mid' },
   { value: 'descending', label: 'Desc' },
 ] as const;
-const DRAG_RELEASE_TIMEOUT_MS = 700;
 const ROW_SEARCH_RESULT_LIMIT = 6;
 const CATALOG_RESULT_LIMIT = 50;
 
@@ -98,10 +96,6 @@ export default function WorkoutEditor(props: WorkoutEditorProps) {
   const account = useAccountState();
   const nextKey = useRef(0);
   const savingRef = useRef(false);
-  const dragActiveRef = useRef(false);
-  const dragFromRef = useRef<number | null>(null);
-  const dragToRef = useRef<number | null>(null);
-  const dragReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [draft, setDraft] = useState<WorkoutDraft>(() => {
     if (props.mode === 'session') {
       return props.session
@@ -117,7 +111,6 @@ export default function WorkoutEditor(props: WorkoutEditorProps) {
   const [exerciseSearch, setExerciseSearch] = useState<{ key: string; query: string } | null>(
     null
   );
-  const [dragListVersion, setDragListVersion] = useState(0);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -192,43 +185,6 @@ export default function WorkoutEditor(props: WorkoutEditorProps) {
     return counts;
   }, [draft.exercises]);
 
-  useEffect(
-    () => () => {
-      if (dragReleaseTimerRef.current) clearTimeout(dragReleaseTimerRef.current);
-    },
-    []
-  );
-
-  const clearDragReleaseWatchdog = () => {
-    if (!dragReleaseTimerRef.current) return;
-    clearTimeout(dragReleaseTimerRef.current);
-    dragReleaseTimerRef.current = null;
-  };
-
-  const armDragReleaseWatchdog = () => {
-    if (!dragActiveRef.current) return;
-    clearDragReleaseWatchdog();
-    dragReleaseTimerRef.current = setTimeout(() => {
-      dragReleaseTimerRef.current = null;
-      if (!dragActiveRef.current) return;
-      // A cancelled native gesture can skip onDragEnd and leave FlatList scrolling disabled.
-      // Commit its last placeholder and remount only the list so scrolling resumes.
-      const from = dragFromRef.current;
-      const to = dragToRef.current;
-      dragActiveRef.current = false;
-      dragFromRef.current = null;
-      dragToRef.current = null;
-      if (from !== null && to !== null && from !== to) {
-        tick();
-        setDraft((previous) => ({
-          ...previous,
-          exercises: reorderWorkoutDraftExercises(previous.exercises, from, to),
-        }));
-      }
-      setDragListVersion((version) => version + 1);
-    }, DRAG_RELEASE_TIMEOUT_MS);
-  };
-
   const updateExercise = (index: number, update: Partial<WorkoutDraftExercise>) => {
     setDraft((previous) => ({
       ...previous,
@@ -286,7 +242,6 @@ export default function WorkoutEditor(props: WorkoutEditorProps) {
               accessibilityLabel={`Reorder ${exercise.name}`}
               accessibilityHint="Press and drag to move this exercise"
               onPressIn={drag}
-              onPressOut={armDragReleaseWatchdog}
               hitSlop={8}
               style={styles.dragHandle}
             >
@@ -490,35 +445,20 @@ export default function WorkoutEditor(props: WorkoutEditorProps) {
       <Text style={styles.splitName}>{subtitle}</Text>
 
       <DraggableFlatList
-        key={`workout-exercises:${dragListVersion}`}
         data={draft.exercises}
         keyExtractor={(exercise) => exercise.key}
         renderItem={renderPickedExercise}
         extraData={exerciseSearch}
-        onDragBegin={(index) => {
-          clearDragReleaseWatchdog();
-          dragActiveRef.current = true;
-          dragFromRef.current = index;
-          dragToRef.current = index;
-          setExerciseSearch(null);
-        }}
-        onPlaceholderIndexChange={(index) => {
-          dragToRef.current = index;
-        }}
-        onRelease={armDragReleaseWatchdog}
-        onDragEnd={({ from, to }) => {
-          clearDragReleaseWatchdog();
-          dragActiveRef.current = false;
-          dragFromRef.current = null;
-          dragToRef.current = null;
+        onDragBegin={() => setExerciseSearch(null)}
+        onDragEnd={({ data, from, to }) => {
           if (from === to) return;
           tick();
           setDraft((previous) => ({
             ...previous,
-            exercises: reorderWorkoutDraftExercises(previous.exercises, from, to),
+            exercises: data,
           }));
         }}
-        activationDistance={1}
+        activationDistance={8}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         containerStyle={styles.editorList}
