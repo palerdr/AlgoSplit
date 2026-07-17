@@ -1,9 +1,7 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import {
-  NestableDraggableFlatList,
-  NestableScrollContainer,
+import DraggableFlatList, {
   RenderItemParams,
   ScaleDecorator,
 } from 'react-native-draggable-flatlist';
@@ -19,6 +17,7 @@ import {
   newWorkoutDraft,
   parseWorkoutDayInput,
   reorderWorkoutDraftExercises,
+  replaceWorkoutDraftExercise,
   workoutDraftToSessionCreate,
   workoutDraftError,
   workoutDraftFromSession,
@@ -50,6 +49,20 @@ const RESISTANCE_PROFILES = [
   { value: 'mid', label: 'Mid' },
   { value: 'descending', label: 'Desc' },
 ] as const;
+const DRAG_RELEASE_TIMEOUT_MS = 700;
+const ROW_SEARCH_RESULT_LIMIT = 6;
+const CATALOG_RESULT_LIMIT = 50;
+
+function searchExerciseCatalog(query: string, currentName?: string, limit = CATALOG_RESULT_LIMIT) {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  if (!normalizedQuery) return [];
+  const normalizedCurrentName = currentName?.toLocaleLowerCase();
+  return EXERCISES.filter(
+    (exercise) =>
+      exercise.name.toLocaleLowerCase().includes(normalizedQuery) &&
+      exercise.name.toLocaleLowerCase() !== normalizedCurrentName
+  ).slice(0, limit);
+}
 
 export default function WorkoutEditor({
   split,
@@ -63,6 +76,10 @@ export default function WorkoutEditor({
   const account = useAccountState();
   const nextKey = useRef(0);
   const savingRef = useRef(false);
+  const dragActiveRef = useRef(false);
+  const dragFromRef = useRef<number | null>(null);
+  const dragToRef = useRef<number | null>(null);
+  const dragReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [draft, setDraft] = useState<WorkoutDraft>(() =>
     session
       ? workoutDraftFromSession(split.id, session)
@@ -70,6 +87,10 @@ export default function WorkoutEditor({
   );
   const [dayText, setDayText] = useState(() => String(draft.dayNumber));
   const [search, setSearch] = useState('');
+  const [exerciseSearch, setExerciseSearch] = useState<{ key: string; query: string } | null>(
+    null
+  );
+  const [dragListVersion, setDragListVersion] = useState(0);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -98,8 +119,47 @@ export default function WorkoutEditor({
         })
         .slice(0, 20);
     }
-    return EXERCISES.filter((exercise) => exercise.name.toLocaleLowerCase().includes(query));
+    return EXERCISES.filter((exercise) =>
+      exercise.name.toLocaleLowerCase().includes(query)
+    ).slice(0, CATALOG_RESULT_LIMIT);
   }, [account.splits.data, account.workoutSummaries.data.workouts, search]);
+
+  useEffect(
+    () => () => {
+      if (dragReleaseTimerRef.current) clearTimeout(dragReleaseTimerRef.current);
+    },
+    []
+  );
+
+  const clearDragReleaseWatchdog = () => {
+    if (!dragReleaseTimerRef.current) return;
+    clearTimeout(dragReleaseTimerRef.current);
+    dragReleaseTimerRef.current = null;
+  };
+
+  const armDragReleaseWatchdog = () => {
+    if (!dragActiveRef.current) return;
+    clearDragReleaseWatchdog();
+    dragReleaseTimerRef.current = setTimeout(() => {
+      dragReleaseTimerRef.current = null;
+      if (!dragActiveRef.current) return;
+      // A cancelled native gesture can skip onDragEnd and leave FlatList scrolling disabled.
+      // Commit its last placeholder and remount only the list so scrolling resumes.
+      const from = dragFromRef.current;
+      const to = dragToRef.current;
+      dragActiveRef.current = false;
+      dragFromRef.current = null;
+      dragToRef.current = null;
+      if (from !== null && to !== null && from !== to) {
+        tick();
+        setDraft((previous) => ({
+          ...previous,
+          exercises: reorderWorkoutDraftExercises(previous.exercises, from, to),
+        }));
+      }
+      setDragListVersion((version) => version + 1);
+    }, DRAG_RELEASE_TIMEOUT_MS);
+  };
 
   const updateExercise = (index: number, update: Partial<WorkoutDraftExercise>) => {
     setDraft((previous) => ({
@@ -128,6 +188,15 @@ export default function WorkoutEditor({
     }));
   };
 
+  const replaceExercise = (exerciseKey: string, replacement: Exercise) => {
+    tick();
+    setDraft((previous) => ({
+      ...previous,
+      exercises: replaceWorkoutDraftExercise(previous.exercises, exerciseKey, replacement),
+    }));
+    setExerciseSearch(null);
+  };
+
   const renderPickedExercise = ({
     item: exercise,
     getIndex,
@@ -136,22 +205,42 @@ export default function WorkoutEditor({
   }: RenderItemParams<WorkoutDraftExercise>) => {
     const index = getIndex();
     if (index === undefined) return null;
+    const rowSearch = exerciseSearch?.key === exercise.key ? exerciseSearch : null;
+    const replacementMatches = rowSearch
+      ? searchExerciseCatalog(rowSearch.query, exercise.name, ROW_SEARCH_RESULT_LIMIT)
+      : [];
     return (
       <ScaleDecorator activeScale={1.02}>
         <View style={[styles.pickedRow, isActive && styles.pickedRowActive]}>
           <View style={styles.pickedMainRow}>
             <Pressable
               accessibilityLabel={`Reorder ${exercise.name}`}
-              onLongPress={drag}
-              delayLongPress={160}
+              accessibilityHint="Press and drag to move this exercise"
+              onPressIn={drag}
+              onPressOut={armDragReleaseWatchdog}
               hitSlop={8}
               style={styles.dragHandle}
             >
               <Text style={[styles.dragHandleText, isActive && styles.dragHandleActive]}>≡</Text>
             </Pressable>
-            <Text style={styles.pickedName}>
-              {exercise.name}
-            </Text>
+            <View style={styles.pickedNameField}>
+              <TextInput
+                accessibilityLabel={`Replace ${exercise.name}`}
+                value={rowSearch?.query ?? exercise.name}
+                onFocus={() => setExerciseSearch({ key: exercise.key, query: exercise.name })}
+                onChangeText={(query) => setExerciseSearch({ key: exercise.key, query })}
+                onSubmitEditing={() => {
+                  if (replacementMatches[0]) replaceExercise(exercise.key, replacementMatches[0]);
+                }}
+                placeholder="Search replacement"
+                placeholderTextColor={theme.textDim}
+                autoCorrect={false}
+                selectTextOnFocus
+                returnKeyType="search"
+                style={styles.pickedNameInput}
+              />
+              <Text style={styles.pickedSearchIcon}>⌕</Text>
+            </View>
             <View style={styles.setControls}>
               <Pressable
                 onPress={() => {
@@ -188,6 +277,25 @@ export default function WorkoutEditor({
               <Text style={styles.remove}>✕</Text>
             </Pressable>
           </View>
+          {rowSearch && rowSearch.query.trim() !== exercise.name.trim() && (
+            <View style={styles.replacementResults}>
+              {replacementMatches.map((replacement) => (
+                <Pressable
+                  key={replacement.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Replace with ${replacement.name}`}
+                  onPress={() => replaceExercise(exercise.key, replacement)}
+                  style={styles.replacementRow}
+                >
+                  <Text style={styles.replacementName}>{replacement.name}</Text>
+                  <Text style={styles.replacementAction}>Swap</Text>
+                </Pressable>
+              ))}
+              {replacementMatches.length === 0 && (
+                <Text style={styles.noReplacement}>No matching exercises</Text>
+              )}
+            </View>
+          )}
           <View style={styles.profileRow}>
             <Text style={styles.profileLabel}>Resistance</Text>
             <View style={styles.profileOptions}>
@@ -301,99 +409,115 @@ export default function WorkoutEditor({
       <Text style={styles.title}>{session ? 'Edit Workout' : 'New Workout'}</Text>
       <Text style={styles.splitName}>{split.name}</Text>
 
-      <NestableScrollContainer
+      <DraggableFlatList
+        key={`workout-exercises:${dragListVersion}`}
+        data={draft.exercises}
+        keyExtractor={(exercise) => exercise.key}
+        renderItem={renderPickedExercise}
+        extraData={exerciseSearch}
+        onDragBegin={(index) => {
+          clearDragReleaseWatchdog();
+          dragActiveRef.current = true;
+          dragFromRef.current = index;
+          dragToRef.current = index;
+          setExerciseSearch(null);
+        }}
+        onPlaceholderIndexChange={(index) => {
+          dragToRef.current = index;
+        }}
+        onRelease={armDragReleaseWatchdog}
+        onDragEnd={({ from, to }) => {
+          clearDragReleaseWatchdog();
+          dragActiveRef.current = false;
+          dragFromRef.current = null;
+          dragToRef.current = null;
+          if (from === to) return;
+          tick();
+          setDraft((previous) => ({
+            ...previous,
+            exercises: reorderWorkoutDraftExercises(previous.exercises, from, to),
+          }));
+        }}
+        activationDistance={1}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
+        containerStyle={styles.editorList}
         contentContainerStyle={styles.listContent}
-      >
-        {error && <Text style={styles.error}>{error}</Text>}
-        <View style={styles.fieldRow}>
-          <Glass style={styles.nameField}>
-            <TextInput
-              accessibilityLabel="Workout name"
-              value={draft.name}
-              onChangeText={(name) => setDraft((previous) => ({ ...previous, name }))}
-              placeholder="Workout name"
-              placeholderTextColor={theme.textDim}
-              style={styles.input}
-            />
-          </Glass>
-          <Glass style={styles.dayField}>
-            <Text style={styles.dayPrefix}>Day</Text>
-            <TextInput
-              accessibilityLabel="Workout day"
-              value={dayText}
-              onChangeText={(value) => {
-                const parsed = parseWorkoutDayInput(value);
-                setDayText(parsed.text);
-                setDraft((previous) => ({
-                  ...previous,
-                  dayNumber: parsed.dayNumber,
-                }));
-              }}
-              keyboardType="number-pad"
-              maxLength={1}
-              selectTextOnFocus
-              style={styles.dayInput}
-            />
-          </Glass>
-        </View>
+        ListHeaderComponent={
+          <>
+            {error && <Text style={styles.error}>{error}</Text>}
+            <View style={styles.fieldRow}>
+              <Glass style={styles.nameField}>
+                <TextInput
+                  accessibilityLabel="Workout name"
+                  value={draft.name}
+                  onChangeText={(name) => setDraft((previous) => ({ ...previous, name }))}
+                  placeholder="Workout name"
+                  placeholderTextColor={theme.textDim}
+                  style={styles.input}
+                />
+              </Glass>
+              <Glass style={styles.dayField}>
+                <Text style={styles.dayPrefix}>Day</Text>
+                <TextInput
+                  accessibilityLabel="Workout day"
+                  value={dayText}
+                  onChangeText={(value) => {
+                    const parsed = parseWorkoutDayInput(value);
+                    setDayText(parsed.text);
+                    setDraft((previous) => ({
+                      ...previous,
+                      dayNumber: parsed.dayNumber,
+                    }));
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={1}
+                  selectTextOnFocus
+                  style={styles.dayInput}
+                />
+              </Glass>
+            </View>
 
-        <Text style={styles.sectionLabel}>Exercises</Text>
-        {draft.exercises.length === 0 && (
-          <Glass style={styles.restNotice}>
-            <Text style={styles.restNoticeTitle}>Rest</Text>
-          </Glass>
-        )}
-        <NestableDraggableFlatList
-          data={draft.exercises}
-          keyExtractor={(exercise) => exercise.key}
-          renderItem={renderPickedExercise}
-          onDragEnd={({ from, to }) => {
-            if (from === to) return;
-            tick();
-            setDraft((previous) => ({
-              ...previous,
-              exercises: reorderWorkoutDraftExercises(previous.exercises, from, to),
-            }));
-          }}
-          activationDistance={8}
-          scrollEnabled={false}
-        />
-
-        <Text style={[styles.sectionLabel, styles.addLabel]}>Add exercises</Text>
-        <Glass style={styles.searchField}>
-          <TextInput
-            accessibilityLabel="Search exercises"
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search exercises"
-            placeholderTextColor={theme.textDim}
-            autoCorrect={false}
-            style={styles.input}
-          />
-        </Glass>
-        {!search.trim() && catalog.length === 0 && (
-          <Text style={styles.catalogHint}>Search the exercise catalog to add your first movement.</Text>
-        )}
-        <FlatList
-          data={catalog}
-          keyExtractor={(item) => item.id}
-          nestedScrollEnabled
-          keyboardShouldPersistTaps="handled"
-          initialNumToRender={20}
-          maxToRenderPerBatch={20}
-          windowSize={5}
-          style={search.trim() ? styles.catalogList : undefined}
-          scrollEnabled={Boolean(search.trim())}
-          renderItem={({ item }) => (
-            <Pressable style={styles.catalogRow} onPress={() => addExercise(item)}>
-              <Text style={styles.catalogName}>{item.name}</Text>
-              <Text style={styles.catalogAdd}>+</Text>
-            </Pressable>
-          )}
-        />
-      </NestableScrollContainer>
+            <Text style={styles.sectionLabel}>Exercises</Text>
+            {draft.exercises.length === 0 && (
+              <Glass style={styles.restNotice}>
+                <Text style={styles.restNoticeTitle}>Rest</Text>
+              </Glass>
+            )}
+          </>
+        }
+        ListFooterComponent={
+          <View>
+            <Text style={[styles.sectionLabel, styles.addLabel]}>Add exercises</Text>
+            <Glass style={styles.searchField}>
+              <TextInput
+                accessibilityLabel="Search exercises"
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search exercises"
+                placeholderTextColor={theme.textDim}
+                autoCorrect={false}
+                style={styles.input}
+              />
+            </Glass>
+            {!search.trim() && catalog.length === 0 && (
+              <Text style={styles.catalogHint}>
+                Search the exercise catalog to add your first movement.
+              </Text>
+            )}
+            {catalog.map((item) => (
+              <Pressable
+                key={item.id}
+                style={styles.catalogRow}
+                onPress={() => addExercise(item)}
+              >
+                <Text style={styles.catalogName}>{item.name}</Text>
+                <Text style={styles.catalogAdd}>+</Text>
+              </Pressable>
+            ))}
+          </View>
+        }
+      />
       <DeleteConfirmationModal
         visible={deleteConfirmOpen}
         title="Delete workout day?"
@@ -432,6 +556,7 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.35 },
   title: { color: theme.text, fontSize: 28, fontWeight: '700' },
   splitName: { color: theme.accent, fontSize: 12, fontWeight: '700', marginTop: 5, marginBottom: 20 },
+  editorList: { flex: 1 },
   error: { color: '#E27878', fontSize: 12, lineHeight: 17, marginBottom: 12 },
   fieldRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
   nameField: { flex: 1, borderRadius: 16, paddingHorizontal: 14 },
@@ -484,11 +609,49 @@ const styles = StyleSheet.create({
   dragHandle: { paddingHorizontal: 2, paddingVertical: 7 },
   dragHandleText: { color: theme.textDim, fontSize: 22, lineHeight: 17, fontWeight: '700' },
   dragHandleActive: { color: theme.accent },
-  pickedName: { color: theme.text, fontSize: 14, lineHeight: 19, flex: 1, minWidth: 0 },
+  pickedNameField: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 10,
+    paddingHorizontal: 9,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  pickedNameInput: {
+    flex: 1,
+    minWidth: 0,
+    color: theme.text,
+    fontSize: 14,
+    lineHeight: 19,
+    paddingVertical: 7,
+  },
+  pickedSearchIcon: { color: theme.textDim, fontSize: 16, marginLeft: 5 },
   setControls: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   setButton: { color: theme.text, fontSize: 18, width: 18, textAlign: 'center' },
   setValue: { color: theme.text, fontSize: 13, minWidth: 26, textAlign: 'center' },
   remove: { color: theme.textDim, fontSize: 14 },
+  replacementResults: {
+    marginTop: 7,
+    marginLeft: 34,
+    borderRadius: 11,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(12,18,14,0.96)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.border,
+  },
+  replacementRow: {
+    minHeight: 39,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.border,
+  },
+  replacementName: { flex: 1, color: theme.text, fontSize: 13 },
+  replacementAction: { color: theme.accent, fontSize: 11, fontWeight: '700' },
+  noReplacement: { color: theme.textDim, fontSize: 12, paddingVertical: 12 },
   profileRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -528,7 +691,6 @@ const styles = StyleSheet.create({
   },
   catalogName: { color: theme.text, fontSize: 15 },
   catalogAdd: { color: theme.accent, fontSize: 20, fontWeight: '600' },
-  catalogList: { maxHeight: 360 },
   catalogHint: { color: theme.textDim, fontSize: 12, lineHeight: 17, paddingVertical: 12 },
   listContent: { paddingBottom: 40 },
 });

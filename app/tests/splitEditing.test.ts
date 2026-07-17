@@ -4,6 +4,7 @@ import {
   normalizeResistanceProfile,
   parseWorkoutDayInput,
   reorderWorkoutDraftExercises,
+  replaceWorkoutDraftExercise,
   splitWithWorkoutDraft,
   workoutDraftError,
   workoutDraftFromSession,
@@ -69,6 +70,29 @@ describe('workout split editing', () => {
 
     expect(reordered.map((item) => item.name)).toEqual(['Barbell Row', 'Bench Press']);
     expect(draft.exercises.map((item) => item.name)).toEqual(['Bench Press', 'Barbell Row']);
+  });
+
+  it('swaps a row exercise while preserving its key, set count, and position', () => {
+    const draft = workoutDraftFromSession('split-1', split().sessions[0]);
+    draft.exercises[0].sets = 5;
+
+    const replaced = replaceWorkoutDraftExercise(draft.exercises, 'ex-1', {
+      name: 'Incline Dumbbell Press',
+      unilateral: true,
+      resistanceProfile: 'ascending',
+    });
+
+    expect(replaced.map((item) => item.name)).toEqual([
+      'Incline Dumbbell Press',
+      'Barbell Row',
+    ]);
+    expect(replaced[0]).toMatchObject({
+      key: 'ex-1',
+      sets: 5,
+      unilateral: true,
+      resistanceProfile: 'ascending',
+    });
+    expect(draft.exercises[0].name).toBe('Bench Press');
   });
 
   it('hydrates exercises in persisted order', () => {
