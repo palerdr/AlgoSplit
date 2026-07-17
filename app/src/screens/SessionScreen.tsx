@@ -562,8 +562,13 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     }))
   );
 
+  // Count the not-yet-committed set so the label is stable across the commit:
+  // once the pending set lands, `current` itself is whatever comes after rest.
+  const setsDone = current
+    ? current.completedSets.length + (pendingSetRef.current ? 1 : 0)
+    : 0;
   const nextUp = current
-    ? current.completedSets.length + 1 < current.targetSets
+    ? setsDone < current.targetSets
       ? current.exercise.name
       : view.exercises[view.currentIndex + 1]?.exercise.name ?? null
     : null;
