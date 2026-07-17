@@ -58,7 +58,7 @@ export default function ResetPasswordScreen({ token, onDone }: ResetPasswordScre
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <FadeIn>
+      <FadeIn style={styles.cardWrap}>
         <Glass style={styles.card}>
           <Text style={styles.brand}>AlgoSplit</Text>
           <Text style={styles.title}>{complete ? 'Password updated' : 'Choose a new password'}</Text>
@@ -121,7 +121,9 @@ export default function ResetPasswordScreen({ token, onDone }: ResetPasswordScre
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.bg, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  card: { width: '100%', maxWidth: 420, borderRadius: 28, padding: 24 },
+  // FadeIn needs a concrete width — see AuthScreen.cardWrap.
+  cardWrap: { width: '100%', maxWidth: 420 },
+  card: { width: '100%', borderRadius: 28, padding: 24 },
   brand: { color: theme.accent, fontSize: 13, fontWeight: '800', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 24 },
   title: { color: theme.text, fontSize: 28, fontWeight: '700', marginBottom: 8 },
   body: { color: theme.textDim, fontSize: 13, lineHeight: 19, marginBottom: 22 },

@@ -105,7 +105,7 @@ export default function AuthScreen() {
   if (account.status === 'unconfigured') {
     return (
       <View style={styles.container}>
-        <FadeIn>
+        <FadeIn style={styles.cardWrap}>
           <Glass style={styles.card}>
             <Text style={styles.brand}>AlgoSplit</Text>
             <Text style={styles.title}>Backend not configured</Text>
@@ -121,7 +121,7 @@ export default function AuthScreen() {
   if (account.status === 'error') {
     return (
       <View style={styles.container}>
-        <FadeIn>
+        <FadeIn style={styles.cardWrap}>
           <Glass style={styles.card}>
             <Text style={styles.brand}>AlgoSplit</Text>
             <Text style={styles.title}>Account connection failed</Text>
@@ -142,7 +142,7 @@ export default function AuthScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <FadeIn>
+      <FadeIn style={styles.cardWrap}>
         <Glass style={styles.card}>
           <Text style={styles.brand}>AlgoSplit</Text>
           <Text style={styles.title}>
@@ -310,9 +310,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 14,
   },
-  card: {
+  // FadeIn needs a concrete width: inside the centered container it would
+  // otherwise auto-size, making the card's width:'100%' resolve to the longest
+  // unwrapped text line and overflow the screen.
+  cardWrap: {
     width: '100%',
     maxWidth: 420,
+  },
+  card: {
+    width: '100%',
     borderRadius: 28,
     padding: 24,
   },
