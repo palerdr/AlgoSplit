@@ -72,6 +72,22 @@ jobs:
       - name: Compute short commit SHA for email subjects
         run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
 
+      # Build-cadence telemetry for the notification emails: how many pipeline
+      # runs (i.e. build attempts) happened today and this month. Documents
+      # usage next to every success/failure so quota-style surprises are
+      # visible in the inbox, not just in dashboards. Never fails the build.
+      - name: Count pipeline runs today and this month
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TODAY=$(date -u +%Y-%m-%dT00:00:00Z)
+          MONTH=$(date -u +%Y-%m-01T00:00:00Z)
+          BUILDS_TODAY=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/testflight.yml/runs" -f "created=>=${TODAY}" -F per_page=1 --jq '.total_count' || echo '?')
+          BUILDS_MONTH=$(gh api -X GET "repos/${GITHUB_REPOSITORY}/actions/workflows/testflight.yml/runs" -f "created=>=${MONTH}" -F per_page=1 --jq '.total_count' || echo '?')
+          echo "BUILDS_TODAY=${BUILDS_TODAY}" >> "$GITHUB_ENV"
+          echo "BUILDS_MONTH=${BUILDS_MONTH}" >> "$GITHUB_ENV"
+
       - name: Email contributors that a build started
         if: ${{ env.GMAIL_APP_PASSWORD != '' }}
         continue-on-error: true
@@ -90,6 +106,7 @@ jobs:
 
             ${{ github.event.head_commit.message }}
 
+            Build ${{ env.BUILDS_TODAY }} today · ${{ env.BUILDS_MONTH }} this month
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
       - name: Build and submit to TestFlight
@@ -119,4 +136,5 @@ jobs:
 
             ${{ github.event.head_commit.message }}
 
+            Build ${{ env.BUILDS_TODAY }} today · ${{ env.BUILDS_MONTH }} this month
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
