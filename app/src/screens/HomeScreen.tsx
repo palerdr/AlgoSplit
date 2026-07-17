@@ -15,6 +15,7 @@ import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle } from 'react-native-svg';
 import BodyHeatmap from '../3d/BodyHeatmap';
+import FireIcon from '../ui/FireIcon';
 import Glass from '../ui/Glass';
 import { levelsFromNet, stimulusScore } from '../analysis/stimulus';
 import { useAppState } from '../state/AppState';
@@ -711,9 +712,14 @@ export default function HomeScreen({
                               <View style={styles.planTitleRow}>
                                 <Text style={styles.cardTitle}>{group.name}</Text>
                                 {isActive ? (
-                                  <Text style={styles.activeTag}>
-                                    {activeStreak > 0 ? `🔥 ${activeStreak}` : 'ACTIVE'}
-                                  </Text>
+                                  activeStreak > 0 ? (
+                                    <View style={styles.activeStreakRow}>
+                                      <FireIcon size={13} />
+                                      <Text style={styles.activeTag}>{activeStreak}</Text>
+                                    </View>
+                                  ) : (
+                                    <Text style={styles.activeTag}>ACTIVE</Text>
+                                  )
                                 ) : (
                                   <Text style={styles.planSplit}>›</Text>
                                 )}
@@ -1096,6 +1102,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.5,
+  },
+  activeStreakRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   lastRow: {
     flexDirection: 'row',
