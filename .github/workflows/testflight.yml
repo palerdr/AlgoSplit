@@ -65,6 +65,9 @@ jobs:
         run: npm ci
         working-directory: app
 
+      - name: Compute short commit SHA for email subjects
+        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
       - name: Email contributors that a build started
         if: ${{ env.GMAIL_APP_PASSWORD != '' }}
         continue-on-error: true
@@ -77,7 +80,7 @@ jobs:
           password: ${{ env.GMAIL_APP_PASSWORD }}
           from: AlgoSplit CI
           to: ${{ env.NOTIFY_RECIPIENTS }}
-          subject: '🏗 AlgoSplit: main updated, new build started'
+          subject: 'AlgoSplit commit ${{ env.SHORT_SHA }} building...'
           body: |
             main was updated by ${{ github.actor }} — a TestFlight rebuild is underway.
 
@@ -104,7 +107,7 @@ jobs:
           password: ${{ env.GMAIL_APP_PASSWORD }}
           from: AlgoSplit CI
           to: ${{ env.NOTIFY_RECIPIENTS }}
-          subject: "${{ steps.build.outcome == 'success' && '✅ AlgoSplit: new build on TestFlight' || '❌ AlgoSplit: TestFlight build failed' }}"
+          subject: "AlgoSplit commit ${{ env.SHORT_SHA }} ${{ steps.build.outcome == 'success' && 'updated in TestFlight' || 'build failed' }}"
           body: |
             ${{ steps.build.outcome == 'success' && 'The new build is submitted — open TestFlight to update the app once Apple finishes processing (usually a few minutes).' || 'The build failed — logs:' }}
 
