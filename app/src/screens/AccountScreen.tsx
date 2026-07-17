@@ -426,6 +426,15 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
           </Glass>
         </FadeIn>
 
+        <FadeIn delay={160}>
+          <Glass style={styles.card}>
+            <Text style={styles.cardTitle}>Credits</Text>
+            <Text style={styles.body}>
+              Animal silhouettes by game-icons.net contributors, licensed CC BY 3.0.
+            </Text>
+          </Glass>
+        </FadeIn>
+
         <FadeIn delay={180}>
           <Glass style={styles.card}>
             <Text style={styles.cardTitle}>Active sessions</Text>
