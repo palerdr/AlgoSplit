@@ -215,9 +215,9 @@ export default function WorkoutEditor({
           <View style={styles.pickedMainRow}>
             <Pressable
               accessibilityLabel={`Reorder ${exercise.name}`}
-              onLongPress={drag}
+              accessibilityHint="Press and drag to move this exercise"
+              onPressIn={drag}
               onPressOut={armDragReleaseWatchdog}
-              delayLongPress={160}
               hitSlop={8}
               style={styles.dragHandle}
             >
@@ -438,7 +438,7 @@ export default function WorkoutEditor({
             exercises: reorderWorkoutDraftExercises(previous.exercises, from, to),
           }));
         }}
-        activationDistance={8}
+        activationDistance={1}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         containerStyle={styles.editorList}
