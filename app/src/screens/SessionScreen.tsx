@@ -1049,10 +1049,10 @@ const styles = StyleSheet.create({
   },
   wheelStar: {
     position: 'absolute',
-    right: 10,
-    color: theme.accent,
-    fontSize: 11,
-    opacity: 0.85,
+    right: 17,
+    color: '#7FA98C',
+    fontSize: 9,
+    opacity: 0.65,
   },
   shadowHint: {
     color: theme.textDim,
