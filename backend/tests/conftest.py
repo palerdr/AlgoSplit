@@ -23,6 +23,7 @@ os.environ.setdefault("AUTH_EXPOSE_ACCESS_TOKEN", "true")
 
 from api.dependencies import AuthUser, get_current_user
 import api.routes.auth as auth_routes
+import api.routes.session_templates as session_templates_routes
 import api.routes.splits as splits_routes
 from main import app, rate_limiter
 
@@ -273,6 +274,21 @@ class FakeTableQuery:
         count = len(matched_rows) if self._count_mode == "exact" else None
         rows = self._sort_and_limit(matched_rows)
 
+        if (
+            self.table_name == "session_templates"
+            and self._select_fields
+            and "session_template_exercises(" in self._select_fields
+        ):
+            for template in rows:
+                template["session_template_exercises"] = sorted(
+                    [
+                        copy.deepcopy(ex)
+                        for ex in self.client.tables["session_template_exercises"]
+                        if ex["template_id"] == template["id"]
+                    ],
+                    key=lambda ex: ex["order_index"],
+                )
+
         if self.table_name == "splits" and self._select_fields and "sessions(" in self._select_fields:
             for split in rows:
                 sessions = [
@@ -304,11 +320,11 @@ class FakeTableQuery:
             new_row.setdefault("id", self.client.next_id(self.table_name))
             now = _utc_now_iso()
 
-            if self.table_name in {"splits", "sessions", "workout_logs"}:
+            if self.table_name in {"splits", "sessions", "workout_logs", "session_templates"}:
                 new_row.setdefault("created_at", now)
-            if self.table_name in {"splits", "sessions"}:
+            if self.table_name in {"splits", "sessions", "session_templates"}:
                 new_row.setdefault("updated_at", now)
-            elif self.table_name in {"exercises", "workout_exercises"}:
+            elif self.table_name in {"exercises", "workout_exercises", "session_template_exercises"}:
                 new_row.setdefault("created_at", now)
 
             if self.table_name == "splits":
@@ -328,7 +344,7 @@ class FakeTableQuery:
             if not self._match_filters(row):
                 continue
             row.update(copy.deepcopy(self._update_row))
-            if self.table_name in {"splits", "sessions"}:
+            if self.table_name in {"splits", "sessions", "session_templates"}:
                 row["updated_at"] = now
             updated.append(copy.deepcopy(row))
         return updated
@@ -353,6 +369,13 @@ class FakeTableQuery:
             session_ids = {row["id"] for row in deleted}
             self.client.tables["exercises"] = [
                 ex for ex in self.client.tables["exercises"] if ex["session_id"] not in session_ids
+            ]
+        elif self.table_name == "session_templates":
+            template_ids = {row["id"] for row in deleted}
+            self.client.tables["session_template_exercises"] = [
+                ex
+                for ex in self.client.tables["session_template_exercises"]
+                if ex["template_id"] not in template_ids
             ]
         elif self.table_name == "workout_logs":
             workout_ids = {row["id"] for row in deleted}
@@ -411,6 +434,9 @@ class FakeSupabaseClient:
                 raise FakeRpcError("P0002", "split_not_found")
             session_id = params.get("p_session_id")
             day_number = params["p_day_number"]
+            # Mirrors migration 013's guard in public.save_split_session.
+            if day_number < 1 or day_number > 14:
+                raise FakeRpcError("22023", "invalid_day_number")
             if any(
                 session["split_id"] == split_id
                 and session["day_number"] == day_number
@@ -530,6 +556,9 @@ def auth_user() -> AuthUser:
 def client(monkeypatch: pytest.MonkeyPatch, fake_supabase: FakeSupabaseClient, auth_user: AuthUser):
     monkeypatch.setattr(auth_routes, "get_supabase_auth_client", lambda: fake_supabase.auth)
     monkeypatch.setattr(splits_routes, "get_supabase_client_with_token", lambda _token: fake_supabase)
+    monkeypatch.setattr(
+        session_templates_routes, "get_supabase_client_with_token", lambda _token: fake_supabase
+    )
     monkeypatch.setattr(
         splits_routes,
         "move_match_with_overrides",

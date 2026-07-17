@@ -17,7 +17,11 @@ class TemplateExerciseCreate(BaseModel):
     sets: int = Field(..., gt=0, description="Number of sets")
     order_index: int = Field(default=0, ge=0, description="Order within template")
     unilateral: bool = Field(default=False, description="Whether performed unilaterally")
-    resistance_profile: Optional[str] = Field(default=None, description="Resistance profile override")
+    resistance_profile: Optional[str] = Field(
+        default=None,
+        pattern="^(ascending|mid|descending)$",
+        description="Resistance profile override",
+    )
 
 class TemplateExerciseResponse(BaseModel):
     """Template exercise response"""
@@ -32,6 +36,12 @@ class TemplateExerciseResponse(BaseModel):
 
 class SessionTemplateCreate(BaseModel):
     """Request to create a session template"""
+    name: str = Field(..., min_length=1, max_length=200, description="Template name")
+    exercises: List[TemplateExerciseCreate] = Field(..., min_items=1, description="Exercises in template")
+    notes: Optional[str] = Field(default=None, max_length=1000)
+
+class SessionTemplateUpdate(BaseModel):
+    """Request to update a session template (full replacement of exercises)"""
     name: str = Field(..., min_length=1, max_length=200, description="Template name")
     exercises: List[TemplateExerciseCreate] = Field(..., min_items=1, description="Exercises in template")
     notes: Optional[str] = Field(default=None, max_length=1000)

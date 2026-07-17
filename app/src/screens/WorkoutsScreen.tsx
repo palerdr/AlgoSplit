@@ -1,24 +1,25 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
+  RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import type { SessionTemplateResponse } from '../api/backend';
 import { useAccountState } from '../state/AccountState';
 import {
   AccountWorkoutEditorEntry,
-  AccountWorkoutEditorGroup,
   accountWorkoutEditorGroups,
 } from '../workout/splitSessions';
-import { workoutsPrimaryCreateTarget } from '../workout/newSplitDraft';
 import { theme } from '../theme';
 import Glass from '../ui/Glass';
 import FadeIn from '../ui/FadeIn';
 import DeleteConfirmationModal from '../ui/DeleteConfirmationModal';
-import NewSplitEditor from '../components/workouts/NewSplitEditor';
+import SplitWizard from '../components/workouts/SplitWizard';
 import WorkoutEditor from '../components/workouts/WorkoutEditor';
 
 interface WorkoutsScreenProps {
@@ -26,6 +27,9 @@ interface WorkoutsScreenProps {
 }
 
 type DeleteTarget = { splitId: string; name: string };
+type Mode = 'browse' | 'newSplit' | 'sessionEditor' | 'templateEditor';
+
+const tick = () => Haptics.selectionAsync().catch(() => {});
 
 export default function WorkoutsScreen({
   onBack,
@@ -36,36 +40,59 @@ export default function WorkoutsScreen({
     [account.splits.data]
   );
   const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
-  const [mode, setMode] = useState<'browse' | 'newSplit' | 'editor'>('browse');
+  const [mode, setMode] = useState<Mode>('browse');
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingRestDay, setEditingRestDay] = useState<number | undefined>(undefined);
+  // Snapshot rather than a live cache lookup: a background refresh must not
+  // flip an in-progress edit between create and update mid-flight.
+  const [editingTemplate, setEditingTemplate] = useState<SessionTemplateResponse | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+
   const selectedGroup = groups.find((group) => group.id === selectedSplitId) ?? null;
-  const createTarget = workoutsPrimaryCreateTarget(selectedGroup?.id ?? null);
   const editingSplit = account.splits.data.find((split) => split.id === selectedSplitId) ?? null;
   const editingSession =
     editingSplit?.sessions.find((session) => session.id === editingSessionId) ?? undefined;
-  const items: Array<AccountWorkoutEditorGroup | AccountWorkoutEditorEntry> =
-    selectedGroup ? selectedGroup.sessions : groups;
 
-  const openEditor = (
+  useEffect(() => {
+    if (account.status === 'authenticated') {
+      account.ensureWorkoutTemplates();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account.status]);
+
+  // If a background refresh drops the split being edited (deleted elsewhere),
+  // leave the editor cleanly instead of stranding the mode machine.
+  useEffect(() => {
+    if (mode === 'sessionEditor' && !editingSplit) {
+      setMode('browse');
+      setEditingSessionId(null);
+      setEditingRestDay(undefined);
+    }
+  }, [mode, editingSplit]);
+
+  const openSessionEditor = (
     splitId: string,
     sessionId: string | null,
     restDay?: number
   ) => {
-    Haptics.selectionAsync().catch(() => {});
+    tick();
     setSelectedSplitId(splitId);
     setEditingSessionId(sessionId);
     setEditingRestDay(restDay);
-    setMode('editor');
+    setMode('sessionEditor');
   };
 
-  const refreshSavedSplits = async () => {
-    if (account.splits.loading) return;
-    Haptics.selectionAsync().catch(() => {});
-    await account.refreshSplits();
+  const refreshAll = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await Promise.all([account.refreshSplits(), account.refreshWorkoutTemplates()]);
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const confirmDelete = async () => {
@@ -86,7 +113,7 @@ export default function WorkoutsScreen({
 
   if (mode === 'newSplit') {
     return (
-      <NewSplitEditor
+      <SplitWizard
         onCancel={() => setMode('browse')}
         onSaved={(saved) => {
           setSelectedSplitId(saved.id);
@@ -96,13 +123,41 @@ export default function WorkoutsScreen({
     );
   }
 
-  if (mode === 'editor' && editingSplit) {
+  if (mode === 'templateEditor') {
+    return (
+      <WorkoutEditor
+        key={`template:${editingTemplate?.id ?? 'new'}`}
+        mode="template"
+        template={editingTemplate}
+        onCancel={() => {
+          setEditingTemplate(null);
+          setMode('browse');
+        }}
+        onSaved={() => {
+          setEditingTemplate(null);
+          setMode('browse');
+        }}
+        onDelete={
+          editingTemplate
+            ? async () => {
+                await account.deleteWorkoutTemplate(editingTemplate.id);
+                setEditingTemplate(null);
+                setMode('browse');
+              }
+            : undefined
+        }
+      />
+    );
+  }
+
+  if (mode === 'sessionEditor' && editingSplit) {
     return (
       <WorkoutEditor
         key={`${editingSplit.id}:${editingSessionId ?? `new:${editingRestDay ?? 'open'}`}`}
+        mode="session"
         split={editingSplit}
         session={editingSession}
-        initialRestDay={editingRestDay}
+        initialDay={editingRestDay}
         onCancel={() => {
           setEditingSessionId(null);
           setEditingRestDay(undefined);
@@ -128,35 +183,29 @@ export default function WorkoutsScreen({
     );
   }
 
-  return (
-    <View style={styles.container}>
-      <View style={styles.topRow}>
-        <Pressable
-          onPress={() => {
-            if (selectedGroup) {
-              Haptics.selectionAsync().catch(() => {});
+  if (selectedGroup) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.topRow}>
+          <Pressable
+            onPress={() => {
+              tick();
               setDeleteTarget(null);
               setActionError(null);
               setSelectedSplitId(null);
-            } else {
-              onBack();
-            }
-          }}
-          hitSlop={8}
-          style={styles.backWrap}
-        >
-          <Glass style={styles.backChip} interactive>
-            <Text style={styles.backText}>
-              {selectedGroup ? '‹ Workouts' : '‹ Home'}
-            </Text>
-          </Glass>
-        </Pressable>
-        {selectedGroup && (
+            }}
+            hitSlop={8}
+            style={styles.backWrap}
+          >
+            <Glass style={styles.backChip} interactive>
+              <Text style={styles.backText}>‹ Workouts</Text>
+            </Glass>
+          </Pressable>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Delete ${selectedGroup.name} split`}
             onPress={() => {
-              Haptics.selectionAsync().catch(() => {});
+              tick();
               setActionError(null);
               setDeleteTarget({ splitId: selectedGroup.id, name: selectedGroup.name });
             }}
@@ -166,121 +215,45 @@ export default function WorkoutsScreen({
               <Text style={styles.headerDeleteText}>Delete</Text>
             </Glass>
           </Pressable>
-        )}
-      </View>
-      <Text style={styles.title}>{selectedGroup?.name ?? 'Workouts'}</Text>
+        </View>
+        <Text style={styles.title}>{selectedGroup.name}</Text>
 
-      <FlatList
-        data={items}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={
-          <View>
-            <FadeIn>
-              <View style={styles.accountRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.accountLabel}>
-                    {selectedGroup ? 'Workout days' : 'Saved splits'}
-                  </Text>
-                  <Text style={styles.accountEmail}>{account.user?.email}</Text>
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Refresh saved splits"
-                  onPress={refreshSavedSplits}
-                  disabled={account.splits.loading}
-                  hitSlop={8}
-                >
-                  <Text style={[styles.refresh, account.splits.loading && styles.refreshing]}>
-                    {account.splits.loading ? 'Refreshing…' : 'Refresh'}
-                  </Text>
-                </Pressable>
-              </View>
-            </FadeIn>
-            {mode === 'browse' && (
-              <FadeIn delay={45}>
-                <Pressable
-                  onPress={() => {
-                    if (createTarget === 'workout' && selectedGroup) {
-                      openEditor(selectedGroup.id, null);
-                    } else {
-                      Haptics.selectionAsync().catch(() => {});
-                      setMode('newSplit');
-                    }
-                  }}
-                >
+        <FlatList
+          data={selectedGroup.sessions}
+          keyExtractor={(item) => item.id}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={refreshAll}
+              tintColor={theme.textDim}
+            />
+          }
+          ListHeaderComponent={
+            <View>
+              <FadeIn>
+                <Pressable onPress={() => openSessionEditor(selectedGroup.id, null)}>
                   <Glass style={styles.newBtn} interactive>
-                    <Text style={styles.newBtnText}>
-                      {createTarget === 'workout' ? '+ New workout' : '+ New split'}
-                    </Text>
+                    <Text style={styles.newBtnText}>+ New workout</Text>
                   </Glass>
                 </Pressable>
               </FadeIn>
-            )}
-            {account.splits.loading && !account.splits.loaded && (
-              <Glass style={styles.newBtn} interactive>
-                <Text style={styles.noticeText}>Loading your saved workouts…</Text>
-              </Glass>
-            )}
-            {account.splits.error && (
-              <Pressable onPress={account.refreshSplits}>
-                <Glass style={styles.notice} interactive>
-                  <Text style={styles.errorText}>Saved workouts could not load.</Text>
-                  <Text style={styles.noticeText}>Tap to retry. Demo plans were not substituted.</Text>
-                </Glass>
-              </Pressable>
-            )}
-            {account.splits.loaded && !account.splits.error && items.length === 0 && (
-              <Glass style={styles.notice}>
-                <Text style={styles.noticeText}>
-                  {selectedGroup
-                    ? 'This split has no workout days yet.'
-                    : 'No saved splits yet. Create a split and it will appear here.'}
-                </Text>
-              </Glass>
-            )}
-          </View>
-        }
-        renderItem={({ item, index }) => (
-          <FadeIn delay={(index + 1) * 45}>
-            {'sessions' in item ? (
-              <Glass style={styles.nameRow} interactive>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`Open ${item.name} split`}
-                  onPress={() => {
-                    Haptics.selectionAsync().catch(() => {});
-                    setDeleteTarget(null);
-                    setActionError(null);
-                    setSelectedSplitId(item.id);
-                  }}
-                  style={styles.openRow}
-                >
-                  <View style={styles.rowCopy}>
-                    <Text style={styles.nameRowText}>{item.name}</Text>
-                    <Text style={styles.rowMeta} numberOfLines={1}>
-                      {item.sessions.filter((session) => session.kind === 'workout').length} workout{' '}
-                      {item.sessions.filter((session) => session.kind === 'workout').length === 1
-                        ? 'day'
-                        : 'days'}
-                      {item.cycleLength ? ` · ${item.cycleLength}-day cycle` : ''}
-                      {item.sessions.filter((session) => session.kind === 'workout').length > 0
-                        ? ` · ${item.sessions
-                            .filter((session) => session.kind === 'workout')
-                            .map((session) => session.name)
-                            .join(' · ')}`
-                        : ''}
-                    </Text>
-                  </View>
-                  <Text style={styles.chevron}>›</Text>
-                </Pressable>
-              </Glass>
-            ) : (
+              {account.splits.loaded &&
+                !account.splits.error &&
+                selectedGroup.sessions.length === 0 && (
+                  <Glass style={styles.notice}>
+                    <Text style={styles.noticeText}>This split has no workout days yet.</Text>
+                  </Glass>
+                )}
+            </View>
+          }
+          renderItem={({ item, index }) => (
+            <FadeIn delay={(index + 1) * 45}>
               <Glass style={styles.nameRow} interactive>
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={`Edit ${item.name}`}
                   onPress={() =>
-                    openEditor(
+                    openSessionEditor(
                       item.splitId,
                       item.sessionId,
                       item.kind === 'rest' && item.synthetic ? item.dayNumber : undefined
@@ -303,27 +276,197 @@ export default function WorkoutsScreen({
                   <Text style={styles.chevron}>›</Text>
                 </Pressable>
               </Glass>
-            )}
-          </FadeIn>
-        )}
-        contentContainerStyle={{ paddingBottom: 40 }}
-      />
-      <DeleteConfirmationModal
-        visible={deleteTarget !== null}
-        title="Delete split?"
-        message={
-          deleteTarget
-            ? `“${deleteTarget.name}” and all of its workout days will be permanently deleted.`
-            : ''
+            </FadeIn>
+          )}
+          contentContainerStyle={{ paddingBottom: 40 }}
+        />
+        <DeleteConfirmationModal
+          visible={deleteTarget !== null}
+          title="Delete split?"
+          message={
+            deleteTarget
+              ? `“${deleteTarget.name}” and all of its workout days will be permanently deleted.`
+              : ''
+          }
+          busy={deleting}
+          error={actionError}
+          onCancel={() => {
+            setDeleteTarget(null);
+            setActionError(null);
+          }}
+          onConfirm={confirmDelete}
+        />
+      </View>
+    );
+  }
+
+  const templates = account.workoutTemplates;
+  const splits = account.splits;
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.topRow}>
+        <Pressable onPress={onBack} hitSlop={8} style={styles.backWrap}>
+          <Glass style={styles.backChip} interactive>
+            <Text style={styles.backText}>‹ Home</Text>
+          </Glass>
+        </Pressable>
+      </View>
+      <Text style={styles.title}>Workouts and Splits</Text>
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refreshAll}
+            tintColor={theme.textDim}
+          />
         }
-        busy={deleting}
-        error={actionError}
-        onCancel={() => {
-          setDeleteTarget(null);
-          setActionError(null);
-        }}
-        onConfirm={confirmDelete}
-      />
+        contentContainerStyle={{ paddingBottom: 40 }}
+      >
+        <FadeIn>
+          <Text style={styles.sectionLabel}>Workouts</Text>
+        </FadeIn>
+        <FadeIn delay={30}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Create a new workout"
+            onPress={() => {
+              tick();
+              setEditingTemplate(null);
+              setMode('templateEditor');
+            }}
+          >
+            <Glass style={styles.newBtn} interactive>
+              <Text style={styles.newBtnText}>+ New workout</Text>
+            </Glass>
+          </Pressable>
+        </FadeIn>
+        {templates.loading && !templates.loaded && (
+          <Glass style={styles.notice}>
+            <Text style={styles.noticeText}>Loading your saved workouts…</Text>
+          </Glass>
+        )}
+        {templates.error && (
+          <Pressable onPress={account.refreshWorkoutTemplates}>
+            <Glass style={styles.notice} interactive>
+              <Text style={styles.errorText}>Saved workouts could not load.</Text>
+              <Text style={styles.noticeText}>Tap to retry.</Text>
+            </Glass>
+          </Pressable>
+        )}
+        {templates.loaded && !templates.error && templates.data.length === 0 && (
+          <Glass style={styles.notice}>
+            <Text style={styles.noticeText}>
+              No saved workouts yet. Create one and it will appear here.
+            </Text>
+          </Glass>
+        )}
+        {templates.data.map((template: SessionTemplateResponse, index) => (
+          <FadeIn key={template.id} delay={(index + 2) * 30}>
+            <Glass style={styles.nameRow} interactive>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${template.name}`}
+                onPress={() => {
+                  tick();
+                  setEditingTemplate(template);
+                  setMode('templateEditor');
+                }}
+                style={styles.openRow}
+              >
+                <View style={styles.rowCopy}>
+                  <Text style={styles.nameRowText}>{template.name}</Text>
+                  <Text style={styles.rowMeta} numberOfLines={1}>
+                    {template.exercises.length}{' '}
+                    {template.exercises.length === 1 ? 'exercise' : 'exercises'}
+                    {template.exercises.length > 0
+                      ? ` · ${template.exercises
+                          .map((exercise) => exercise.exercise_name)
+                          .join(' · ')}`
+                      : ''}
+                  </Text>
+                </View>
+                <Text style={styles.chevron}>›</Text>
+              </Pressable>
+            </Glass>
+          </FadeIn>
+        ))}
+
+        <FadeIn delay={60}>
+          <Text style={[styles.sectionLabel, styles.splitsLabel]}>Splits</Text>
+        </FadeIn>
+        <FadeIn delay={90}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Create a new split"
+            onPress={() => {
+              tick();
+              setMode('newSplit');
+            }}
+          >
+            <Glass style={styles.newBtn} interactive>
+              <Text style={styles.newBtnText}>+ New split</Text>
+            </Glass>
+          </Pressable>
+        </FadeIn>
+        {splits.loading && !splits.loaded && (
+          <Glass style={styles.notice}>
+            <Text style={styles.noticeText}>Loading your saved splits…</Text>
+          </Glass>
+        )}
+        {splits.error && (
+          <Pressable onPress={account.refreshSplits}>
+            <Glass style={styles.notice} interactive>
+              <Text style={styles.errorText}>Saved splits could not load.</Text>
+              <Text style={styles.noticeText}>Tap to retry. Demo plans were not substituted.</Text>
+            </Glass>
+          </Pressable>
+        )}
+        {splits.loaded && !splits.error && groups.length === 0 && (
+          <Glass style={styles.notice}>
+            <Text style={styles.noticeText}>
+              No saved splits yet. Create a split and it will appear here.
+            </Text>
+          </Glass>
+        )}
+        {groups.map((group, index) => {
+          const workoutDays = group.sessions.filter(
+            (session: AccountWorkoutEditorEntry) => session.kind === 'workout'
+          );
+          return (
+            <FadeIn key={group.id} delay={(index + 4) * 30}>
+              <Glass style={styles.nameRow} interactive>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${group.name} split`}
+                  onPress={() => {
+                    tick();
+                    setDeleteTarget(null);
+                    setActionError(null);
+                    setSelectedSplitId(group.id);
+                  }}
+                  style={styles.openRow}
+                >
+                  <View style={styles.rowCopy}>
+                    <Text style={styles.nameRowText}>{group.name}</Text>
+                    <Text style={styles.rowMeta} numberOfLines={1}>
+                      {workoutDays.length} workout{' '}
+                      {workoutDays.length === 1 ? 'day' : 'days'}
+                      {group.cycleLength ? ` · ${group.cycleLength}-day cycle` : ''}
+                      {workoutDays.length > 0
+                        ? ` · ${workoutDays.map((session) => session.name).join(' · ')}`
+                        : ''}
+                    </Text>
+                  </View>
+                  <Text style={styles.chevron}>›</Text>
+                </Pressable>
+              </Glass>
+            </FadeIn>
+          );
+        })}
+      </ScrollView>
     </View>
   );
 }
@@ -334,17 +477,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.bg,
     paddingTop: 64,
     paddingHorizontal: 24,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  back: {
-    color: theme.textDim,
-    fontSize: 15,
-    marginBottom: 16,
   },
   backWrap: {
     alignSelf: 'flex-start',
@@ -370,6 +502,17 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '700',
     marginBottom: 20,
+  },
+  sectionLabel: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+  splitsLabel: {
+    marginTop: 22,
   },
   newBtn: {
     borderRadius: 20,
@@ -415,145 +558,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  card: {
-    borderRadius: 20,
-    padding: 18,
-    marginBottom: 14,
-  },
-  exerciseLine: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  exerciseLineBorder: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.09)',
-  },
-  exerciseName: {
-    color: theme.text,
-    fontSize: 15,
-  },
-  sets: {
-    color: theme.textDim,
-    fontSize: 13,
-    fontVariant: ['tabular-nums'],
-  },
-  saveBtn: {
-    borderRadius: 17,
-    paddingVertical: 9,
-    paddingHorizontal: 18,
-  },
-  saveText: {
-    color: theme.accent,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  nameField: {
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
-  nameInput: {
-    color: theme.text,
-    fontSize: 17,
-    paddingVertical: 14,
-  },
-  pickedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    marginBottom: 8,
-    gap: 10,
-  },
-  pickedName: {
-    color: theme.text,
-    fontSize: 15,
-    fontWeight: '500',
-    flex: 1,
-  },
-  setsControl: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  setsBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  setsBtnText: {
-    color: theme.text,
-    fontSize: 17,
-    lineHeight: 19,
-  },
-  setsValue: {
-    color: theme.text,
-    fontSize: 14,
-    fontVariant: ['tabular-nums'],
-    minWidth: 26,
-    textAlign: 'center',
-  },
-  removeX: {
-    color: theme.textDim,
-    fontSize: 15,
-    paddingHorizontal: 2,
-  },
-  sectionLabel: {
-    color: theme.textDim,
-    fontSize: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginTop: 10,
-    marginBottom: 8,
-  },
-  catalogRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 13,
-    borderBottomColor: theme.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  catalogName: {
-    color: theme.text,
-    fontSize: 16,
-  },
-  catalogPlus: {
-    color: theme.accent,
-    fontSize: 20,
-    fontWeight: '600',
-  },
-  accountRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    marginBottom: 16,
-  },
-  accountLabel: {
-    color: theme.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  accountEmail: {
-    color: theme.textDim,
-    fontSize: 11,
-    marginTop: 3,
-  },
-  refresh: {
-    color: theme.accent,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  refreshing: {
-    color: theme.textDim,
-  },
   notice: {
     borderRadius: 18,
     padding: 16,
@@ -579,12 +583,6 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     justifyContent: 'space-between',
     gap: 12,
-  },
-  splitName: {
-    color: theme.accent,
-    fontSize: 11,
-    fontWeight: '600',
-    flexShrink: 1,
   },
   dayLabel: {
     color: theme.accent,

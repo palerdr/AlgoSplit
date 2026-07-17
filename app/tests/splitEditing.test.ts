@@ -1,12 +1,21 @@
-import type { ExerciseResponse, SessionResponse, SplitResponse } from '../src/api/backend';
+import type {
+  ExerciseResponse,
+  SessionResponse,
+  SessionTemplateResponse,
+  SplitResponse,
+} from '../src/api/backend';
 import {
   newWorkoutDraft,
   normalizeResistanceProfile,
   parseWorkoutDayInput,
   reorderWorkoutDraftExercises,
+  splitDayLimit,
   splitWithWorkoutDraft,
   workoutDraftError,
   workoutDraftFromSession,
+  workoutDraftFromTemplate,
+  workoutDraftFromWizard,
+  workoutDraftToTemplateCreate,
 } from '../src/workout/splitEditing';
 
 function exercise(id: string, name: string, order: number): ExerciseResponse {
@@ -63,6 +72,17 @@ describe('workout split editing', () => {
     expect(parseWorkoutDayInput('Day 4')).toEqual({ text: '4', dayNumber: 4 });
   });
 
+  it('accepts two-digit days for long cycles', () => {
+    expect(parseWorkoutDayInput('Day 12')).toEqual({ text: '12', dayNumber: 12 });
+    expect(parseWorkoutDayInput('123')).toEqual({ text: '12', dayNumber: 12 });
+  });
+
+  it('derives the day limit from the cycle length', () => {
+    expect(splitDayLimit(split())).toBe(4);
+    expect(splitDayLimit({ ...split(), cycle_length: null })).toBe(7);
+    expect(splitDayLimit({ ...split(), cycle_length: 99 })).toBe(14);
+  });
+
   it('reorders exercises by drag indices without mutating the source', () => {
     const draft = workoutDraftFromSession('split-1', split().sessions[0]);
     const reordered = reorderWorkoutDraftExercises(draft.exercises, 0, 1);
@@ -75,7 +95,7 @@ describe('workout split editing', () => {
     const draft = workoutDraftFromSession('split-1', split().sessions[0]);
 
     expect(draft.exercises.map((item) => item.name)).toEqual(['Bench Press', 'Barbell Row']);
-    expect(draft.exercises.map((item) => item.resistanceProfile)).toEqual(['mid', 'mid']);
+    expect(draft.exercises.map((item) => item.resistanceProfile)).toEqual([null, null]);
     expect(normalizeResistanceProfile('descending')).toBe('descending');
   });
 
@@ -107,7 +127,7 @@ describe('workout split editing', () => {
       name: 'Upper Revised',
       day_number: 1,
       exercises: [
-        { name: 'Barbell Row', sets: 4, unilateral: false, resistance_profile: 'mid' },
+        { name: 'Barbell Row', sets: 4, unilateral: false, resistance_profile: null },
         { name: 'Lateral Raise', sets: 3, unilateral: false, resistance_profile: 'ascending' },
       ],
     });
@@ -136,25 +156,113 @@ describe('workout split editing', () => {
     ]);
   });
 
-  it('prefills an interior automatic rest sentinel for manual persistence', () => {
+  it('prefills the tapped rest day without naming the draft', () => {
     const draft = newWorkoutDraft(split(), 2);
 
     expect(draft).toMatchObject({
-      name: 'Rest',
+      name: '',
       dayNumber: 2,
       exercises: [],
     });
-    expect(workoutDraftError(split(), draft)).toBeNull();
   });
 
-  it('rejects duplicate days but permits empty rest sentinels', () => {
+  it('requires a name and at least one exercise', () => {
+    const source = split();
+    const draft = newWorkoutDraft(source);
+
+    expect(workoutDraftError(source, draft)).toBe('Enter a workout name.');
+    draft.name = 'Arms';
+    expect(workoutDraftError(source, draft)).toBe('Add at least one exercise.');
+    draft.exercises = [
+      { key: 'new:curl', name: 'Barbell Curl', sets: 3, unilateral: false, resistanceProfile: 'mid' },
+    ];
+    expect(workoutDraftError(source, draft)).toBeNull();
+  });
+
+  it('rejects duplicate days and days beyond the cycle length', () => {
     const source = split();
     const draft = newWorkoutDraft(source);
     draft.name = 'Duplicate';
+    draft.exercises = [
+      { key: 'new:curl', name: 'Barbell Curl', sets: 3, unilateral: false, resistanceProfile: 'mid' },
+    ];
     draft.dayNumber = 1;
 
     expect(workoutDraftError(source, draft)).toBe('Day 1 already has a workout in this split.');
+    draft.dayNumber = 5;
+    expect(workoutDraftError(source, draft)).toBe('Day must be a whole number from 1 through 4.');
     draft.dayNumber = 2;
     expect(workoutDraftError(source, draft)).toBeNull();
+  });
+
+  it('skips day validation without a split (standalone and wizard drafts)', () => {
+    const draft = workoutDraftFromWizard({
+      name: 'Push',
+      exercises: [{ name: 'Bench Press', sets: 4, unilateral: false, resistance_profile: 'mid' }],
+    });
+    draft.dayNumber = Number.NaN;
+
+    expect(workoutDraftError(null, draft)).toBeNull();
+    expect(draft.exercises.map((item) => item.name)).toEqual(['Bench Press']);
+  });
+
+  it('round-trips a saved workout template through a draft', () => {
+    const template: SessionTemplateResponse = {
+      id: 'template-1',
+      user_id: 'user-1',
+      name: 'Pull',
+      source_session_id: null,
+      source_split_id: null,
+      notes: null,
+      exercises: [
+        {
+          id: 'tex-2',
+          template_id: 'template-1',
+          exercise_name: 'Lat Pulldown',
+          sets: 3,
+          order_index: 1,
+          unilateral: false,
+          resistance_profile: 'ascending',
+          created_at: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 'tex-1',
+          template_id: 'template-1',
+          exercise_name: 'Barbell Row',
+          sets: 4,
+          order_index: 0,
+          unilateral: false,
+          resistance_profile: null,
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+
+    const draft = workoutDraftFromTemplate(template);
+    expect(draft.name).toBe('Pull');
+    expect(draft.exercises.map((item) => item.name)).toEqual(['Barbell Row', 'Lat Pulldown']);
+    expect(draft.exercises.map((item) => item.resistanceProfile)).toEqual([null, 'ascending']);
+
+    expect(workoutDraftToTemplateCreate(draft)).toEqual({
+      name: 'Pull',
+      exercises: [
+        {
+          exercise_name: 'Barbell Row',
+          sets: 4,
+          order_index: 0,
+          unilateral: false,
+          resistance_profile: null,
+        },
+        {
+          exercise_name: 'Lat Pulldown',
+          sets: 3,
+          order_index: 1,
+          unilateral: false,
+          resistance_profile: 'ascending',
+        },
+      ],
+    });
   });
 });

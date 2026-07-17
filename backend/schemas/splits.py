@@ -67,7 +67,7 @@ class SessionCreate(BaseModel):
     """Session to be added to a split"""
 
     name: str = Field(..., min_length=1, description="Session name (e.g., 'Push Day')")
-    day_number: int = Field(..., ge=1, le=7, description="Day number in the weekly cycle (1-7)")
+    day_number: int = Field(..., ge=1, le=14, description="Day number in the split cycle (1-14)")
     exercises: List[ExerciseCreate] = Field(
         default_factory=list,
         description="Exercises in this session; empty sessions are non-executable rest days",
@@ -126,7 +126,7 @@ class SplitCreate(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=200, description="Split name")
     cycle_length: Optional[int] = Field(
-        default=None, ge=1, le=7, description="Cycle length in days (max 7; auto-calculated from sessions if not provided)"
+        default=None, ge=1, le=14, description="Cycle length in days (max 14, matching the analysis engine; auto-calculated from sessions if not provided)"
     )
     stimulus_duration: int = Field(
         default=48, gt=0, description="Hours of elevated protein synthesis"
@@ -176,7 +176,7 @@ class SplitUpdate(BaseModel):
     """Request to update an existing split"""
 
     name: Optional[str] = Field(None, min_length=1, max_length=200)
-    cycle_length: Optional[int] = Field(None, ge=1, le=7)
+    cycle_length: Optional[int] = Field(None, ge=1, le=14)
     # Bounds match SplitRequest (the analysis endpoint). Previously these only
     # had lower guards (stimulus gt=0, maintenance ge=0), so a value the analysis
     # would later reject (e.g. stimulus 999) could be persisted here and then

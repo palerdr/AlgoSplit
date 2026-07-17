@@ -6,8 +6,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, status
 from db.supabase import get_supabase_client_with_token
 from schemas.programs import (
-    SessionTemplateCreate, SessionTemplateResponse, SessionTemplateListResponse,
-    TemplateExerciseResponse, CreateTemplateFromSession,
+    SessionTemplateCreate, SessionTemplateUpdate, SessionTemplateResponse,
+    SessionTemplateListResponse, TemplateExerciseResponse, CreateTemplateFromSession,
 )
 from schemas.auth import ErrorResponse
 from api.dependencies import get_current_user, AuthUser
@@ -156,6 +156,66 @@ async def get_template(template_id: str, current_user: AuthUser = Depends(get_cu
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get template: {str(e)}")
+
+
+@router.put("/{template_id}", response_model=SessionTemplateResponse)
+async def update_template(
+    template_id: str,
+    template: SessionTemplateUpdate,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """Replace a template's name, notes, and exercises."""
+    try:
+        supabase = get_supabase_client_with_token(current_user.access_token)
+
+        # A manual edit severs any link to the source split session; otherwise
+        # the split-save background sync would clobber the user's changes.
+        template_result = supabase.table("session_templates").update({
+            "name": template.name,
+            "notes": template.notes,
+            "source_session_id": None,
+            "source_split_id": None,
+        }).eq("id", template_id).execute()
+
+        if not template_result.data:
+            raise HTTPException(status_code=404, detail="Template not found")
+
+        template_record = template_result.data[0]
+
+        stale_result = (
+            supabase.table("session_template_exercises")
+            .select("id")
+            .eq("template_id", template_id)
+            .execute()
+        )
+        stale_ids = [row["id"] for row in stale_result.data or []]
+
+        exercise_rows = [
+            {
+                "template_id": template_id,
+                "exercise_name": ex.exercise_name,
+                "sets": ex.sets,
+                "order_index": idx if ex.order_index == 0 else ex.order_index,
+                "unilateral": ex.unilateral,
+                "resistance_profile": ex.resistance_profile,
+            }
+            for idx, ex in enumerate(template.exercises)
+        ]
+
+        # Insert replacements before deleting the old rows so a mid-way failure
+        # never leaves the template without exercises (no transaction across
+        # PostgREST calls).
+        ex_result = supabase.table("session_template_exercises").insert(exercise_rows).execute()
+        if stale_ids:
+            supabase.table("session_template_exercises").delete().in_(
+                "id", stale_ids
+            ).execute()
+        template_record["session_template_exercises"] = ex_result.data or []
+        return build_template_response(template_record)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update template: {str(e)}")
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -123,6 +123,67 @@ def test_replace_split_rewrites_sessions_and_exercises(client):
     assert body["sessions"][0]["exercises"][0]["exercise_name"] == "Romanian Deadlift"
 
 
+def test_split_cycles_up_to_fourteen_days_are_accepted(client):
+    payload = _create_payload("Long Cycle")
+    payload["cycle_length"] = 14
+    payload["sessions"] = [
+        payload["sessions"][0],
+        {**payload["sessions"][1], "day_number": 9},
+        {
+            "name": "Finisher",
+            "day_number": 14,
+            "exercises": [{"name": "Back Squat", "sets": 3}],
+        },
+    ]
+
+    create_resp = client.post("/api/splits", json=payload)
+    assert create_resp.status_code == 201
+    body = create_resp.json()
+    assert body["cycle_length"] == 14
+    assert [session["day_number"] for session in body["sessions"]] == [1, 9, 14]
+
+    analysis_resp = client.post(f"/api/splits/{body['id']}/analyze")
+    assert analysis_resp.status_code == 200
+
+
+def test_single_session_saves_accept_days_8_through_14(client):
+    create_resp = client.post("/api/splits", json=_create_payload("Session Cycle"))
+    split_id = create_resp.json()["id"]
+
+    create_session = client.post(
+        f"/api/splits/{split_id}/sessions",
+        json={
+            "name": "Deload",
+            "day_number": 12,
+            "exercises": [{"name": "Back Squat", "sets": 2}],
+        },
+    )
+    assert create_session.status_code in (200, 201)
+    session = create_session.json()
+    assert session["day_number"] == 12
+
+    move_resp = client.put(
+        f"/api/splits/{split_id}/sessions/{session['id']}",
+        json={
+            "name": "Deload",
+            "day_number": 14,
+            "exercises": [{"name": "Back Squat", "sets": 2}],
+        },
+    )
+    assert move_resp.status_code == 200
+    assert move_resp.json()["day_number"] == 14
+
+
+def test_split_days_beyond_fourteen_are_rejected(client):
+    payload = _create_payload("Too Long")
+    payload["sessions"][1]["day_number"] = 15
+    assert client.post("/api/splits", json=payload).status_code == 422
+
+    payload = _create_payload("Cycle Too Long")
+    payload["cycle_length"] = 15
+    assert client.post("/api/splits", json=payload).status_code == 422
+
+
 def test_empty_rest_session_persists_and_analyzes_as_non_training_day(client):
     payload = _create_payload("Rest Sentinel")
     payload["cycle_length"] = 3
@@ -237,15 +298,6 @@ def test_batch_update_exercise_accepts_custom_exercise_name(monkeypatch, client)
     split_resp = client.get(f"/api/splits/{split_id}")
     assert split_resp.status_code == 200
     assert split_resp.json()["sessions"][0]["exercises"][0]["exercise_name"] == "My Custom Cable Fly"
-
-
-def test_create_split_rejects_day_above_7(client):
-    payload = _create_payload("Weekly Cap")
-    payload["sessions"][0]["day_number"] = 8
-
-    response = client.post("/api/splits", json=payload)
-
-    assert response.status_code == 422
 
 
 def test_analyze_saved_split_uses_custom_exercise_overrides(monkeypatch, client):

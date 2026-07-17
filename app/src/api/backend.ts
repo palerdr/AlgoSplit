@@ -1512,6 +1512,13 @@ export interface SessionTemplateCreate {
   notes?: string | null;
 }
 
+/** schemas/programs.py — body of PUT /api/session-templates/{id}. */
+export interface SessionTemplateUpdate {
+  name: string;
+  exercises: TemplateExerciseCreate[];
+  notes?: string | null;
+}
+
 /** schemas/programs.py:39 — one session template. */
 export interface SessionTemplateResponse {
   id: string;
@@ -2385,6 +2392,15 @@ export const sessionTemplates = {
     return request<SessionTemplateResponse>(
       'GET',
       `/api/session-templates/${encodeURIComponent(templateId)}`
+    );
+  },
+
+  /** PUT /api/session-templates/{id} — replace a template's name, notes, and exercises. */
+  update(templateId: string, template: SessionTemplateUpdate): Promise<SessionTemplateResponse> {
+    return request<SessionTemplateResponse>(
+      'PUT',
+      `/api/session-templates/${encodeURIComponent(templateId)}`,
+      template
     );
   },
 

@@ -1,5 +1,15 @@
-import React, { useMemo, useRef, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import * as Haptics from 'expo-haptics';
 import {
   NestableDraggableFlatList,
@@ -7,7 +17,11 @@ import {
   RenderItemParams,
   ScaleDecorator,
 } from 'react-native-draggable-flatlist';
-import type { SessionCreate, SessionResponse, SplitResponse } from '../../api/backend';
+import type {
+  SessionResponse,
+  SessionTemplateResponse,
+  SplitResponse,
+} from '../../api/backend';
 import { EXERCISES, type Exercise } from '../../data/exercises';
 import { useAccountState } from '../../state/AccountState';
 import { theme } from '../../theme';
@@ -19,30 +33,45 @@ import {
   newWorkoutDraft,
   parseWorkoutDayInput,
   reorderWorkoutDraftExercises,
-  workoutDraftToSessionCreate,
+  splitDayLimit,
   workoutDraftError,
   workoutDraftFromSession,
+  workoutDraftFromTemplate,
+  workoutDraftFromWizard,
+  workoutDraftToSessionCreate,
+  workoutDraftToTemplateCreate,
 } from '../../workout/splitEditing';
+import type { WizardWorkout } from '../../workout/splitWizard';
 
-interface WorkoutEditorBaseProps {
-  split: SplitResponse;
-  session?: SessionResponse;
-  initialRestDay?: number;
+/**
+ * One editor, three destinations:
+ * - 'session': a day inside a saved split (persists via the splits API; has a Day field)
+ * - 'template': a standalone saved workout (persists via the session-templates API)
+ * - 'wizard': an in-memory workout being placed on a split-wizard day (no API call)
+ */
+type WorkoutEditorTarget =
+  | {
+      mode: 'session';
+      split: SplitResponse;
+      session?: SessionResponse;
+      initialDay?: number;
+      onSaved: (split: SplitResponse) => void;
+    }
+  | {
+      mode: 'template';
+      template: SessionTemplateResponse | null;
+      onSaved: (template: SessionTemplateResponse) => void;
+    }
+  | {
+      mode: 'wizard';
+      initialWorkout: WizardWorkout | null;
+      onSaved: (workout: WizardWorkout) => void;
+    };
+
+type WorkoutEditorProps = WorkoutEditorTarget & {
   onCancel: () => void;
   onDelete?: () => Promise<void> | void;
-}
-
-type WorkoutEditorProps = WorkoutEditorBaseProps &
-  (
-    | {
-        onSaved: (split: SplitResponse) => void;
-        onDraftSaved?: never;
-      }
-    | {
-        onSaved?: never;
-        onDraftSaved: (sessionId: string | null, session: SessionCreate) => void;
-      }
-  );
+};
 
 const tick = () => Haptics.selectionAsync().catch(() => {});
 const RESISTANCE_PROFILES = [
@@ -51,35 +80,60 @@ const RESISTANCE_PROFILES = [
   { value: 'descending', label: 'Desc' },
 ] as const;
 
-export default function WorkoutEditor({
-  split,
-  session,
-  initialRestDay,
-  onCancel,
-  onSaved,
-  onDraftSaved,
-  onDelete,
-}: WorkoutEditorProps) {
+export default function WorkoutEditor(props: WorkoutEditorProps) {
+  const { onCancel, onDelete } = props;
   const account = useAccountState();
   const nextKey = useRef(0);
   const savingRef = useRef(false);
-  const [draft, setDraft] = useState<WorkoutDraft>(() =>
-    session
-      ? workoutDraftFromSession(split.id, session)
-      : newWorkoutDraft(split, initialRestDay)
-  );
+  const [draft, setDraft] = useState<WorkoutDraft>(() => {
+    if (props.mode === 'session') {
+      return props.session
+        ? workoutDraftFromSession(props.split.id, props.session)
+        : newWorkoutDraft(props.split, props.initialDay);
+    }
+    if (props.mode === 'template') return workoutDraftFromTemplate(props.template);
+    return workoutDraftFromWizard(props.initialWorkout);
+  });
   const [dayText, setDayText] = useState(() => String(draft.dayNumber));
   const [search, setSearch] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const editingExisting =
+    props.mode === 'session'
+      ? Boolean(props.session)
+      : props.mode === 'template'
+        ? Boolean(props.template)
+        : Boolean(props.initialWorkout);
+  const subtitle =
+    props.mode === 'session'
+      ? props.split.name
+      : props.mode === 'template'
+        ? 'Saved workout'
+        : 'For this split';
+
+  // The empty-query "recents" rail needs logged-workout names; only Details
+  // screens load summaries otherwise.
+  useEffect(() => {
+    if (account.status === 'authenticated') {
+      account.ensureWorkoutSummaries();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account.status]);
 
   const catalog = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
     if (!query) {
       const recentNames = account.workoutSummaries.data.workouts
         .flatMap((workout) => workout.exercise_names)
+        .concat(
+          account.workoutTemplates.data.flatMap((template) =>
+            template.exercises.map((exercise) => exercise.exercise_name)
+          )
+        )
         .concat(
           account.splits.data.flatMap((savedSplit) =>
             savedSplit.sessions.flatMap((savedSession) =>
@@ -99,7 +153,21 @@ export default function WorkoutEditor({
         .slice(0, 20);
     }
     return EXERCISES.filter((exercise) => exercise.name.toLocaleLowerCase().includes(query));
-  }, [account.splits.data, account.workoutSummaries.data.workouts, search]);
+  }, [
+    account.splits.data,
+    account.workoutSummaries.data.workouts,
+    account.workoutTemplates.data,
+    search,
+  ]);
+
+  const pickedCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const exercise of draft.exercises) {
+      const key = exercise.name.toLocaleLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [draft.exercises]);
 
   const updateExercise = (index: number, update: Partial<WorkoutDraftExercise>) => {
     setDraft((previous) => ({
@@ -113,6 +181,7 @@ export default function WorkoutEditor({
   const addExercise = (exercise: Exercise) => {
     tick();
     nextKey.current += 1;
+    setError(null);
     setDraft((previous) => ({
       ...previous,
       exercises: [
@@ -220,7 +289,10 @@ export default function WorkoutEditor({
 
   const save = async () => {
     if (savingRef.current) return;
-    const validation = workoutDraftError(split, draft);
+    const validation = workoutDraftError(
+      props.mode === 'session' ? props.split : null,
+      draft
+    );
     if (validation) {
       setError(validation);
       return;
@@ -229,20 +301,28 @@ export default function WorkoutEditor({
     setSaving(true);
     setError(null);
     try {
-      const sessionCreate = workoutDraftToSessionCreate(draft);
-      if (onDraftSaved) {
-        onDraftSaved(draft.sessionId, sessionCreate);
+      if (props.mode === 'wizard') {
+        const session = workoutDraftToSessionCreate(draft);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        props.onSaved({ name: session.name, exercises: session.exercises });
         return;
       }
-      if (!onSaved) throw new Error('Workout editor is missing a save destination.');
+      if (props.mode === 'template') {
+        const payload = workoutDraftToTemplateCreate(draft);
+        const saved = props.template
+          ? await account.updateWorkoutTemplate(props.template.id, payload)
+          : await account.createWorkoutTemplate(payload);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+        props.onSaved(saved);
+        return;
+      }
       const saved = await account.saveSplitSession(
-        split.id,
+        props.split.id,
         draft.sessionId,
-        sessionCreate
+        workoutDraftToSessionCreate(draft)
       );
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      onSaved(saved);
+      props.onSaved(saved);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Workout could not be saved.');
     } finally {
@@ -259,7 +339,7 @@ export default function WorkoutEditor({
       await onDelete();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Workout day could not be deleted.');
+      setError(cause instanceof Error ? cause.message : 'Workout could not be deleted.');
     } finally {
       setDeleting(false);
     }
@@ -275,7 +355,7 @@ export default function WorkoutEditor({
           {onDelete && (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={`Delete ${draft.name || 'workout day'}`}
+              accessibilityLabel={`Delete ${draft.name || 'workout'}`}
               onPress={() => {
                 tick();
                 setError(null);
@@ -298,8 +378,8 @@ export default function WorkoutEditor({
         </View>
       </View>
 
-      <Text style={styles.title}>{session ? 'Edit Workout' : 'New Workout'}</Text>
-      <Text style={styles.splitName}>{split.name}</Text>
+      <Text style={styles.title}>{editingExisting ? 'Edit Workout' : 'New Workout'}</Text>
+      <Text style={styles.splitName}>{subtitle}</Text>
 
       <NestableScrollContainer
         keyboardShouldPersistTaps="handled"
@@ -315,35 +395,38 @@ export default function WorkoutEditor({
               onChangeText={(name) => setDraft((previous) => ({ ...previous, name }))}
               placeholder="Workout name"
               placeholderTextColor={theme.textDim}
+              maxLength={200}
               style={styles.input}
             />
           </Glass>
-          <Glass style={styles.dayField}>
-            <Text style={styles.dayPrefix}>Day</Text>
-            <TextInput
-              accessibilityLabel="Workout day"
-              value={dayText}
-              onChangeText={(value) => {
-                const parsed = parseWorkoutDayInput(value);
-                setDayText(parsed.text);
-                setDraft((previous) => ({
-                  ...previous,
-                  dayNumber: parsed.dayNumber,
-                }));
-              }}
-              keyboardType="number-pad"
-              maxLength={1}
-              selectTextOnFocus
-              style={styles.dayInput}
-            />
-          </Glass>
+          {props.mode === 'session' && (
+            <Glass style={styles.dayField}>
+              <Text style={styles.dayPrefix}>Day</Text>
+              <TextInput
+                accessibilityLabel="Workout day"
+                value={dayText}
+                onChangeText={(value) => {
+                  const parsed = parseWorkoutDayInput(value);
+                  setDayText(parsed.text);
+                  setDraft((previous) => ({
+                    ...previous,
+                    dayNumber: parsed.dayNumber,
+                  }));
+                }}
+                keyboardType="number-pad"
+                maxLength={splitDayLimit(props.split) > 9 ? 2 : 1}
+                selectTextOnFocus
+                style={styles.dayInput}
+              />
+            </Glass>
+          )}
         </View>
 
         <Text style={styles.sectionLabel}>Exercises</Text>
         {draft.exercises.length === 0 && (
-          <Glass style={styles.restNotice}>
-            <Text style={styles.restNoticeTitle}>Rest</Text>
-          </Glass>
+          <Text style={styles.catalogHint}>
+            No exercises yet. Every workout needs at least one.
+          </Text>
         )}
         <NestableDraggableFlatList
           data={draft.exercises}
@@ -361,43 +444,96 @@ export default function WorkoutEditor({
           scrollEnabled={false}
         />
 
-        <Text style={[styles.sectionLabel, styles.addLabel]}>Add exercises</Text>
-        <Glass style={styles.searchField}>
-          <TextInput
-            accessibilityLabel="Search exercises"
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search exercises"
-            placeholderTextColor={theme.textDim}
-            autoCorrect={false}
-            style={styles.input}
-          />
-        </Glass>
-        {!search.trim() && catalog.length === 0 && (
-          <Text style={styles.catalogHint}>Search the exercise catalog to add your first movement.</Text>
-        )}
-        <FlatList
-          data={catalog}
-          keyExtractor={(item) => item.id}
-          nestedScrollEnabled
-          keyboardShouldPersistTaps="handled"
-          initialNumToRender={20}
-          maxToRenderPerBatch={20}
-          windowSize={5}
-          style={search.trim() ? styles.catalogList : undefined}
-          scrollEnabled={Boolean(search.trim())}
-          renderItem={({ item }) => (
-            <Pressable style={styles.catalogRow} onPress={() => addExercise(item)}>
-              <Text style={styles.catalogName}>{item.name}</Text>
-              <Text style={styles.catalogAdd}>+</Text>
-            </Pressable>
-          )}
-        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Add exercises"
+          onPress={() => {
+            tick();
+            setPickerOpen(true);
+          }}
+        >
+          <Glass style={styles.addButton} interactive>
+            <Text style={styles.addButtonText}>+ Add exercises</Text>
+          </Glass>
+        </Pressable>
       </NestableScrollContainer>
+
+      <Modal
+        visible={pickerOpen}
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setPickerOpen(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.pickerContainer}
+        >
+          <View style={styles.pickerHeader}>
+            <Text style={styles.pickerTitle}>Add exercises</Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Done adding exercises"
+              onPress={() => {
+                tick();
+                setSearch('');
+                setPickerOpen(false);
+              }}
+              hitSlop={8}
+            >
+              <Glass style={styles.pickerDone} interactive>
+                <Text style={styles.pickerDoneText}>Done</Text>
+              </Glass>
+            </Pressable>
+          </View>
+          <Glass style={styles.searchField}>
+            <TextInput
+              accessibilityLabel="Search exercises"
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search exercises"
+              placeholderTextColor={theme.textDim}
+              autoCorrect={false}
+              autoFocus
+              style={styles.input}
+            />
+          </Glass>
+          {!search.trim() && (
+            <Text style={styles.pickerSectionLabel}>
+              {catalog.length > 0 ? 'Recent' : 'Search the catalog to add your first movement.'}
+            </Text>
+          )}
+          <FlatList
+            data={catalog}
+            keyExtractor={(item) => item.id}
+            keyboardShouldPersistTaps="always"
+            keyboardDismissMode="none"
+            initialNumToRender={20}
+            maxToRenderPerBatch={20}
+            windowSize={5}
+            renderItem={({ item }) => {
+              const added = pickedCounts.get(item.name.toLocaleLowerCase()) ?? 0;
+              return (
+                <Pressable style={styles.catalogRow} onPress={() => addExercise(item)}>
+                  <Text style={styles.catalogName}>{item.name}</Text>
+                  <View style={styles.catalogRight}>
+                    {added > 0 && (
+                      <Text style={styles.catalogAdded}>
+                        {added === 1 ? 'Added' : `Added ×${added}`}
+                      </Text>
+                    )}
+                    <Text style={styles.catalogAdd}>+</Text>
+                  </View>
+                </Pressable>
+              );
+            }}
+          />
+        </KeyboardAvoidingView>
+      </Modal>
+
       <DeleteConfirmationModal
         visible={deleteConfirmOpen}
-        title="Delete workout day?"
-        message={`“${draft.name || 'This workout day'}” will be permanently deleted.`}
+        title="Delete workout?"
+        message={`“${draft.name || 'This workout'}” will be permanently deleted.`}
         busy={deleting}
         error={deleteConfirmOpen ? error : null}
         onCancel={() => {
@@ -453,17 +589,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 9,
   },
-  restNotice: {
-    borderRadius: 14,
-    paddingVertical: 11,
-    paddingHorizontal: 13,
-    marginBottom: 10,
-  },
-  restNoticeTitle: {
-    color: theme.accent,
-    fontSize: 12,
-    fontWeight: '700',
-  },
   pickedRow: {
     backgroundColor: 'rgba(255,255,255,0.07)',
     borderRadius: 14,
@@ -516,8 +641,38 @@ const styles = StyleSheet.create({
   profilePillActive: { backgroundColor: 'rgba(65,196,110,0.18)' },
   profileText: { color: theme.textDim, fontSize: 11, fontWeight: '700' },
   profileTextActive: { color: theme.accent },
-  searchField: { borderRadius: 16, paddingHorizontal: 14, marginBottom: 8 },
-  addLabel: { marginTop: 12 },
+  addButton: {
+    borderRadius: 16,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  addButtonText: { color: theme.accent, fontSize: 15, fontWeight: '700' },
+  pickerContainer: {
+    flex: 1,
+    backgroundColor: theme.bg,
+    paddingTop: 64,
+    paddingHorizontal: 24,
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  pickerTitle: { color: theme.text, fontSize: 22, fontWeight: '700' },
+  pickerDone: { borderRadius: 17, paddingVertical: 8, paddingHorizontal: 16 },
+  pickerDoneText: { color: theme.accent, fontSize: 14, fontWeight: '700' },
+  pickerSectionLabel: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginTop: 14,
+    marginBottom: 4,
+  },
+  searchField: { borderRadius: 16, paddingHorizontal: 14 },
   catalogRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -526,9 +681,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.border,
   },
-  catalogName: { color: theme.text, fontSize: 15 },
+  catalogName: { color: theme.text, fontSize: 15, flex: 1, marginRight: 12 },
+  catalogRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  catalogAdded: { color: theme.accent, fontSize: 12, fontWeight: '700' },
   catalogAdd: { color: theme.accent, fontSize: 20, fontWeight: '600' },
-  catalogList: { maxHeight: 360 },
   catalogHint: { color: theme.textDim, fontSize: 12, lineHeight: 17, paddingVertical: 12 },
   listContent: { paddingBottom: 40 },
 });

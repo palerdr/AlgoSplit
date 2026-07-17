@@ -14,6 +14,9 @@ import {
   AnalysisResponse,
   AuthIdentity,
   SessionCreate,
+  SessionTemplateCreate,
+  SessionTemplateResponse,
+  SessionTemplateUpdate,
   SocialProvider,
   SplitCreate,
   SplitResponse,
@@ -26,6 +29,7 @@ import {
   authErrorMessageForDisplay,
   analysis,
   backendConfigured,
+  sessionTemplates as sessionTemplatesApi,
   splits as splitsApi,
   workouts as workoutsApi,
 } from '../api/backend';
@@ -83,6 +87,7 @@ interface AccountState {
   clearAuthReturnScreen: () => void;
   identities: RemoteResource<AuthIdentity[]>;
   splits: RemoteResource<SplitResponse[]>;
+  workoutTemplates: RemoteResource<SessionTemplateResponse[]>;
   workoutRanges: Record<string, RemoteResource<WorkoutLogResponse[]>>;
   workoutOverview: RemoteResource<WorkoutOverviewPoint[]>;
   workoutSummaries: RemoteResource<WorkoutSummaryListResponse>;
@@ -115,6 +120,14 @@ interface AccountState {
     session: SessionCreate
   ) => Promise<SplitResponse>;
   deleteSplitSession: (splitId: string, sessionId: string) => Promise<SplitResponse>;
+  ensureWorkoutTemplates: () => Promise<void>;
+  refreshWorkoutTemplates: () => Promise<void>;
+  createWorkoutTemplate: (template: SessionTemplateCreate) => Promise<SessionTemplateResponse>;
+  updateWorkoutTemplate: (
+    templateId: string,
+    template: SessionTemplateUpdate
+  ) => Promise<SessionTemplateResponse>;
+  deleteWorkoutTemplate: (templateId: string) => Promise<void>;
   ensureWorkouts: (days?: number) => Promise<void>;
   refreshWorkouts: (days?: number) => Promise<void>;
   ensureWorkoutOverview: () => Promise<void>;
@@ -134,6 +147,7 @@ function emptyResource<T>(data: T): RemoteResource<T> {
 }
 
 const EMPTY_SPLITS = emptyResource<SplitResponse[]>([]);
+const EMPTY_WORKOUT_TEMPLATES = emptyResource<SessionTemplateResponse[]>([]);
 const EMPTY_STIMULUS = emptyResource<AnalysisResponse | null>(null);
 const EMPTY_OVERVIEW = emptyResource<WorkoutOverviewPoint[]>([]);
 const EMPTY_SUMMARIES = emptyResource<WorkoutSummaryListResponse>({ workouts: [], total: 0 });
@@ -184,6 +198,9 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   const [authReturnScreen, setAuthReturnScreen] = useState<AuthReturnScreen | null>(null);
   const [identityResource, setIdentityResource] = useState(EMPTY_IDENTITIES);
   const [splitResource, setSplitResource] = useState(EMPTY_SPLITS);
+  const [workoutTemplateResource, setWorkoutTemplateResource] = useState(
+    EMPTY_WORKOUT_TEMPLATES
+  );
   const [workoutRanges, setWorkoutRanges] = useState<
     Record<string, RemoteResource<WorkoutLogResponse[]>>
   >({});
@@ -202,6 +219,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   const [analysisPreferencesReady, setAnalysisPreferencesReady] = useState(false);
 
   const splitRef = useRef(splitResource);
+  const workoutTemplatesRef = useRef(workoutTemplateResource);
   const rangesRef = useRef(workoutRanges);
   const overviewRef = useRef(workoutOverview);
   const summariesRef = useRef(workoutSummaries);
@@ -210,6 +228,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   const stimulusRef = useRef(recentStimulus);
   const identitiesRef = useRef(identityResource);
   splitRef.current = splitResource;
+  workoutTemplatesRef.current = workoutTemplateResource;
   rangesRef.current = workoutRanges;
   overviewRef.current = workoutOverview;
   summariesRef.current = workoutSummaries;
@@ -220,6 +239,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
 
   const generationRef = useRef(0);
   const splitInFlight = useRef<Promise<void> | null>(null);
+  const workoutTemplatesInFlight = useRef<Promise<void> | null>(null);
   const workoutInFlight = useRef(new Map<string, Promise<void>>());
   const overviewInFlight = useRef<Promise<void> | null>(null);
   const summariesInFlight = useRef<Promise<void> | null>(null);
@@ -233,6 +253,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   const clearRemoteData = useCallback(() => {
     generationRef.current += 1;
     splitInFlight.current = null;
+    workoutTemplatesInFlight.current = null;
     workoutInFlight.current.clear();
     overviewInFlight.current = null;
     summariesInFlight.current = null;
@@ -243,6 +264,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     deletedWorkoutIdsRef.current.clear();
     clearSplitAnalysisCache();
     setSplitResource(EMPTY_SPLITS);
+    setWorkoutTemplateResource(EMPTY_WORKOUT_TEMPLATES);
     setWorkoutRanges({});
     setWorkoutOverview(EMPTY_OVERVIEW);
     setWorkoutSummaries(EMPTY_SUMMARIES);
@@ -362,6 +384,123 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   );
   const ensureSplits = useCallback(() => loadSplits(false), [loadSplits]);
   const refreshSplits = useCallback(() => loadSplits(true), [loadSplits]);
+
+  const loadWorkoutTemplates = useCallback(
+    (force: boolean): Promise<void> => {
+      if (!force && isFresh(workoutTemplatesRef.current)) return Promise.resolve();
+      if (workoutTemplatesInFlight.current) return workoutTemplatesInFlight.current;
+      const generation = generationRef.current;
+      setWorkoutTemplateResource((previous) => ({ ...previous, loading: true, error: null }));
+      const promise = sessionTemplatesApi
+        .list()
+        .then((response) => {
+          if (generation !== generationRef.current) return;
+          setWorkoutTemplateResource({
+            data: response.templates,
+            loading: false,
+            loaded: true,
+            error: null,
+            fetchedAt: Date.now(),
+          });
+        })
+        .catch((error) => {
+          if (generation !== generationRef.current) return;
+          if (isSignedOutError(error)) return markSignedOut();
+          setWorkoutTemplateResource((previous) => ({
+            ...previous,
+            loading: false,
+            loaded: true,
+            error: messageFromError(error),
+          }));
+        })
+        .finally(() => {
+          if (workoutTemplatesInFlight.current === promise) {
+            workoutTemplatesInFlight.current = null;
+          }
+        });
+      workoutTemplatesInFlight.current = promise;
+      return promise;
+    },
+    [markSignedOut]
+  );
+  const ensureWorkoutTemplates = useCallback(
+    () => loadWorkoutTemplates(false),
+    [loadWorkoutTemplates]
+  );
+  const refreshWorkoutTemplates = useCallback(
+    () => loadWorkoutTemplates(true),
+    [loadWorkoutTemplates]
+  );
+
+  // Unlike the interactive mutations above, template saves can resolve after a
+  // logout/account switch (the wizard fires one without awaiting), so they
+  // check the generation before touching the cache.
+  const createWorkoutTemplate = useCallback(
+    async (template: SessionTemplateCreate) => {
+      const generation = generationRef.current;
+      try {
+        const saved = await sessionTemplatesApi.create(template);
+        if (generation !== generationRef.current) return saved;
+        setWorkoutTemplateResource((previous) => ({
+          data: [saved, ...previous.data.filter((candidate) => candidate.id !== saved.id)],
+          loading: false,
+          loaded: true,
+          error: null,
+          fetchedAt: Date.now(),
+        }));
+        return saved;
+      } catch (error) {
+        if (generation === generationRef.current && isSignedOutError(error)) markSignedOut();
+        throw error;
+      }
+    },
+    [markSignedOut]
+  );
+
+  const updateWorkoutTemplate = useCallback(
+    async (templateId: string, template: SessionTemplateUpdate) => {
+      const generation = generationRef.current;
+      try {
+        const saved = await sessionTemplatesApi.update(templateId, template);
+        if (generation !== generationRef.current) return saved;
+        setWorkoutTemplateResource((previous) => ({
+          data: previous.data.map((candidate) =>
+            candidate.id === templateId ? saved : candidate
+          ),
+          loading: false,
+          loaded: true,
+          error: null,
+          fetchedAt: Date.now(),
+        }));
+        return saved;
+      } catch (error) {
+        if (generation === generationRef.current && isSignedOutError(error)) markSignedOut();
+        throw error;
+      }
+    },
+    [markSignedOut]
+  );
+
+  const deleteWorkoutTemplate = useCallback(
+    async (templateId: string) => {
+      const generation = generationRef.current;
+      try {
+        await sessionTemplatesApi.remove(templateId);
+        if (generation !== generationRef.current) return;
+        setWorkoutTemplateResource((previous) => ({
+          data: previous.data.filter((candidate) => candidate.id !== templateId),
+          loading: false,
+          loaded: true,
+          error: null,
+          fetchedAt: Date.now(),
+        }));
+      } catch (error) {
+        if (generation === generationRef.current && isSignedOutError(error)) markSignedOut();
+        throw error;
+      }
+    },
+    [markSignedOut]
+  );
 
   const reusableWorkoutRange = useCallback((days?: number) => {
     if (days === undefined) return null;
@@ -1217,6 +1356,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       clearAuthReturnScreen,
       identities: identityResource,
       splits: splitResource,
+      workoutTemplates: workoutTemplateResource,
       workoutRanges,
       workoutOverview,
       workoutSummaries,
@@ -1245,6 +1385,11 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       deleteWorkout,
       saveSplitSession,
       deleteSplitSession,
+      ensureWorkoutTemplates,
+      refreshWorkoutTemplates,
+      createWorkoutTemplate,
+      updateWorkoutTemplate,
+      deleteWorkoutTemplate,
       ensureWorkouts,
       refreshWorkouts,
       ensureWorkoutOverview,
@@ -1267,6 +1412,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       clearAuthReturnScreen,
       identityResource,
       splitResource,
+      workoutTemplateResource,
       workoutRanges,
       workoutOverview,
       workoutSummaries,
@@ -1295,6 +1441,11 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       deleteWorkout,
       saveSplitSession,
       deleteSplitSession,
+      ensureWorkoutTemplates,
+      refreshWorkoutTemplates,
+      createWorkoutTemplate,
+      updateWorkoutTemplate,
+      deleteWorkoutTemplate,
       ensureWorkouts,
       refreshWorkouts,
       ensureWorkoutOverview,
