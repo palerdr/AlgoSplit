@@ -11,6 +11,7 @@ import type { SessionCreate, SessionResponse, SplitResponse } from '../../api/ba
 import { EXERCISES, type Exercise } from '../../data/exercises';
 import { useAccountState } from '../../state/AccountState';
 import { theme } from '../../theme';
+import DeleteConfirmationModal from '../../ui/DeleteConfirmationModal';
 import Glass from '../../ui/Glass';
 import {
   WorkoutDraft,
@@ -148,31 +149,9 @@ export default function WorkoutEditor({
             >
               <Text style={[styles.dragHandleText, isActive && styles.dragHandleActive]}>≡</Text>
             </Pressable>
-            <Text style={styles.pickedName} numberOfLines={1}>
+            <Text style={styles.pickedName}>
               {exercise.name}
             </Text>
-            <View style={styles.profileOptions}>
-              {RESISTANCE_PROFILES.map((profile) => {
-                const active = exercise.resistanceProfile === profile.value;
-                return (
-                  <Pressable
-                    key={profile.value}
-                    accessibilityRole="button"
-                    accessibilityLabel={`${profile.label} resistance profile`}
-                    accessibilityState={{ selected: active }}
-                    onPress={() => {
-                      tick();
-                      updateExercise(index, { resistanceProfile: profile.value });
-                    }}
-                    style={[styles.profilePill, active && styles.profilePillActive]}
-                  >
-                    <Text style={[styles.profileText, active && styles.profileTextActive]}>
-                      {profile.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
             <View style={styles.setControls}>
               <Pressable
                 onPress={() => {
@@ -208,6 +187,31 @@ export default function WorkoutEditor({
             >
               <Text style={styles.remove}>✕</Text>
             </Pressable>
+          </View>
+          <View style={styles.profileRow}>
+            <Text style={styles.profileLabel}>Resistance</Text>
+            <View style={styles.profileOptions}>
+              {RESISTANCE_PROFILES.map((profile) => {
+                const active = exercise.resistanceProfile === profile.value;
+                return (
+                  <Pressable
+                    key={profile.value}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${profile.label} resistance profile`}
+                    accessibilityState={{ selected: active }}
+                    onPress={() => {
+                      tick();
+                      updateExercise(index, { resistanceProfile: profile.value });
+                    }}
+                    style={[styles.profilePill, active && styles.profilePillActive]}
+                  >
+                    <Text style={[styles.profileText, active && styles.profileTextActive]}>
+                      {profile.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
         </View>
       </ScaleDecorator>
@@ -256,7 +260,6 @@ export default function WorkoutEditor({
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Workout day could not be deleted.');
-      setDeleteConfirmOpen(false);
     } finally {
       setDeleting(false);
     }
@@ -304,29 +307,6 @@ export default function WorkoutEditor({
         contentContainerStyle={styles.listContent}
       >
         {error && <Text style={styles.error}>{error}</Text>}
-        {deleteConfirmOpen && (
-          <Glass style={styles.deleteConfirm}>
-            <Text style={styles.deleteConfirmTitle}>Delete workout day?</Text>
-            <Text style={styles.deleteConfirmCopy}>
-              “{draft.name || 'This workout day'}” will be permanently deleted.
-            </Text>
-            <View style={styles.deleteConfirmActions}>
-              <Pressable
-                onPress={() => setDeleteConfirmOpen(false)}
-                disabled={deleting}
-                hitSlop={8}
-              >
-                <Text style={styles.deleteCancel}>Cancel</Text>
-              </Pressable>
-              <Pressable onPress={confirmDelete} disabled={deleting} hitSlop={8}>
-                <Text style={styles.deleteConfirmText}>
-                  {deleting ? 'Deleting…' : 'Delete'}
-                </Text>
-              </Pressable>
-            </View>
-          </Glass>
-        )}
-
         <View style={styles.fieldRow}>
           <Glass style={styles.nameField}>
             <TextInput
@@ -414,6 +394,18 @@ export default function WorkoutEditor({
           )}
         />
       </NestableScrollContainer>
+      <DeleteConfirmationModal
+        visible={deleteConfirmOpen}
+        title="Delete workout day?"
+        message={`“${draft.name || 'This workout day'}” will be permanently deleted.`}
+        busy={deleting}
+        error={deleteConfirmOpen ? error : null}
+        onCancel={() => {
+          setDeleteConfirmOpen(false);
+          setError(null);
+        }}
+        onConfirm={confirmDelete}
+      />
     </View>
   );
 }
@@ -441,23 +433,6 @@ const styles = StyleSheet.create({
   title: { color: theme.text, fontSize: 28, fontWeight: '700' },
   splitName: { color: theme.accent, fontSize: 12, fontWeight: '700', marginTop: 5, marginBottom: 20 },
   error: { color: '#E27878', fontSize: 12, lineHeight: 17, marginBottom: 12 },
-  deleteConfirm: { borderRadius: 16, padding: 15, marginBottom: 16 },
-  deleteConfirmTitle: { color: theme.text, fontSize: 14, fontWeight: '700' },
-  deleteConfirmCopy: {
-    color: theme.textDim,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 4,
-    marginBottom: 12,
-  },
-  deleteConfirmActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 22,
-  },
-  deleteCancel: { color: theme.textDim, fontSize: 13, fontWeight: '700' },
-  deleteConfirmText: { color: '#E27878', fontSize: 13, fontWeight: '800' },
   fieldRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
   nameField: { flex: 1, borderRadius: 16, paddingHorizontal: 14 },
   dayField: {
@@ -509,12 +484,27 @@ const styles = StyleSheet.create({
   dragHandle: { paddingHorizontal: 2, paddingVertical: 7 },
   dragHandleText: { color: theme.textDim, fontSize: 22, lineHeight: 17, fontWeight: '700' },
   dragHandleActive: { color: theme.accent },
-  pickedName: { color: theme.text, fontSize: 14, flex: 1 },
+  pickedName: { color: theme.text, fontSize: 14, lineHeight: 19, flex: 1, minWidth: 0 },
   setControls: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   setButton: { color: theme.text, fontSize: 18, width: 18, textAlign: 'center' },
   setValue: { color: theme.text, fontSize: 13, minWidth: 26, textAlign: 'center' },
   remove: { color: theme.textDim, fontSize: 14 },
-  profileOptions: { flexDirection: 'row', gap: 3 },
+  profileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    marginLeft: 34,
+    gap: 10,
+  },
+  profileLabel: {
+    color: theme.textDim,
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  profileOptions: { flexDirection: 'row', gap: 5 },
   profilePill: {
     minWidth: 32,
     alignItems: 'center',

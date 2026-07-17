@@ -10,13 +10,15 @@ import { createClient } from '@supabase/supabase-js';
 import type { OAuthSessionCompleteRequest, SocialProvider } from '../api/backend';
 
 const TEMPORARY_STORAGE_KEY = 'algosplit_oauth_temporary_v1';
+const PENDING_WEB_AUTH_KEY = 'algosplit_oauth_pending_v1';
 const OAUTH_STORAGE_KEY = 'algosplit.oauth.bridge';
 const OAUTH_CALLBACK_PATH = 'oauth/callback';
 const IDENTITY_CALLBACK_PATH = 'identity/callback';
-const WEB_AUTH_WINDOW_NAME = 'algosplit-social-auth';
+const PENDING_WEB_AUTH_TTL_MS = 10 * 60 * 1000;
 
 type CallbackKind = 'oauth' | 'identity';
 type DevicePlatform = 'ios' | 'android' | 'web' | string;
+export type AuthReturnScreen = 'home' | 'account';
 
 interface TemporaryValues {
   [key: string]: string;
@@ -28,72 +30,32 @@ interface SessionStorageLike {
   removeItem(key: string): void;
 }
 
+interface PendingWebAuth {
+  version: 1;
+  kind: CallbackKind;
+  provider: SocialProvider;
+  returnScreen: AuthReturnScreen;
+  createdAt: number;
+}
+
+export type WebAuthCallbackResult =
+  | { type: 'none' }
+  | { type: 'cancelled'; kind: CallbackKind; returnScreen: AuthReturnScreen }
+  | {
+      type: 'oauth';
+      session: OAuthSessionCompleteRequest;
+      returnScreen: AuthReturnScreen;
+    }
+  | {
+      type: 'identity';
+      provider: SocialProvider;
+      returnScreen: AuthReturnScreen;
+    };
+
 // This client is intentionally disposable. Once the API has adopted a social
 // session, dropping the bridge client releases its in-memory OAuth session too.
 let oauthClient: ReturnType<typeof createClient> | null = null;
-let preparedWebAuthWindow: Window | null = null;
-
-/**
- * Open the web auth window while the browser still considers the provider
- * button click a direct user gesture. Supabase creates its PKCE URL
- * asynchronously, which is too late for popup blockers on many browsers.
- */
-export function prepareWebAuthSession(provider: SocialProvider): void {
-  if (Platform.OS !== 'web') return;
-  const browserWindow = (globalThis as { window?: Window }).window;
-  if (!browserWindow) {
-    throw new SocialAuthError('Social sign-in needs a browser window. Please try again.');
-  }
-  if (preparedWebAuthWindow && !preparedWebAuthWindow.closed) {
-    preparedWebAuthWindow.close();
-  }
-  const popup = browserWindow.open(
-    '',
-    WEB_AUTH_WINDOW_NAME,
-    'popup=yes,width=500,height=650,resizable=yes,scrollbars=yes'
-  );
-  if (!popup) {
-    throw new SocialAuthError('Allow pop-ups for AlgoSplit, then try again.');
-  }
-  preparedWebAuthWindow = popup;
-  try {
-    popup.document.title = `Opening ${provider === 'google' ? 'Google' : 'Apple'} sign-in`;
-    popup.document.body.style.background = '#090b10';
-    popup.document.body.style.color = '#f5f7fa';
-    popup.document.body.style.fontFamily = 'system-ui, sans-serif';
-    popup.document.body.style.padding = '32px';
-    popup.document.body.textContent = `Opening ${provider === 'google' ? 'Google' : 'Apple'}…`;
-  } catch {
-    // The placeholder is cosmetic; navigation remains safe without it.
-  }
-  popup.focus();
-}
-
-export function cancelPreparedWebAuthSession(): void {
-  if (preparedWebAuthWindow && !preparedWebAuthWindow.closed) {
-    preparedWebAuthWindow.close();
-  }
-  preparedWebAuthWindow = null;
-}
-
-async function openPreparedAuthSession(
-  authorizationUrl: string,
-  redirectTo: string
-): Promise<WebBrowser.WebBrowserAuthSessionResult> {
-  if (Platform.OS !== 'web') {
-    return WebBrowser.openAuthSessionAsync(authorizationUrl, redirectTo);
-  }
-  if (!preparedWebAuthWindow || preparedWebAuthWindow.closed) {
-    throw new SocialAuthError('The sign-in window was closed. Please try again.');
-  }
-  // Navigate the already-approved window before Expo attaches its secure
-  // callback listener. Reusing the same named window avoids popup blocking.
-  preparedWebAuthWindow.location.assign(authorizationUrl);
-  preparedWebAuthWindow.focus();
-  return WebBrowser.openAuthSessionAsync(authorizationUrl, redirectTo, {
-    windowName: WEB_AUTH_WINDOW_NAME,
-  });
-}
+let appleAvailabilityPromise: Promise<boolean> | null = null;
 
 function sessionStorageOrNull(): SessionStorageLike | null {
   try {
@@ -156,7 +118,6 @@ export const temporaryOAuthStorage = {
 /** Delete the PKCE verifier and any transient Supabase session immediately. */
 export async function clearTemporaryOAuthCredentials(): Promise<void> {
   oauthClient = null;
-  cancelPreparedWebAuthSession();
   try {
     if (Platform.OS === 'web') {
       sessionStorageOrNull()?.removeItem(TEMPORARY_STORAGE_KEY);
@@ -177,9 +138,14 @@ export class SocialAuthCancelledError extends Error {
 }
 
 export class SocialAuthError extends Error {
-  constructor(message: string) {
+  readonly kind?: CallbackKind;
+  readonly returnScreen?: AuthReturnScreen;
+
+  constructor(message: string, kind?: CallbackKind, returnScreen?: AuthReturnScreen) {
     super(message);
     this.name = 'SocialAuthError';
+    this.kind = kind;
+    this.returnScreen = returnScreen;
   }
 }
 
@@ -218,10 +184,7 @@ function callbackPath(kind: CallbackKind): string {
   return kind === 'oauth' ? OAUTH_CALLBACK_PATH : IDENTITY_CALLBACK_PATH;
 }
 
-/**
- * Public callback used by Supabase. Production builds should provide the exact
- * canonical value via env; the fallback keeps local development ergonomic.
- */
+/** Public callback used by Supabase, with an environment override for production. */
 export function callbackUrl(kind: CallbackKind): string {
   const configured = configuredCallbackUrl(kind);
   if (configured) return configured;
@@ -289,6 +252,30 @@ export function socialAuthConfigured(): boolean {
   );
 }
 
+/** Hide Apple unless Supabase publicly reports that the provider is enabled. */
+export function appleProviderEnabled(): Promise<boolean> {
+  if (Platform.OS === 'android') return Promise.resolve(false);
+  if (appleAvailabilityPromise) return appleAvailabilityPromise;
+  const supabaseUrl = normalizedPublicEnv(process.env.EXPO_PUBLIC_SUPABASE_URL);
+  const supabaseKey = normalizedPublicEnv(process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
+  if (!supabaseUrl || !supabaseKey) return Promise.resolve(false);
+  appleAvailabilityPromise = fetch(`${supabaseUrl.replace(/\/$/, '')}/auth/v1/settings`, {
+    headers: { apikey: supabaseKey },
+  })
+    .then(async (response) => {
+      if (!response.ok) return false;
+      const settings = (await response.json()) as { external?: { apple?: unknown } };
+      return settings.external?.apple === true;
+    })
+    .catch(() => false);
+  return appleAvailabilityPromise;
+}
+
+/** Test helper for clearing the process-local provider-settings cache. */
+export function resetSocialAuthCaches(): void {
+  appleAvailabilityPromise = null;
+}
+
 function getOAuthClient(): ReturnType<typeof createClient> {
   const supabaseUrl = normalizedPublicEnv(process.env.EXPO_PUBLIC_SUPABASE_URL);
   const supabaseKey = normalizedPublicEnv(process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
@@ -323,8 +310,75 @@ function handoffFromSession(session: {
   };
 }
 
-async function socialOAuthSession(provider: SocialProvider): Promise<OAuthSessionCompleteRequest> {
-  prepareWebAuthSession(provider);
+function pendingWebAuthOrNull(now = Date.now()): PendingWebAuth | null {
+  const serialized = sessionStorageOrNull()?.getItem(PENDING_WEB_AUTH_KEY);
+  if (!serialized) return null;
+  try {
+    const parsed = JSON.parse(serialized) as Partial<PendingWebAuth>;
+    const valid =
+      parsed.version === 1 &&
+      (parsed.kind === 'oauth' || parsed.kind === 'identity') &&
+      (parsed.provider === 'google' || parsed.provider === 'apple') &&
+      (parsed.returnScreen === 'home' || parsed.returnScreen === 'account') &&
+      typeof parsed.createdAt === 'number' &&
+      now - parsed.createdAt >= 0 &&
+      now - parsed.createdAt <= PENDING_WEB_AUTH_TTL_MS;
+    if (valid) return parsed as PendingWebAuth;
+  } catch {
+    // Invalid or stale state is treated as absent and removed below.
+  }
+  sessionStorageOrNull()?.removeItem(PENDING_WEB_AUTH_KEY);
+  return null;
+}
+
+function savePendingWebAuth(pending: PendingWebAuth): void {
+  const storage = sessionStorageOrNull();
+  if (!storage) throw new SocialAuthError('Temporary browser session storage is unavailable.');
+  storage.setItem(PENDING_WEB_AUTH_KEY, JSON.stringify(pending));
+}
+
+export function clearPendingWebAuth(): void {
+  sessionStorageOrNull()?.removeItem(PENDING_WEB_AUTH_KEY);
+}
+
+type WebNavigator = (url: string) => void;
+
+function defaultWebNavigator(url: string): void {
+  const location = (globalThis as { location?: { assign?: (next: string) => void } }).location;
+  if (!location?.assign) {
+    throw new SocialAuthError('Social sign-in needs a browser window. Please try again.');
+  }
+  location.assign(url);
+}
+
+/** Start a web PKCE flow with exactly one full-page navigation. */
+export async function startWebOAuthRedirect(
+  provider: SocialProvider,
+  navigate: WebNavigator = defaultWebNavigator,
+  now = Date.now()
+): Promise<void> {
+  const client = getOAuthClient();
+  const { data, error } = await client.auth.signInWithOAuth({
+    provider,
+    options: {
+      redirectTo: oauthCallbackUrl(),
+      skipBrowserRedirect: true,
+    },
+  });
+  if (error || !data.url) {
+    throw new SocialAuthError('Could not start social sign-in. Please try again.');
+  }
+  savePendingWebAuth({
+    version: 1,
+    kind: 'oauth',
+    provider,
+    returnScreen: 'home',
+    createdAt: now,
+  });
+  navigate(data.url);
+}
+
+async function nativeOAuthSession(provider: SocialProvider): Promise<OAuthSessionCompleteRequest> {
   const redirectTo = oauthCallbackUrl();
   const client = getOAuthClient();
   const { data, error } = await client.auth.signInWithOAuth({
@@ -337,8 +391,7 @@ async function socialOAuthSession(provider: SocialProvider): Promise<OAuthSessio
   if (error || !data.url) {
     throw new SocialAuthError('Could not start social sign-in. Please try again.');
   }
-
-  const result = await openPreparedAuthSession(data.url, redirectTo);
+  const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
   if (result.type === 'cancel' || result.type === 'dismiss') {
     throw new SocialAuthCancelledError();
   }
@@ -352,7 +405,6 @@ async function socialOAuthSession(provider: SocialProvider): Promise<OAuthSessio
   if (!code) {
     throw new SocialAuthError('Social sign-in did not return an authorization code. Please try again.');
   }
-
   const { data: exchange, error: exchangeError } = await client.auth.exchangeCodeForSession(code);
   if (exchangeError) {
     throw new SocialAuthError('Could not finish social sign-in. Please try again.');
@@ -397,47 +449,129 @@ async function nativeAppleSession(): Promise<OAuthSessionCompleteRequest> {
 }
 
 /**
- * Complete Google on every platform, web Apple OAuth, or native iOS Apple.
- * The caller must hand the returned credentials straight to /auth/oauth/complete
- * and then call clearTemporaryOAuthCredentials in a finally block.
+ * Return native credentials, or null after a web full-page redirect has begun.
+ * The caller hands native credentials straight to /auth/oauth/complete.
  */
 export async function socialSessionForProvider(
   provider: SocialProvider
-): Promise<OAuthSessionCompleteRequest> {
+): Promise<OAuthSessionCompleteRequest | null> {
   if (!socialProviderVisible(provider)) {
     throw new SocialAuthError('This sign-in method is not available on this device.');
   }
   try {
+    if (Platform.OS === 'web') {
+      await startWebOAuthRedirect(provider);
+      return null;
+    }
     if (provider === 'apple' && Platform.OS === 'ios') return await nativeAppleSession();
-    return await socialOAuthSession(provider);
+    return await nativeOAuthSession(provider);
   } catch (error) {
+    clearPendingWebAuth();
     await clearTemporaryOAuthCredentials();
     throw error;
   }
 }
 
-/** Open the server-issued identity-link URL and verify it returned to the expected callback. */
-export async function completeIdentityLink(authorizationUrl: string): Promise<void> {
+/** Start identity linking without exposing the first-party cookie session to JavaScript. */
+export async function completeIdentityLink(
+  authorizationUrl: string,
+  provider: SocialProvider,
+  navigate: WebNavigator = defaultWebNavigator,
+  now = Date.now()
+): Promise<void> {
   const redirectTo = identityCallbackUrl();
-  try {
-    const result = await openPreparedAuthSession(authorizationUrl, redirectTo);
-    if (result.type === 'cancel' || result.type === 'dismiss') {
-      throw new SocialAuthCancelledError();
-    }
-    if (result.type !== 'success' || !isExpectedCallback(result.url, redirectTo)) {
-      throw new SocialAuthError('Account connection did not return to AlgoSplit. Please try again.');
-    }
-    if (callbackErrorFromUrl(result.url)) {
-      throw new SocialAuthError('Account connection was not completed. Please try again.');
-    }
-  } finally {
-    cancelPreparedWebAuthSession();
+  if (Platform.OS === 'web') {
+    savePendingWebAuth({
+      version: 1,
+      kind: 'identity',
+      provider,
+      returnScreen: 'account',
+      createdAt: now,
+    });
+    navigate(authorizationUrl);
+    return;
+  }
+  const result = await WebBrowser.openAuthSessionAsync(authorizationUrl, redirectTo);
+  if (result.type === 'cancel' || result.type === 'dismiss') {
+    throw new SocialAuthCancelledError();
+  }
+  if (result.type !== 'success' || !isExpectedCallback(result.url, redirectTo)) {
+    throw new SocialAuthError('Account connection did not return to AlgoSplit. Please try again.');
+  }
+  if (callbackErrorFromUrl(result.url)) {
+    throw new SocialAuthError('Account connection was not completed. Please try again.');
   }
 }
 
-/** Closes the popup opened by WebBrowser.openAuthSessionAsync on web callback routes. */
-export function maybeCompleteWebAuthSession(): void {
-  if (Platform.OS === 'web') {
-    WebBrowser.maybeCompleteAuthSession();
+/** Complete or cancel a pending full-page web auth operation after app bootstrap/resume. */
+export async function completePendingWebAuth(
+  url = (globalThis as { location?: { href?: string } }).location?.href,
+  now = Date.now()
+): Promise<WebAuthCallbackResult> {
+  if (Platform.OS !== 'web') return { type: 'none' };
+  const pending = pendingWebAuthOrNull(now);
+  if (!pending || !url) return { type: 'none' };
+
+  const providerError = callbackErrorFromUrl(url);
+  const expectedCallback = callbackUrl(pending.kind);
+  const atExpectedCallback = isExpectedCallback(url, expectedCallback);
+  if (providerError) {
+    clearPendingWebAuth();
+    await clearTemporaryOAuthCredentials();
+    if (new URL(url).searchParams.get('error') === 'access_denied') {
+      return { type: 'cancelled', kind: pending.kind, returnScreen: pending.returnScreen };
+    }
+    throw new SocialAuthError(
+      pending.kind === 'oauth'
+        ? 'Social sign-in was not completed. Please try again.'
+        : 'Account connection was not completed. Please try again.',
+      pending.kind,
+      pending.returnScreen
+    );
   }
+
+  if (!atExpectedCallback) {
+    clearPendingWebAuth();
+    await clearTemporaryOAuthCredentials();
+    return { type: 'cancelled', kind: pending.kind, returnScreen: pending.returnScreen };
+  }
+
+  clearPendingWebAuth();
+  if (pending.kind === 'identity') {
+    return { type: 'identity', provider: pending.provider, returnScreen: pending.returnScreen };
+  }
+  const code = oauthCodeFromCallbackUrl(url);
+  if (!code) {
+    await clearTemporaryOAuthCredentials();
+    throw new SocialAuthError(
+      'Social sign-in did not return an authorization code. Please try again.',
+      pending.kind,
+      pending.returnScreen
+    );
+  }
+  const { data, error } = await getOAuthClient().auth.exchangeCodeForSession(code);
+  if (error) {
+    await clearTemporaryOAuthCredentials();
+    throw new SocialAuthError(
+      'Could not finish social sign-in. Please try again.',
+      pending.kind,
+      pending.returnScreen
+    );
+  }
+  return {
+    type: 'oauth',
+    session: handoffFromSession(data.session),
+    returnScreen: pending.returnScreen,
+  };
+}
+
+/** Remove OAuth callback parameters without adding another browser-history entry. */
+export function cleanWebAuthUrl(): void {
+  if (Platform.OS !== 'web') return;
+  const browser = globalThis as {
+    location?: { origin?: string };
+    history?: { replaceState?: (data: unknown, unused: string, url?: string | URL | null) => void };
+  };
+  if (!browser.location?.origin || !browser.history?.replaceState) return;
+  browser.history.replaceState(null, '', `${browser.location.origin}/`);
 }

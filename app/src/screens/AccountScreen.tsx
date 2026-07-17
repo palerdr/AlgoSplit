@@ -48,8 +48,11 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
     account.identities.data.map((identity) => [identity.provider, identity])
   );
   const emailIdentity = identitiesByProvider.get('email');
-  const socialProviders: SocialProvider[] =
-    Platform.OS === 'android' ? ['google'] : ['google', 'apple'];
+  const socialProviders: SocialProvider[] = account.appleProviderEnabled
+    ? Platform.OS === 'android'
+      ? ['google']
+      : ['google', 'apple']
+    : ['google'];
 
   const connectIdentity = async (provider: SocialProvider) => {
     setIdentityBusy(provider);

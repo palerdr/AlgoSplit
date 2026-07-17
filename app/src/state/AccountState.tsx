@@ -30,11 +30,14 @@ import {
   workouts as workoutsApi,
 } from '../api/backend';
 import {
+  type AuthReturnScreen,
+  SocialAuthError,
+  appleProviderEnabled,
+  cleanWebAuthUrl,
   clearTemporaryOAuthCredentials,
-  cancelPreparedWebAuthSession,
+  completePendingWebAuth,
   completeIdentityLink,
   isSocialAuthCancellation,
-  prepareWebAuthSession,
   socialSessionForProvider,
 } from '../auth/socialAuth';
 import {
@@ -75,6 +78,9 @@ interface AccountState {
   status: AccountStatus;
   user: UserInfo | null;
   sessionError: string | null;
+  appleProviderEnabled: boolean;
+  authReturnScreen: AuthReturnScreen | null;
+  clearAuthReturnScreen: () => void;
   identities: RemoteResource<AuthIdentity[]>;
   splits: RemoteResource<SplitResponse[]>;
   workoutRanges: Record<string, RemoteResource<WorkoutLogResponse[]>>;
@@ -102,6 +108,7 @@ interface AccountState {
   createSplit: (split: SplitCreate) => Promise<SplitResponse>;
   replaceSplit: (splitId: string, split: SplitCreate) => Promise<SplitResponse>;
   deleteSplit: (splitId: string) => Promise<void>;
+  deleteWorkout: (workoutId: string) => Promise<void>;
   saveSplitSession: (
     splitId: string,
     sessionId: string | null,
@@ -173,6 +180,8 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   );
   const [user, setUser] = useState<UserInfo | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [appleEnabled, setAppleEnabled] = useState(false);
+  const [authReturnScreen, setAuthReturnScreen] = useState<AuthReturnScreen | null>(null);
   const [identityResource, setIdentityResource] = useState(EMPTY_IDENTITIES);
   const [splitResource, setSplitResource] = useState(EMPTY_SPLITS);
   const [workoutRanges, setWorkoutRanges] = useState<
@@ -219,6 +228,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   const stimulusInFlight = useRef<Promise<void> | null>(null);
   const identitiesInFlight = useRef<Promise<void> | null>(null);
   const stimulusRequestRef = useRef(0);
+  const deletedWorkoutIdsRef = useRef(new Set<string>());
 
   const clearRemoteData = useCallback(() => {
     generationRef.current += 1;
@@ -230,6 +240,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     progressInFlight.current.clear();
     stimulusInFlight.current = null;
     identitiesInFlight.current = null;
+    deletedWorkoutIdsRef.current.clear();
     clearSplitAnalysisCache();
     setSplitResource(EMPTY_SPLITS);
     setWorkoutRanges({});
@@ -396,10 +407,13 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       const promise = loadAllWorkouts(days)
         .then((data) => {
           if (generation !== generationRef.current) return;
+          const visibleData = data.filter(
+            (workout) => !deletedWorkoutIdsRef.current.has(workout.id)
+          );
           setWorkoutRanges((previous) => ({
             ...previous,
             [key]: {
-              data,
+              data: visibleData,
               loading: false,
               loaded: true,
               error: null,
@@ -439,8 +453,11 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
         .overview(180)
         .then((response) => {
           if (generation !== generationRef.current) return;
+          const visibleWorkouts = response.workouts.filter(
+            (workout) => !deletedWorkoutIdsRef.current.has(workout.id)
+          );
           setWorkoutOverview({
-            data: response.workouts,
+            data: visibleWorkouts,
             loading: false,
             loaded: true,
             error: null,
@@ -481,18 +498,25 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
         .summaries({ limit: 50, offset })
         .then((response) => {
           if (generation !== generationRef.current) return;
-          setWorkoutSummaries((previous) => ({
-            data: {
-              workouts: append
-                ? [...previous.data.workouts, ...response.workouts]
-                : response.workouts,
-              total: response.total,
-            },
-            loading: false,
-            loaded: true,
-            error: null,
-            fetchedAt: Date.now(),
-          }));
+          const visibleWorkouts = response.workouts.filter(
+            (workout) => !deletedWorkoutIdsRef.current.has(workout.id)
+          );
+          const filteredCount = response.workouts.length - visibleWorkouts.length;
+          setWorkoutSummaries((previous) => {
+            const workouts = append
+                ? [...previous.data.workouts, ...visibleWorkouts]
+                : visibleWorkouts;
+            return {
+              data: {
+                workouts,
+                total: Math.max(workouts.length, response.total - filteredCount),
+              },
+              loading: false,
+              loaded: true,
+              error: null,
+              fetchedAt: Date.now(),
+            };
+          });
         })
         .catch((error) => {
           if (generation !== generationRef.current) return;
@@ -518,6 +542,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
 
   const ensureWorkoutDetail = useCallback(
     (workoutId: string): Promise<void> => {
+      if (deletedWorkoutIdsRef.current.has(workoutId)) return Promise.resolve();
       const existing = detailsRef.current[workoutId];
       // Expanded workout payloads are immutable history records; retain them
       // for the authenticated session instead of refetching after the tab TTL.
@@ -536,7 +561,10 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       const promise = workoutsApi
         .get(workoutId)
         .then((data) => {
-          if (generation !== generationRef.current) return;
+          if (
+            generation !== generationRef.current ||
+            deletedWorkoutIdsRef.current.has(workoutId)
+          ) return;
           setWorkoutDetails((previous) => ({
             ...previous,
             [workoutId]: {
@@ -549,7 +577,10 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
           }));
         })
         .catch((error) => {
-          if (generation !== generationRef.current) return;
+          if (
+            generation !== generationRef.current ||
+            deletedWorkoutIdsRef.current.has(workoutId)
+          ) return;
           if (isSignedOutError(error)) return markSignedOut();
           setWorkoutDetails((previous) => ({
             ...previous,
@@ -583,10 +614,13 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       const promise = loadAllWorkoutProgress(exerciseName, days)
         .then((data) => {
           if (generation !== generationRef.current) return;
+          const visibleData = data.filter(
+            (workout) => !deletedWorkoutIdsRef.current.has(workout.id)
+          );
           setWorkoutProgress((previous) => ({
             ...previous,
             [key]: {
-              data,
+              data: visibleData,
               loading: false,
               loaded: true,
               error: null,
@@ -731,6 +765,77 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     [markSignedOut]
   );
 
+  const deleteWorkout = useCallback(
+    async (workoutId: string) => {
+      try {
+        await workoutsApi.remove(workoutId);
+        deletedWorkoutIdsRef.current.add(workoutId);
+        detailsInFlight.current.delete(workoutId);
+        const fetchedAt = Date.now();
+
+        setWorkoutRanges((previous) => {
+          const next = { ...previous };
+          for (const [key, resource] of Object.entries(next)) {
+            next[key] = {
+              ...resource,
+              data: resource.data.filter((workout) => workout.id !== workoutId),
+              fetchedAt,
+            };
+          }
+          return next;
+        });
+        setWorkoutOverview((previous) => ({
+          ...previous,
+          data: previous.data.filter((workout) => workout.id !== workoutId),
+          fetchedAt,
+        }));
+        setWorkoutSummaries((previous) => {
+          const containedWorkout = previous.data.workouts.some(
+            (workout) => workout.id === workoutId
+          );
+          return {
+            ...previous,
+            data: {
+              workouts: previous.data.workouts.filter((workout) => workout.id !== workoutId),
+              total: containedWorkout
+                ? Math.max(0, previous.data.total - 1)
+                : previous.data.total,
+            },
+            fetchedAt,
+          };
+        });
+        setWorkoutDetails((previous) => {
+          const next = { ...previous };
+          delete next[workoutId];
+          return next;
+        });
+        setWorkoutProgress((previous) => {
+          const next = { ...previous };
+          for (const [key, resource] of Object.entries(next)) {
+            next[key] = {
+              ...resource,
+              data: resource.data.filter((workout) => workout.id !== workoutId),
+              fetchedAt,
+            };
+          }
+          return next;
+        });
+
+        // A deleted workout changes the home heatmap immediately. Supersede
+        // any analysis request that started before the deletion completed.
+        stimulusRequestRef.current += 1;
+        stimulusInFlight.current = null;
+        stimulusRef.current = EMPTY_STIMULUS;
+        setRecentStimulus(EMPTY_STIMULUS);
+        void loadStimulus(true);
+      } catch (error) {
+        if (isSignedOutError(error)) markSignedOut();
+        throw error;
+      }
+    },
+    [loadStimulus, markSignedOut]
+  );
+
   const saveSplitSession = useCallback(
     async (splitId: string, sessionId: string | null, session: SessionCreate) => {
       try {
@@ -842,8 +947,13 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   const signInWithProvider = useCallback(async (provider: SocialProvider) => {
     setStatus('checking');
     setSessionError(null);
+    let credentialsCreated = false;
     try {
       const socialSession = await socialSessionForProvider(provider);
+      // Web continues after a full-page callback. Keep the checking state so a
+      // restored page cannot briefly show the signed-out form during redirect.
+      if (!socialSession) return;
+      credentialsCreated = true;
       const response = await auth.oauthComplete(socialSession);
       setUser(response.user);
       setStatus('authenticated');
@@ -855,22 +965,21 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       }
       throw error;
     } finally {
-      await clearTemporaryOAuthCredentials();
+      if (credentialsCreated) await clearTemporaryOAuthCredentials();
     }
   }, []);
 
   const linkIdentity = useCallback(
     async (provider: SocialProvider) => {
       try {
-        prepareWebAuthSession(provider);
         const response = await auth.linkIdentity(
           provider,
           Platform.OS === 'web' ? 'web' : 'native'
         );
-        await completeIdentityLink(response.url);
+        await completeIdentityLink(response.url, provider);
+        if (Platform.OS === 'web') return;
         await refreshIdentities();
       } catch (error) {
-        cancelPreparedWebAuthSession();
         if (isSignedOutError(error)) markSignedOut();
         throw error;
       }
@@ -938,9 +1047,112 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     markSignedOut();
   }, [markSignedOut, user?.id]);
 
+  const clearAuthReturnScreen = useCallback(() => setAuthReturnScreen(null), []);
+
+  const bootstrapAuth = useCallback(async () => {
+    if (Platform.OS !== 'web') {
+      await refreshSession();
+      return;
+    }
+
+    let handledCallback = false;
+    try {
+      const result = await completePendingWebAuth();
+      if (result.type === 'none') {
+        await refreshSession();
+        return;
+      }
+      handledCallback = true;
+      cleanWebAuthUrl();
+      setAuthReturnScreen(result.returnScreen);
+
+      if (result.type === 'cancelled') {
+        if (result.kind === 'oauth') {
+          markSignedOut();
+        } else {
+          const nextUser = await auth.me();
+          setUser(nextUser);
+          setStatus('authenticated');
+        }
+        return;
+      }
+
+      if (result.type === 'oauth') {
+        const response = await auth.oauthComplete(result.session);
+        setUser(response.user);
+        setSessionError(null);
+        setStatus('authenticated');
+        return;
+      }
+
+      const nextUser = await auth.me();
+      const response = await auth.identities();
+      const linked = response.identities.some((identity) => identity.provider === result.provider);
+      setUser(nextUser);
+      setStatus('authenticated');
+      setIdentityResource({
+        data: response.identities,
+        loading: false,
+        loaded: true,
+        error: linked ? null : 'Could not load your connected accounts. Please try again.',
+        fetchedAt: Date.now(),
+      });
+    } catch (error) {
+      handledCallback = true;
+      cleanWebAuthUrl();
+      const callbackError = error instanceof SocialAuthError ? error : null;
+      if (callbackError?.returnScreen) setAuthReturnScreen(callbackError.returnScreen);
+
+      // An identity callback still has the first-party HttpOnly cookie even
+      // when the provider rejects or cannot finish the link.
+      if (callbackError?.kind === 'identity') {
+        try {
+          const nextUser = await auth.me();
+          setUser(nextUser);
+          setStatus('authenticated');
+          setIdentityResource((previous) => ({
+            ...previous,
+            loading: false,
+            loaded: true,
+            error: 'Could not load your connected accounts. Please try again.',
+          }));
+          return;
+        } catch {
+          // Fall through to the normal signed-out recovery below.
+        }
+      }
+
+      markSignedOut();
+      if (!isSocialAuthCancellation(error)) {
+        setSessionError('Could not sign in. Try again.');
+      }
+    } finally {
+      if (handledCallback) await clearTemporaryOAuthCredentials();
+    }
+  }, [markSignedOut, refreshSession]);
+
   useEffect(() => {
-    refreshSession();
-  }, [refreshSession]);
+    void bootstrapAuth();
+  }, [bootstrapAuth]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) void bootstrapAuth();
+    };
+    window.addEventListener('pageshow', onPageShow);
+    return () => window.removeEventListener('pageshow', onPageShow);
+  }, [bootstrapAuth]);
+
+  useEffect(() => {
+    let active = true;
+    void appleProviderEnabled().then((enabled) => {
+      if (active) setAppleEnabled(enabled);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -1000,6 +1212,9 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       status,
       user,
       sessionError,
+      appleProviderEnabled: appleEnabled,
+      authReturnScreen,
+      clearAuthReturnScreen,
       identities: identityResource,
       splits: splitResource,
       workoutRanges,
@@ -1027,6 +1242,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       createSplit,
       replaceSplit,
       deleteSplit,
+      deleteWorkout,
       saveSplitSession,
       deleteSplitSession,
       ensureWorkouts,
@@ -1046,6 +1262,9 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       status,
       user,
       sessionError,
+      appleEnabled,
+      authReturnScreen,
+      clearAuthReturnScreen,
       identityResource,
       splitResource,
       workoutRanges,
@@ -1073,6 +1292,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       createSplit,
       replaceSplit,
       deleteSplit,
+      deleteWorkout,
       saveSplitSession,
       deleteSplitSession,
       ensureWorkouts,
