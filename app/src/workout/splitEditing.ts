@@ -8,6 +8,7 @@ import type {
   SplitCreate,
   SplitResponse,
 } from '../api/backend';
+import type { Exercise } from '../data/exercises';
 
 /** Highest day number a split cycle can reach (matches the analysis engine). */
 export const MAX_SPLIT_DAYS = 14;
@@ -67,6 +68,24 @@ export function reorderWorkoutDraftExercises(
   const [moved] = reordered.splice(fromIndex, 1);
   reordered.splice(toIndex, 0, moved);
   return reordered;
+}
+
+/** Swap a catalog exercise into an existing row without losing its programming. */
+export function replaceWorkoutDraftExercise(
+  exercises: WorkoutDraftExercise[],
+  exerciseKey: string,
+  replacement: Pick<Exercise, 'name' | 'unilateral' | 'resistanceProfile'>
+): WorkoutDraftExercise[] {
+  return exercises.map((exercise) =>
+    exercise.key === exerciseKey
+      ? {
+          ...exercise,
+          name: replacement.name,
+          unilateral: replacement.unilateral,
+          resistanceProfile: replacement.resistanceProfile,
+        }
+      : exercise
+  );
 }
 
 function draftExercise(
