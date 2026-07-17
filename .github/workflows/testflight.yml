@@ -75,17 +75,13 @@ jobs:
           password: ${{ env.GMAIL_APP_PASSWORD }}
           from: AlgoSplit CI
           to: ${{ env.NOTIFY_RECIPIENTS }}
-          subject: '🏗 AlgoSplit TestFlight build started'
+          subject: '🏗 AlgoSplit: main updated, new build started'
           body: |
-            A new AlgoSplit iOS build was triggered by a push to main.
+            main was updated by ${{ github.actor }} — a TestFlight rebuild is underway.
 
-            Commit: ${{ github.event.head_commit.message }}
-            Author: ${{ github.actor }}
-            SHA: ${{ github.sha }}
+            ${{ github.event.head_commit.message }}
 
-            Follow along:
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            https://expo.dev/accounts/aboufa2322/projects/algosplit/builds
 
       - name: Build and submit to TestFlight
         id: build
@@ -104,14 +100,10 @@ jobs:
           password: ${{ env.GMAIL_APP_PASSWORD }}
           from: AlgoSplit CI
           to: ${{ env.NOTIFY_RECIPIENTS }}
-          subject: ${{ steps.build.outcome == 'success' && '✅ AlgoSplit build submitted to TestFlight' || '❌ AlgoSplit TestFlight build failed' }}
+          subject: "${{ steps.build.outcome == 'success' && '✅ AlgoSplit: new build on TestFlight' || '❌ AlgoSplit: TestFlight build failed' }}"
           body: |
-            Build ${{ steps.build.outcome == 'success' && 'succeeded and was submitted to TestFlight — it will be installable once Apple finishes processing.' || 'failed — see the logs below.' }}
+            ${{ steps.build.outcome == 'success' && 'The new build is submitted — open TestFlight to update the app once Apple finishes processing (usually a few minutes).' || 'The build failed — logs:' }}
 
-            Commit: ${{ github.event.head_commit.message }}
-            Author: ${{ github.actor }}
-            SHA: ${{ github.sha }}
+            ${{ github.event.head_commit.message }}
 
-            Logs:
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            https://expo.dev/accounts/aboufa2322/projects/algosplit/builds
