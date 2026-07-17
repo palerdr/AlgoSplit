@@ -152,9 +152,25 @@ export default function HomeScreen({
   );
   const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
   const [splitPickerOpen, setSplitPickerOpen] = useState(false);
+  const [forceStartPlan, setForceStartPlan] = useState<AccountWorkoutPlan | null>(null);
   const selectedWorkoutGroup =
     workoutGroups.find((group) => group.id === selectedSplitId) ?? null;
   const { width, height } = useWindowDimensions();
+
+  // Tapping the stim dial explains the score briefly, then fades on its own.
+  const [dialTipVisible, setDialTipVisible] = useState(false);
+  const dialTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showDialTip = () => {
+    tick();
+    if (dialTipTimerRef.current) clearTimeout(dialTipTimerRef.current);
+    setDialTipVisible(true);
+    dialTipTimerRef.current = setTimeout(() => setDialTipVisible(false), 2600);
+  };
+  useEffect(() => {
+    return () => {
+      if (dialTipTimerRef.current) clearTimeout(dialTipTimerRef.current);
+    };
+  }, []);
 
   // ── Active split: streak + the workout a quick start launches ──
   const activeSplit =
@@ -435,8 +451,20 @@ export default function HomeScreen({
           },
         ]}
       >
-        <View pointerEvents="none">
-          <StimulusDial value={loadedWeekEffort} />
+        <View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Weekly stimulus score"
+            hitSlop={8}
+            onPress={showDialTip}
+          >
+            <StimulusDial value={loadedWeekEffort} />
+          </Pressable>
+          {dialTipVisible && (
+            <View pointerEvents="none" style={styles.dialTipBubble}>
+              <Text style={styles.dialTipText}>Weekly training stimulus, scored 0–100</Text>
+            </View>
+          )}
         </View>
         {account.status === 'authenticated' && (
           <Pressable
@@ -692,9 +720,16 @@ export default function HomeScreen({
                           key={group.id}
                           onPress={() => {
                             // The active split starts its next workout on the
-                            // spot; other splits open their day list.
+                            // spot; other splits open their day list. Once
+                            // today's assigned workout is done, tapping asks
+                            // before starting another — no silent double.
                             if (quickStart) {
                               pick(quickStart);
+                              return;
+                            }
+                            if (isActive && activeDoneToday && activeNextPlan) {
+                              tick();
+                              setForceStartPlan(activeNextPlan);
                               return;
                             }
                             tick();
@@ -706,6 +741,7 @@ export default function HomeScreen({
                               style={[
                                 styles.sheetCard,
                                 isActive && styles.sheetCardActive,
+                                isActive && activeDoneToday && styles.sheetCardDone,
                                 pressed && styles.cardPressed,
                               ]}
                             >
@@ -729,13 +765,7 @@ export default function HomeScreen({
                                   ? `Starts Day ${quickStart.dayNumber} ${quickStart.name} · ${
                                       quickStart.exercises.length
                                     } ${quickStart.exercises.length === 1 ? 'exercise' : 'exercises'}`
-                                  : isActive && activeDoneToday
-                                    ? `Done for today ✓${
-                                        activeNextPlan
-                                          ? ` · Day ${activeNextPlan.dayNumber} ${activeNextPlan.name} tomorrow`
-                                          : ''
-                                      }`
-                                    : `${group.sessions.length} workout ${
+                                  : `${group.sessions.length} workout ${
                                         group.sessions.length === 1 ? 'day' : 'days'
                                       }${group.cycleLength ? ` · ${group.cycleLength}-day cycle` : ''}${
                                         group.sessions.length > 0
@@ -888,6 +918,48 @@ export default function HomeScreen({
           </View>
         </View>
       )}
+
+      {/* Force-start confirm: in-tree glass overlay (RN Modal breaks glass) */}
+      {forceStartPlan && (
+        <View style={styles.pickerLayer} accessibilityViewIsModal>
+          <Pressable
+            accessible={false}
+            style={styles.pickerBackdrop}
+            onPress={() => setForceStartPlan(null)}
+          />
+          <View style={styles.pickerFrame}>
+            <Glass style={styles.pickerCard}>
+              <Text style={styles.pickerTitle}>Already done for today</Text>
+              <Text style={styles.pickerHint}>
+                You’ve completed {activeSplit?.name ?? 'this split'}’s assigned workout for
+                today.
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Start it anyway"
+                onPress={() => {
+                  const plan = forceStartPlan;
+                  setForceStartPlan(null);
+                  if (plan) pick(plan);
+                }}
+              >
+                <Glass style={styles.forceStartButton} interactive>
+                  <Text style={styles.forceStartButtonText}>Start it anyway</Text>
+                </Glass>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  tick();
+                  setForceStartPlan(null);
+                }}
+              >
+                <Text style={styles.forceStartCancel}>Not now</Text>
+              </Pressable>
+            </Glass>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -1007,6 +1079,24 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
+  dialTipBubble: {
+    position: 'absolute',
+    top: DIAL_SIZE + 8,
+    left: 0,
+    width: 148,
+    paddingVertical: 8,
+    paddingHorizontal: 11,
+    borderRadius: 10,
+    backgroundColor: 'rgba(20,20,20,0.96)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  dialTipText: {
+    color: theme.text,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '600',
+  },
   // Hugs the right edge and stays narrow so the body model keeps its space.
   activeZonePress: {
     marginLeft: 'auto',
@@ -1096,6 +1186,29 @@ const styles = StyleSheet.create({
   sheetCardActive: {
     borderColor: 'rgba(65,196,110,0.5)',
     backgroundColor: 'rgba(65,196,110,0.10)',
+  },
+  // Passive signal that today's assigned workout is already logged — the
+  // explanation lives in the force-start confirm popup, not inline text.
+  sheetCardDone: {
+    opacity: 0.55,
+  },
+  forceStartButton: {
+    borderRadius: 16,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  forceStartButtonText: {
+    color: theme.accent,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  forceStartCancel: {
+    color: theme.textDim,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingTop: 14,
   },
   activeTag: {
     color: theme.accent,
