@@ -65,6 +65,18 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      # The runner ships several Xcode versions side by side; the default is
+      # older than what Apple currently requires for submission ("built with
+      # the iOS 26 SDK or later, included in Xcode 26 or later"). Build
+      # against the newest one installed instead of the runner's default.
+      - name: Select newest available Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          LATEST_XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -n 1)
+          echo "Selecting ${LATEST_XCODE:-/Applications/Xcode.app}"
+          sudo xcode-select -s "${LATEST_XCODE:-/Applications/Xcode.app}/Contents/Developer"
+          xcodebuild -version
+
       - name: Install dependencies
         run: npm ci
         working-directory: app
