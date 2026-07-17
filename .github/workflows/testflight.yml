@@ -14,8 +14,17 @@
 # - iOS signing credentials stored with EAS (distribution certificate +
 #   provisioning profile) and an App Store Connect API key for submission.
 #
-# The job waits for build and submission so a failure anywhere in the chain
-# turns this check red instead of failing silently.
+# Optional — needed only for the "now available" email (see below):
+# - ASC_KEY_ID / ASC_ISSUER_ID / ASC_PRIVATE_KEY repository secrets: a
+#   *separate* App Store Connect API key (Users and Access → Integrations →
+#   App Store Connect API on appstoreconnect.apple.com), used to poll build
+#   processing status. ASC_PRIVATE_KEY is the full contents of the
+#   downloaded .p8 file. Until these exist, that step just fails quietly
+#   (continue-on-error) and the "available" email never fires — the build
+#   and submission themselves are unaffected.
+#
+# The build+submit job itself waits and fails loudly, so a break anywhere in
+# that chain turns this check red instead of failing silently.
 
 name: TestFlight
 
@@ -32,11 +41,13 @@ concurrency:
   group: testflight
   cancel-in-progress: true
 
-# Build notifications for the two contributors. Sending requires two more
-# repository secrets — GMAIL_USERNAME (a Gmail address) and GMAIL_APP_PASSWORD
-# (an app password from myaccount.google.com/apppasswords). Until they exist,
-# the email steps skip silently and the pipeline is unaffected. TestFlight
-# separately emails testers when a build becomes installable.
+# Exactly two contributor emails: one when a build starts, one when Apple has
+# actually finished processing it and it's installable — never merely when
+# our own submit step finishes uploading. A third, failure-only email covers
+# the build/submit step breaking outright. Sending requires GMAIL_USERNAME
+# and GMAIL_APP_PASSWORD repository secrets (an app password from
+# myaccount.google.com/apppasswords); until they exist, email steps skip
+# silently and the pipeline is unaffected.
 env:
   NOTIFY_RECIPIENTS: ab3233@cornell.edu,jdewitte632@gmail.com
 
@@ -81,13 +92,8 @@ jobs:
         run: npm ci
         working-directory: app
 
-      - name: Compute short commit SHA for email subjects
-        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
-
-      # Build-cadence telemetry for the notification emails: how many pipeline
-      # runs (i.e. build attempts) happened today and this month. Documents
-      # usage next to every success/failure so quota-style surprises are
-      # visible in the inbox, not just in dashboards. Never fails the build.
+      # Build-cadence telemetry for the "started"/"failed" emails: how many
+      # pipeline runs happened today and this month. Never fails the build.
       - name: Count pipeline runs today and this month
         continue-on-error: true
         env:
@@ -112,7 +118,7 @@ jobs:
           password: ${{ env.GMAIL_APP_PASSWORD }}
           from: AlgoSplit CI
           to: ${{ env.NOTIFY_RECIPIENTS }}
-          subject: 'AlgoSplit commit ${{ env.SHORT_SHA }} building...'
+          subject: 'AlgoSplit build started'
           body: |
             main was updated by ${{ github.actor }} — a TestFlight rebuild is underway.
 
@@ -128,10 +134,31 @@ jobs:
           eas submit --platform ios --path "$RUNNER_TEMP/AlgoSplit.ipa" --non-interactive
         working-directory: app
 
-      # !cancelled(): a run superseded by a newer push is not a failure — skip
-      # the email instead of sending a misleading ❌.
-      - name: Email contributors the result
-        if: ${{ !cancelled() && env.GMAIL_APP_PASSWORD != '' }}
+      - name: Read app version and build number
+        if: ${{ steps.build.outcome == 'success' }}
+        run: |
+          echo "APP_VERSION=$(node -p "require('./app.json').expo.version")" >> "$GITHUB_ENV"
+          echo "IOS_BUILD_NUMBER=$(eas build:version:get --platform ios --non-interactive 2>&1 | grep -oE 'buildNumber - [0-9]+' | grep -oE '[0-9]+')" >> "$GITHUB_ENV"
+          echo "ASC_APP_ID=$(node -p "require('./eas.json').submit.production.ios.ascAppId")" >> "$GITHUB_ENV"
+        working-directory: app
+
+      # Apple's own processing, not "eas submit succeeded" — that only means
+      # the upload went through. continue-on-error: a stuck/misconfigured
+      # poll must not turn an otherwise-successful build red.
+      - name: Wait for Apple to finish TestFlight processing
+        id: wait_for_processing
+        if: ${{ steps.build.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+          ASC_APP_ID: ${{ env.ASC_APP_ID }}
+          BUILD_NUMBER: ${{ env.IOS_BUILD_NUMBER }}
+        run: node .github/scripts/wait-for-testflight-build.mjs
+
+      - name: Email contributors that the build is available
+        if: ${{ steps.wait_for_processing.outcome == 'success' && env.GMAIL_APP_PASSWORD != '' }}
         continue-on-error: true
         uses: dawidd6/action-send-mail@v3
         with:
@@ -142,10 +169,29 @@ jobs:
           password: ${{ env.GMAIL_APP_PASSWORD }}
           from: AlgoSplit CI
           to: ${{ env.NOTIFY_RECIPIENTS }}
-          subject: "AlgoSplit commit ${{ env.SHORT_SHA }} ${{ steps.build.outcome == 'success' && 'updated in TestFlight' || 'build failed' }}"
+          subject: 'AlgoSplit v${{ env.APP_VERSION }} (${{ env.IOS_BUILD_NUMBER }}) is now available'
           body: |
-            ${{ steps.build.outcome == 'success' && 'The new build is submitted — open TestFlight to update the app once Apple finishes processing (usually a few minutes).' || 'The build failed — logs:' }}
+            AlgoSplit v${{ env.APP_VERSION }} (${{ env.IOS_BUILD_NUMBER }}) is now available in TestFlight.
 
+            ${{ github.event.head_commit.message }}
+
+      # !cancelled(): a run superseded by a newer push is not a failure —
+      # skip the email instead of sending a misleading ❌. Only the build
+      # step itself failing counts here — a processing-wait timeout doesn't.
+      - name: Email contributors that the build failed
+        if: ${{ !cancelled() && steps.build.outcome == 'failure' && env.GMAIL_APP_PASSWORD != '' }}
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ env.GMAIL_USERNAME }}
+          password: ${{ env.GMAIL_APP_PASSWORD }}
+          from: AlgoSplit CI
+          to: ${{ env.NOTIFY_RECIPIENTS }}
+          subject: 'AlgoSplit build failed'
+          body: |
             ${{ github.event.head_commit.message }}
 
             Build ${{ env.BUILDS_TODAY }} today · ${{ env.BUILDS_MONTH }} this month
