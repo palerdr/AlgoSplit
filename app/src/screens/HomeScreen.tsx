@@ -28,6 +28,7 @@ import {
 import {
   mergeSplitLogs,
   nextSplitPlan,
+  splitDoneToday,
   splitWorkoutStreak,
 } from '../workout/splitStreak';
 import { theme } from '../theme';
@@ -54,16 +55,13 @@ const thump = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catc
 const rubber = (x: number) => x / (1 + x * 1.6);
 
 // ── Weekly stimulus dial ─────────────────────────────────────────
-// Floats next to the body model. The arc sweeps to its value with a comet
-// trail of particles behind the tip, muted green that brightens once the
-// score clears the threshold. Children of the glass animate opacity freely;
-// the glass itself is never opacity-animated.
+// Floats next to the body model. The arc sweeps gradually to its value while
+// the number counts up. Children of the glass animate freely; the glass
+// itself is never opacity-animated.
 const DIAL_SIZE = 74;
 const DIAL_STROKE = 5;
 const DIAL_R = (DIAL_SIZE - DIAL_STROKE) / 2;
 const DIAL_C = 2 * Math.PI * DIAL_R;
-const DIAL_BRIGHT_AT = 0.6; // arc turns full accent green past this fill
-const TRAIL = [0.55, 0.38, 0.24, 0.13]; // particle opacities, tip → tail
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
@@ -90,11 +88,6 @@ function StimulusDial({ value }: { value: number | null }) {
     return () => progress.removeListener(listener);
   }, [value, progress]);
 
-  const strokeColor = progress.interpolate({
-    inputRange: [0, DIAL_BRIGHT_AT - 0.12, DIAL_BRIGHT_AT, 1],
-    outputRange: [theme.accentDeep, theme.accentDeep, theme.accent, theme.accent],
-  });
-
   return (
     <Glass style={styles.dialGlass}>
       <Svg width={DIAL_SIZE} height={DIAL_SIZE}>
@@ -110,7 +103,7 @@ function StimulusDial({ value }: { value: number | null }) {
           cx={DIAL_SIZE / 2}
           cy={DIAL_SIZE / 2}
           r={DIAL_R}
-          stroke={strokeColor}
+          stroke={theme.accent}
           strokeWidth={DIAL_STROKE}
           strokeLinecap="round"
           fill="none"
@@ -122,32 +115,6 @@ function StimulusDial({ value }: { value: number | null }) {
           transform={`rotate(-90 ${DIAL_SIZE / 2} ${DIAL_SIZE / 2})`}
         />
       </Svg>
-      {/* Comet trail: particles orbit just behind the arc tip */}
-      {TRAIL.map((baseOpacity, index) => (
-        <Animated.View
-          key={index}
-          pointerEvents="none"
-          style={[
-            styles.dialParticleOrbit,
-            {
-              opacity: progress.interpolate({
-                inputRange: [0, 0.04, 1],
-                outputRange: [0, baseOpacity, baseOpacity],
-              }),
-              transform: [
-                {
-                  rotate: progress.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [`${-(index + 1) * 9}deg`, `${360 - (index + 1) * 9}deg`],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          <View style={[styles.dialParticle, { width: 4 - index * 0.6, height: 4 - index * 0.6 }]} />
-        </Animated.View>
-      ))}
       <View style={styles.dialCenter} pointerEvents="none">
         <Text style={styles.dialValue}>{display === null ? '—' : display}</Text>
         <Text style={styles.dialLabel}>stim</Text>
@@ -201,6 +168,12 @@ export default function HomeScreen({
   );
   const activeNextPlan = React.useMemo(
     () => (activeSplit ? nextSplitPlan(activeSplit, splitLogs, Date.now()) : null),
+    [activeSplit, splitLogs]
+  );
+  // Locked to the calendar day: after today's split workout, quick start rests
+  // until tomorrow (the day list stays available for intentional doubles).
+  const activeDoneToday = React.useMemo(
+    () => (activeSplit ? splitDoneToday(activeSplit, splitLogs, Date.now()) : false),
     [activeSplit, splitLogs]
   );
   const orderedGroups = React.useMemo(() => {
@@ -477,29 +450,10 @@ export default function HomeScreen({
             }}
           >
             <Glass style={styles.activeZone} interactive>
-              <View style={styles.activeZoneTop}>
-                <Text style={styles.activeZoneLabel}>Active split</Text>
-                {activeSplit && activeStreak > 0 && (
-                  <Text style={styles.activeZoneStreak}>🔥 {activeStreak}</Text>
-                )}
-              </View>
-              {activeSplit ? (
-                <>
-                  <Text style={styles.activeZoneName} numberOfLines={1}>
-                    {activeSplit.name}
-                  </Text>
-                  {activeNextPlan && (
-                    <Text style={styles.activeZoneNext} numberOfLines={1}>
-                      Next · Day {activeNextPlan.dayNumber} {activeNextPlan.name}
-                    </Text>
-                  )}
-                </>
-              ) : (
-                <>
-                  <Text style={styles.activeZoneName}>+ Choose a split</Text>
-                  <Text style={styles.activeZoneNext}>Streak & one-tap start</Text>
-                </>
-              )}
+              <Text style={styles.activeZoneLabel}>Active split</Text>
+              <Text style={styles.activeZoneName} numberOfLines={1}>
+                {activeSplit ? activeSplit.name : '+ Choose'}
+              </Text>
             </Glass>
           </Pressable>
         )}
@@ -731,7 +685,7 @@ export default function HomeScreen({
                   ) : (
                     orderedGroups.map((group) => {
                       const isActive = group.id === activeSplit?.id;
-                      const quickStart = isActive ? activeNextPlan : null;
+                      const quickStart = isActive && !activeDoneToday ? activeNextPlan : null;
                       return (
                         <Pressable
                           key={group.id}
@@ -769,13 +723,19 @@ export default function HomeScreen({
                                   ? `Starts Day ${quickStart.dayNumber} ${quickStart.name} · ${
                                       quickStart.exercises.length
                                     } ${quickStart.exercises.length === 1 ? 'exercise' : 'exercises'}`
-                                  : `${group.sessions.length} workout ${
-                                      group.sessions.length === 1 ? 'day' : 'days'
-                                    }${group.cycleLength ? ` · ${group.cycleLength}-day cycle` : ''}${
-                                      group.sessions.length > 0
-                                        ? ` · ${group.sessions.map((session) => session.name).join(' · ')}`
-                                        : ''
-                                    }`}
+                                  : isActive && activeDoneToday
+                                    ? `Done for today ✓${
+                                        activeNextPlan
+                                          ? ` · Day ${activeNextPlan.dayNumber} ${activeNextPlan.name} tomorrow`
+                                          : ''
+                                      }`
+                                    : `${group.sessions.length} workout ${
+                                        group.sessions.length === 1 ? 'day' : 'days'
+                                      }${group.cycleLength ? ` · ${group.cycleLength}-day cycle` : ''}${
+                                        group.sessions.length > 0
+                                          ? ` · ${group.sessions.map((session) => session.name).join(' · ')}`
+                                          : ''
+                                      }`}
                               </Text>
                             </View>
                           )}
@@ -1027,16 +987,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dialParticleOrbit: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-  },
-  dialParticle: {
-    position: 'absolute',
-    top: 1,
-    borderRadius: 2,
-    backgroundColor: theme.accent,
-  },
   dialValue: {
     color: theme.text,
     fontSize: 18,
@@ -1051,44 +1001,27 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
+  // Hugs the right edge and stays narrow so the body model keeps its space.
   activeZonePress: {
-    flex: 1,
-    maxWidth: 250,
     marginLeft: 'auto',
+    maxWidth: 148,
   },
   activeZone: {
-    borderRadius: 20,
-    paddingVertical: 11,
-    paddingHorizontal: 15,
-  },
-  activeZoneTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
+    borderRadius: 18,
+    paddingVertical: 9,
+    paddingHorizontal: 13,
   },
   activeZoneLabel: {
     color: theme.accent,
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '800',
     textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  activeZoneStreak: {
-    color: theme.text,
-    fontSize: 12,
-    fontWeight: '800',
-    fontVariant: ['tabular-nums'],
+    letterSpacing: 0.9,
   },
   activeZoneName: {
     color: theme.text,
-    fontSize: 15,
+    fontSize: 13.5,
     fontWeight: '700',
-    marginTop: 3,
-  },
-  activeZoneNext: {
-    color: theme.textDim,
-    fontSize: 11.5,
     marginTop: 2,
   },
   pickerLayer: {

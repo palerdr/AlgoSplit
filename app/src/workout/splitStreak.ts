@@ -52,6 +52,31 @@ export function splitStreakToleranceDays(split: SplitResponse): number {
   return Math.max(split.cycle_length ?? 7, 7);
 }
 
+function sameLocalDay(left: number, right: number): boolean {
+  const a = new Date(left);
+  const b = new Date(right);
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+/**
+ * The split is locked to the calendar day: once one of its workouts is logged
+ * today, quick start must not roll into the next cycle day until tomorrow.
+ */
+export function splitDoneToday(
+  split: SplitResponse,
+  logs: readonly SplitLogEntry[],
+  now: number
+): boolean {
+  const latest = logs
+    .filter((entry) => entry.splitId === split.id)
+    .sort((left, right) => right.completedAt - left.completedAt)[0];
+  return latest ? sameLocalDay(latest.completedAt, now) : false;
+}
+
 /**
  * Consecutive workouts logged for this split, walking back from the most
  * recent. The streak breaks when the gap between successive workouts — or

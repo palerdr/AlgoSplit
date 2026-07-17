@@ -3,6 +3,7 @@ import type { CompletedWorkout, WorkoutSyncStatus } from '../src/state/AppState'
 import {
   mergeSplitLogs,
   nextSplitPlan,
+  splitDoneToday,
   splitStreakToleranceDays,
   splitWorkoutStreak,
 } from '../src/workout/splitStreak';
@@ -193,5 +194,22 @@ describe('split streak and quick start', () => {
 
   it('returns null for splits with no workout days', () => {
     expect(nextSplitPlan({ ...split(), sessions: [] }, [], NOW)).toBeNull();
+  });
+
+  it('locks the split to the calendar day', () => {
+    const source = split();
+    expect(splitDoneToday(source, [], NOW)).toBe(false);
+
+    const today = mergeSplitLogs([summary({ id: 'w-1', completed_at: daysAgo(0.1) })], []);
+    expect(splitDoneToday(source, today, NOW)).toBe(true);
+
+    const yesterday = mergeSplitLogs([summary({ id: 'w-2', completed_at: daysAgo(1) })], []);
+    expect(splitDoneToday(source, yesterday, NOW)).toBe(false);
+
+    const otherSplit = mergeSplitLogs(
+      [summary({ id: 'w-3', completed_at: daysAgo(0.1), split_id: 'split-other' })],
+      []
+    );
+    expect(splitDoneToday(source, otherSplit, NOW)).toBe(false);
   });
 });
