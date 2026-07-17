@@ -3,6 +3,7 @@ import type {
   SessionResponse,
   SessionTemplateResponse,
   SplitCreate,
+  SplitRequest,
 } from '../api/backend';
 import type { AnalysisPreferences } from '../state/localPersistence';
 import { MAX_SPLIT_DAYS, resistanceProfileOrNull } from './splitEditing';
@@ -189,6 +190,34 @@ export function wizardDraftError(draft: SplitWizardDraft): string | null {
     }
   }
   return null;
+}
+
+/** Analysis-engine request for the review step, mirroring splitToAnalysisRequest. */
+export function wizardDraftToAnalysisRequest(draft: SplitWizardDraft): SplitRequest {
+  return {
+    name: draft.name.trim() || 'New Split',
+    sessions: draft.days.flatMap((day, index) =>
+      day.workout
+        ? [
+            {
+              name: day.workout.name,
+              day: index + 1,
+              exercises: day.workout.exercises.map((exercise) => ({
+                name: exercise.name,
+                sets: exercise.sets,
+                unilateral: Boolean(exercise.unilateral),
+                resistance_profile: exercise.resistance_profile ?? null,
+              })),
+            },
+          ]
+        : []
+    ),
+    cycle_length: draft.cycleLength,
+    stimulus_duration: draft.stimulusDuration,
+    maintenance_volume: draft.maintenanceVolume,
+    dataset: draft.dataset,
+    include_breakdowns: false,
+  };
 }
 
 export function wizardDraftToSplitCreate(draft: SplitWizardDraft): SplitCreate {

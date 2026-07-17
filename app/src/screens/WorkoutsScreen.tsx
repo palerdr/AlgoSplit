@@ -201,47 +201,20 @@ export default function WorkoutsScreen({
               <Text style={styles.backText}>‹ Workouts</Text>
             </Glass>
           </Pressable>
-          <View style={styles.headerActions}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={
-                account.activeSplitId === selectedGroup.id
-                  ? `Deactivate ${selectedGroup.name}`
-                  : `Make ${selectedGroup.name} the active split`
-              }
-              onPress={() => {
-                tick();
-                account.setActiveSplit(
-                  account.activeSplitId === selectedGroup.id ? null : selectedGroup.id
-                );
-              }}
-            >
-              <Glass style={styles.headerDeleteButton} interactive>
-                <Text
-                  style={[
-                    styles.headerActivateText,
-                    account.activeSplitId === selectedGroup.id && styles.headerActivateOn,
-                  ]}
-                >
-                  {account.activeSplitId === selectedGroup.id ? 'Active ✓' : 'Set active'}
-                </Text>
-              </Glass>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Delete ${selectedGroup.name} split`}
-              onPress={() => {
-                tick();
-                setActionError(null);
-                setDeleteTarget({ splitId: selectedGroup.id, name: selectedGroup.name });
-              }}
-              disabled={deleting}
-            >
-              <Glass style={styles.headerDeleteButton} interactive>
-                <Text style={styles.headerDeleteText}>Delete</Text>
-              </Glass>
-            </Pressable>
-          </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${selectedGroup.name} split`}
+            onPress={() => {
+              tick();
+              setActionError(null);
+              setDeleteTarget({ splitId: selectedGroup.id, name: selectedGroup.name });
+            }}
+            disabled={deleting}
+          >
+            <Glass style={styles.headerDeleteButton} interactive>
+              <Text style={styles.headerDeleteText}>Delete</Text>
+            </Glass>
+          </Pressable>
         </View>
         <Text style={styles.title}>{selectedGroup.name}</Text>
 
@@ -592,11 +565,6 @@ const styles = StyleSheet.create({
     color: theme.textDim,
     fontSize: 20,
   },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
   headerDeleteButton: {
     borderRadius: 17,
     paddingVertical: 8,
@@ -606,14 +574,6 @@ const styles = StyleSheet.create({
     color: '#E27878',
     fontSize: 13,
     fontWeight: '700',
-  },
-  headerActivateText: {
-    color: theme.textDim,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  headerActivateOn: {
-    color: theme.accent,
   },
   activeBadge: {
     color: theme.accent,

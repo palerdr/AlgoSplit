@@ -13,7 +13,9 @@ import DraggableFlatList, {
   RenderItemParams,
   ScaleDecorator,
 } from 'react-native-draggable-flatlist';
-import type { SplitResponse } from '../../api/backend';
+import type { AnalysisResponse, SplitResponse } from '../../api/backend';
+import { analysis as analysisApi } from '../../api/backend';
+import { getStimulusLevel, stimulusScore } from '../../analysis/stimulus';
 import { useAccountState } from '../../state/AccountState';
 import { theme } from '../../theme';
 import FadeIn from '../../ui/FadeIn';
@@ -31,6 +33,7 @@ import {
   setWizardCycleLength,
   templateToWizardWorkout,
   wizardDraftError,
+  wizardDraftToAnalysisRequest,
   wizardDraftToSplitCreate,
   wizardNameError,
   wizardWorkoutsBeyond,
@@ -44,34 +47,43 @@ interface SplitWizardProps {
 
 const tick = () => Haptics.selectionAsync().catch(() => {});
 
-/** Two-part progress bar under the title, mirroring the session screen's set segments. */
+type WizardStep = 1 | 2 | 3;
+
+const STEP_LABELS: Record<WizardStep, string> = {
+  1: 'Split basics',
+  2: 'Workout days',
+  3: 'Stimulus review',
+};
+
+function stimulusBarColor(level: number): string {
+  if (level <= 0) return 'rgba(255,255,255,0.07)';
+  if (level <= 2) return theme.accentDeep;
+  if (level <= 5) return '#23A24A';
+  return theme.accent;
+}
+
+/** Progress bar under the title, mirroring the session screen's set segments. */
 function StepBar({
   step,
   onStepPress,
 }: {
-  step: 1 | 2;
-  onStepPress: (step: 1 | 2) => void;
+  step: WizardStep;
+  onStepPress: (step: WizardStep) => void;
 }) {
   return (
     <View style={styles.stepBar}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Split basics"
-        onPress={() => onStepPress(1)}
-        hitSlop={10}
-        style={styles.stepSegment}
-      >
-        <View style={[styles.stepFill, { width: '100%' }]} />
-      </Pressable>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Workout days"
-        onPress={() => onStepPress(2)}
-        hitSlop={10}
-        style={styles.stepSegment}
-      >
-        {step === 2 && <View style={[styles.stepFill, { width: '100%' }]} />}
-      </Pressable>
+      {([1, 2, 3] as const).map((target) => (
+        <Pressable
+          key={target}
+          accessibilityRole="button"
+          accessibilityLabel={STEP_LABELS[target]}
+          onPress={() => onStepPress(target)}
+          hitSlop={10}
+          style={styles.stepSegment}
+        >
+          {step >= target && <View style={[styles.stepFill, { width: '100%' }]} />}
+        </Pressable>
+      ))}
     </View>
   );
 }
@@ -82,9 +94,16 @@ export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
   const [draft, setDraft] = useState(() =>
     createSplitWizardDraft(account.analysisPreferences)
   );
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<WizardStep>(1);
   const [editingDayIndex, setEditingDayIndex] = useState<number | null>(null);
   const [pickerDayIndex, setPickerDayIndex] = useState<number | null>(null);
+  const [setAsActive, setSetAsActive] = useState(true);
+  const [analysisState, setAnalysisState] = useState<{
+    data: AnalysisResponse | null;
+    loading: boolean;
+    error: string | null;
+  }>({ data: null, loading: false, error: null });
+  const analysisKeyRef = useRef<string | null>(null);
   // The day-picker modal keeps rendering during its close animation; remember
   // the last day so its content doesn't flash blank while sliding away.
   const lastPickerIndexRef = useRef(0);
@@ -99,14 +118,46 @@ export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account.status]);
 
-  const goToStep = (next: 1 | 2) => {
+  const runAnalysis = (force = false) => {
+    const request = wizardDraftToAnalysisRequest(draft);
+    const key = JSON.stringify(request);
+    if (!force && analysisKeyRef.current === key && (analysisState.data || analysisState.loading)) {
+      return;
+    }
+    analysisKeyRef.current = key;
+    setAnalysisState({ data: null, loading: true, error: null });
+    analysisApi
+      .analyzeSplit(request)
+      .then((data) => {
+        if (analysisKeyRef.current !== key) return;
+        setAnalysisState({ data, loading: false, error: null });
+      })
+      .catch((cause) => {
+        if (analysisKeyRef.current !== key) return;
+        setAnalysisState({
+          data: null,
+          loading: false,
+          error: cause instanceof Error ? cause.message : 'Analysis failed.',
+        });
+      });
+  };
+
+  const goToStep = (next: WizardStep) => {
     if (next === step) return;
-    if (next === 2) {
+    if (next >= 2) {
       const validation = wizardNameError(draft);
       if (validation) {
         setError(validation);
         return;
       }
+    }
+    if (next === 3) {
+      const validation = wizardDraftError(draft);
+      if (validation) {
+        setError(validation);
+        return;
+      }
+      runAnalysis();
     }
     tick();
     setError(null);
@@ -145,6 +196,7 @@ export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
     setError(null);
     try {
       const saved = await account.createSplit(wizardDraftToSplitCreate(draft));
+      if (setAsActive) account.setActiveSplit(saved.id);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       onSaved(saved);
     } catch (cause) {
@@ -284,6 +336,124 @@ export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
     );
   }
 
+  if (step === 3) {
+    const muscles = analysisState.data?.muscles ?? [];
+    const rows = [...muscles]
+      .map((muscle) => ({
+        region: muscle.region_id,
+        name: muscle.display_name,
+        net: muscle.net_stimulus,
+      }))
+      .sort((a, b) => b.net - a.net);
+    const maxNet = Math.max(0.1, ...rows.map((row) => Math.max(0, row.net)));
+    const score = analysisState.data ? stimulusScore(analysisState.data.muscles) : null;
+    const totalNet = rows.reduce((sum, row) => sum + Math.max(0, row.net), 0);
+
+    return (
+      <View style={styles.container}>
+        <View style={styles.headerRow}>
+          <Pressable onPress={() => goToStep(2)} hitSlop={12} disabled={saving}>
+            <Text style={styles.cancel}>‹ Back</Text>
+          </Pressable>
+          <Pressable onPress={save} disabled={saving}>
+            <Glass style={styles.headerButton} interactive>
+              <Text style={[styles.headerButtonText, saving && styles.disabled]}>
+                {saving ? 'Saving…' : 'Save split'}
+              </Text>
+            </Glass>
+          </Pressable>
+        </View>
+
+        <Text style={styles.title}>{draft.name.trim() || 'New Split'}</Text>
+        <StepBar step={3} onStepPress={goToStep} />
+
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.content}
+        >
+          {error && <Text style={styles.error}>{error}</Text>}
+
+          <Glass style={styles.reviewCard}>
+            <View style={styles.reviewHeader}>
+              <Text style={styles.reviewTitle}>Weekly stimulus</Text>
+              {score !== null && (
+                <View style={styles.scoreBadge}>
+                  <Text style={styles.scoreValue}>{score}</Text>
+                  <Text style={styles.scoreLabel}>score</Text>
+                </View>
+              )}
+            </View>
+            {analysisState.loading && (
+              <Text style={styles.gridHint}>Analyzing your split…</Text>
+            )}
+            {analysisState.error && (
+              <Pressable onPress={() => runAnalysis(true)}>
+                <Text style={styles.error}>
+                  Analysis failed — tap to retry. You can still save the split.
+                </Text>
+              </Pressable>
+            )}
+            {analysisState.data && (
+              <>
+                <Text style={styles.reviewTotal}>
+                  {totalNet.toFixed(1)} total net stimulus ·{' '}
+                  {rows.filter((row) => row.net > 0).length} muscles trained
+                </Text>
+                {rows.map((row, index) => {
+                  const level = getStimulusLevel(row.net);
+                  return (
+                    <View
+                      key={row.region}
+                      style={[styles.muscleRow, index > 0 && styles.muscleRowBorder]}
+                    >
+                      <Text style={styles.muscleName} numberOfLines={1}>
+                        {row.name}
+                      </Text>
+                      <View style={styles.muscleTrack}>
+                        <View
+                          style={[
+                            styles.muscleFill,
+                            {
+                              width: `${(Math.max(0, row.net) / maxNet) * 100}%`,
+                              backgroundColor: stimulusBarColor(level),
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text style={styles.muscleNet}>{row.net.toFixed(1)}</Text>
+                    </View>
+                  );
+                })}
+              </>
+            )}
+          </Glass>
+
+          <Pressable
+            accessibilityRole="switch"
+            accessibilityState={{ checked: setAsActive }}
+            accessibilityLabel="Set as active split"
+            onPress={() => {
+              tick();
+              setSetAsActive((value) => !value);
+            }}
+          >
+            <Glass style={styles.activeToggle} interactive>
+              <View style={styles.activeToggleCopy}>
+                <Text style={styles.activeToggleTitle}>Set as active split</Text>
+                <Text style={styles.gridHintTight}>
+                  Shows on your home screen with a streak and one-tap start.
+                </Text>
+              </View>
+              <View style={[styles.checkbox, setAsActive && styles.checkboxOn]}>
+                {setAsActive && <Text style={styles.checkboxMark}>✓</Text>}
+              </View>
+            </Glass>
+          </Pressable>
+        </ScrollView>
+      </View>
+    );
+  }
+
   const renderDay = ({ item, getIndex, drag, isActive }: RenderItemParams<SplitWizardDay>) => {
     const index = getIndex();
     if (index === undefined) return null;
@@ -368,11 +538,9 @@ export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
         <Pressable onPress={() => goToStep(1)} hitSlop={12} disabled={saving}>
           <Text style={styles.cancel}>‹ Back</Text>
         </Pressable>
-        <Pressable onPress={save} disabled={saving}>
+        <Pressable onPress={() => goToStep(3)} disabled={saving}>
           <Glass style={styles.headerButton} interactive>
-            <Text style={[styles.headerButtonText, saving && styles.disabled]}>
-              {saving ? 'Saving…' : 'Save split'}
-            </Text>
+            <Text style={styles.headerButtonText}>Next</Text>
           </Glass>
         </Pressable>
       </View>
@@ -608,6 +776,74 @@ const styles = StyleSheet.create({
   repeatUnit: { color: theme.textDim, fontSize: 11, fontWeight: '700', marginTop: 2 },
   lengthNotice: { color: '#E2B778', fontSize: 12, lineHeight: 18, marginTop: 10 },
   gridHint: { color: theme.textDim, fontSize: 12, lineHeight: 18, marginBottom: 14 },
+  gridHintTight: { color: theme.textDim, fontSize: 11.5, lineHeight: 16, marginTop: 3 },
+  reviewCard: { borderRadius: 20, padding: 18, marginBottom: 14 },
+  reviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  reviewTitle: { color: theme.text, fontSize: 16, fontWeight: '700' },
+  scoreBadge: { flexDirection: 'row', alignItems: 'baseline', gap: 4 },
+  scoreValue: {
+    color: theme.accent,
+    fontSize: 22,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  scoreLabel: { color: theme.textDim, fontSize: 11, fontWeight: '700' },
+  reviewTotal: { color: theme.textDim, fontSize: 12, marginBottom: 10 },
+  muscleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingVertical: 6,
+  },
+  muscleRowBorder: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  muscleName: { color: theme.text, fontSize: 12.5, width: 108 },
+  muscleTrack: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    overflow: 'hidden',
+  },
+  muscleFill: { height: '100%', borderRadius: 3 },
+  muscleNet: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
+    width: 32,
+    textAlign: 'right',
+  },
+  activeToggle: {
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  activeToggleCopy: { flex: 1 },
+  activeToggleTitle: { color: theme.text, fontSize: 15, fontWeight: '700' },
+  checkbox: {
+    width: 26,
+    height: 26,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxOn: {
+    borderColor: theme.accent,
+    backgroundColor: 'rgba(65,196,110,0.18)',
+  },
+  checkboxMark: { color: theme.accent, fontSize: 15, fontWeight: '800' },
   // Bounds the draggable list to the remaining screen height; without this the
   // library's wrapper View overflows and the last day rows can't scroll into view.
   dayListContainer: { flex: 1 },

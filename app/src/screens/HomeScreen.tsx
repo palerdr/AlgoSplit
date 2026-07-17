@@ -54,14 +54,47 @@ const thump = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catc
 const rubber = (x: number) => x / (1 + x * 1.6);
 
 // ── Weekly stimulus dial ─────────────────────────────────────────
-// Floats next to the body model; a static arc, never opacity-animated.
+// Floats next to the body model. The arc sweeps to its value with a comet
+// trail of particles behind the tip, muted green that brightens once the
+// score clears the threshold. Children of the glass animate opacity freely;
+// the glass itself is never opacity-animated.
 const DIAL_SIZE = 74;
 const DIAL_STROKE = 5;
 const DIAL_R = (DIAL_SIZE - DIAL_STROKE) / 2;
 const DIAL_C = 2 * Math.PI * DIAL_R;
+const DIAL_BRIGHT_AT = 0.6; // arc turns full accent green past this fill
+const TRAIL = [0.55, 0.38, 0.24, 0.13]; // particle opacities, tip → tail
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 function StimulusDial({ value }: { value: number | null }) {
-  const frac = value === null ? 0 : Math.min(100, Math.max(0, value)) / 100;
+  const progress = useRef(new Animated.Value(0)).current;
+  const [display, setDisplay] = useState<number | null>(value === null ? null : 0);
+
+  useEffect(() => {
+    if (value === null) {
+      setDisplay(null);
+      progress.setValue(0);
+      return;
+    }
+    const frac = Math.min(100, Math.max(0, value)) / 100;
+    const listener = progress.addListener(({ value: p }) => {
+      setDisplay(Math.round(p * 100));
+    });
+    Animated.timing(progress, {
+      toValue: frac,
+      duration: 1300,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start(() => setDisplay(Math.round(frac * 100)));
+    return () => progress.removeListener(listener);
+  }, [value, progress]);
+
+  const strokeColor = progress.interpolate({
+    inputRange: [0, DIAL_BRIGHT_AT - 0.12, DIAL_BRIGHT_AT, 1],
+    outputRange: [theme.accentDeep, theme.accentDeep, theme.accent, theme.accent],
+  });
+
   return (
     <Glass style={styles.dialGlass}>
       <Svg width={DIAL_SIZE} height={DIAL_SIZE}>
@@ -73,23 +106,51 @@ function StimulusDial({ value }: { value: number | null }) {
           strokeWidth={DIAL_STROKE}
           fill="none"
         />
-        {frac > 0 && (
-          <Circle
-            cx={DIAL_SIZE / 2}
-            cy={DIAL_SIZE / 2}
-            r={DIAL_R}
-            stroke={theme.accent}
-            strokeWidth={DIAL_STROKE}
-            strokeLinecap="round"
-            fill="none"
-            strokeDasharray={`${DIAL_C * frac} ${DIAL_C}`}
-            transform={`rotate(-90 ${DIAL_SIZE / 2} ${DIAL_SIZE / 2})`}
-          />
-        )}
+        <AnimatedCircle
+          cx={DIAL_SIZE / 2}
+          cy={DIAL_SIZE / 2}
+          r={DIAL_R}
+          stroke={strokeColor}
+          strokeWidth={DIAL_STROKE}
+          strokeLinecap="round"
+          fill="none"
+          strokeDasharray={`${DIAL_C} ${DIAL_C}`}
+          strokeDashoffset={progress.interpolate({
+            inputRange: [0, 1],
+            outputRange: [DIAL_C, 0],
+          })}
+          transform={`rotate(-90 ${DIAL_SIZE / 2} ${DIAL_SIZE / 2})`}
+        />
       </Svg>
+      {/* Comet trail: particles orbit just behind the arc tip */}
+      {TRAIL.map((baseOpacity, index) => (
+        <Animated.View
+          key={index}
+          pointerEvents="none"
+          style={[
+            styles.dialParticleOrbit,
+            {
+              opacity: progress.interpolate({
+                inputRange: [0, 0.04, 1],
+                outputRange: [0, baseOpacity, baseOpacity],
+              }),
+              transform: [
+                {
+                  rotate: progress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [`${-(index + 1) * 9}deg`, `${360 - (index + 1) * 9}deg`],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          <View style={[styles.dialParticle, { width: 4 - index * 0.6, height: 4 - index * 0.6 }]} />
+        </Animated.View>
+      ))}
       <View style={styles.dialCenter} pointerEvents="none">
-        <Text style={styles.dialValue}>{value === null ? '—' : Math.round(value)}</Text>
-        <Text style={styles.dialLabel}>week</Text>
+        <Text style={styles.dialValue}>{display === null ? '—' : display}</Text>
+        <Text style={styles.dialLabel}>stim</Text>
       </View>
     </Glass>
   );
@@ -109,9 +170,7 @@ export default function HomeScreen({
     startFreeSession,
     lastCompleted,
     history,
-    pendingSyncCount,
     failedSyncCount,
-    syncingWorkoutId,
     retryFailedWorkouts,
   } = useAppState();
   const account = useAccountState();
@@ -124,6 +183,7 @@ export default function HomeScreen({
     [account.workoutTemplates.data]
   );
   const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
+  const [splitPickerOpen, setSplitPickerOpen] = useState(false);
   const selectedWorkoutGroup =
     workoutGroups.find((group) => group.id === selectedSplitId) ?? null;
   const { width, height } = useWindowDimensions();
@@ -155,14 +215,37 @@ export default function HomeScreen({
       workoutAnalysisNetStimulus(account.recentStimulus.data?.muscles ?? []),
     [account.recentStimulus.data]
   );
+  // Optimistic stimulus: workouts finished after the server analysis was
+  // fetched are layered on locally, so the dial and body update instantly.
+  // When the post-sync refresh lands (fetchedAt advances), the overlay empties
+  // and the server's numbers quietly take over.
+  const optimisticNet = React.useMemo(() => {
+    if (account.status !== 'authenticated') return null;
+    const fetchedAt = account.recentStimulus.fetchedAt ?? 0;
+    const unseen = history.filter(
+      (workout) => new Date(workout.date).getTime() > fetchedAt
+    );
+    if (unseen.length === 0) return null;
+    const net: Record<string, number> = { ...accountStimulusNet };
+    for (const workout of unseen) {
+      for (const [region, value] of Object.entries(workout.stimulus)) {
+        net[region] = (net[region] ?? 0) + value;
+      }
+    }
+    return net;
+  }, [account.status, account.recentStimulus.fetchedAt, accountStimulusNet, history]);
+  const displayNet = optimisticNet ?? accountStimulusNet;
   const weekEffort = React.useMemo(
-    () => stimulusScore(account.recentStimulus.data?.muscles ?? []),
-    [account.recentStimulus.data]
+    () =>
+      optimisticNet
+        ? stimulusScore(optimisticNet)
+        : stimulusScore(account.recentStimulus.data?.muscles ?? []),
+    [optimisticNet, account.recentStimulus.data]
   );
   const loadedWeekEffort =
     account.status === 'authenticated' &&
-    account.recentStimulus.loaded &&
-    account.recentStimulus.data
+    (optimisticNet !== null ||
+      (account.recentStimulus.loaded && account.recentStimulus.data))
       ? weekEffort
       : null;
 
@@ -253,7 +336,7 @@ export default function HomeScreen({
     bodySource === 'session'
       ? levelsFromNet(lastCompleted?.stimulus ?? {})
       : account.status === 'authenticated'
-        ? levelsFromNet(accountStimulusNet)
+        ? levelsFromNet(displayNet)
         : recentStimulus;
 
   // One value drives the morph: the glass pill stretches into the sheet.
@@ -366,11 +449,11 @@ export default function HomeScreen({
         </Animated.View>
       </Animated.View>
 
-      {/* Weekly stimulus dial, floating beside the body model */}
+      {/* Stimulus dial + active-split zone, floating beside the body model */}
       <Animated.View
-        pointerEvents="none"
+        pointerEvents="box-none"
         style={[
-          styles.dialWrap,
+          styles.topZoneWrap,
           {
             transform: [
               { translateY: uiAnim.interpolate({ inputRange: [0, 1], outputRange: [-180, 0] }) },
@@ -378,7 +461,48 @@ export default function HomeScreen({
           },
         ]}
       >
-        <StimulusDial value={loadedWeekEffort} />
+        <View pointerEvents="none">
+          <StimulusDial value={loadedWeekEffort} />
+        </View>
+        {account.status === 'authenticated' && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={
+              activeSplit ? `Active split ${activeSplit.name}` : 'Choose an active split'
+            }
+            style={styles.activeZonePress}
+            onPress={() => {
+              tick();
+              setSplitPickerOpen(true);
+            }}
+          >
+            <Glass style={styles.activeZone} interactive>
+              <View style={styles.activeZoneTop}>
+                <Text style={styles.activeZoneLabel}>Active split</Text>
+                {activeSplit && activeStreak > 0 && (
+                  <Text style={styles.activeZoneStreak}>🔥 {activeStreak}</Text>
+                )}
+              </View>
+              {activeSplit ? (
+                <>
+                  <Text style={styles.activeZoneName} numberOfLines={1}>
+                    {activeSplit.name}
+                  </Text>
+                  {activeNextPlan && (
+                    <Text style={styles.activeZoneNext} numberOfLines={1}>
+                      Next · Day {activeNextPlan.dayNumber} {activeNextPlan.name}
+                    </Text>
+                  )}
+                </>
+              ) : (
+                <>
+                  <Text style={styles.activeZoneName}>+ Choose a split</Text>
+                  <Text style={styles.activeZoneNext}>Streak & one-tap start</Text>
+                </>
+              )}
+            </Glass>
+          </Pressable>
+        )}
       </Animated.View>
 
       {accountStimulusPending && (
@@ -437,7 +561,9 @@ export default function HomeScreen({
         </Animated.View>
       )}
 
-      {(failedSyncCount > 0 || pendingSyncCount > 0 || syncingWorkoutId) && (
+      {/* Uploads stay silent unless something actually failed — the dial and
+          body already reflect the workout locally. */}
+      {failedSyncCount > 0 && (
         <Animated.View
           style={[
             styles.syncBannerWrap,
@@ -448,15 +574,10 @@ export default function HomeScreen({
             },
           ]}
         >
-          <Pressable
-            onPress={failedSyncCount > 0 ? retryFailedWorkouts : undefined}
-            disabled={failedSyncCount === 0}
-          >
-            <Glass style={styles.syncBanner} interactive={failedSyncCount > 0}>
-              <Text style={[styles.syncText, failedSyncCount > 0 && styles.syncError]}>
-                {failedSyncCount > 0
-                  ? `${failedSyncCount} workout upload failed · Retry`
-                  : 'Syncing workout…'}
+          <Pressable onPress={retryFailedWorkouts}>
+            <Glass style={styles.syncBanner} interactive>
+              <Text style={[styles.syncText, styles.syncError]}>
+                {`${failedSyncCount} workout upload failed · Retry`}
               </Text>
             </Glass>
           </Pressable>
@@ -475,39 +596,6 @@ export default function HomeScreen({
         <Pressable style={StyleSheet.absoluteFill} onPress={() => { tick(); springTo(0); }} />
       </Animated.View>
 
-      {/* Active split: name, next workout, streak — the growing sheet covers it */}
-      {activeSplit && (
-        <Animated.View
-          style={[
-            styles.activeSplitWrap,
-            {
-              transform: [
-                { translateY: uiAnim.interpolate({ inputRange: [0, 1], outputRange: [240, 0] }) },
-              ],
-            },
-          ]}
-          pointerEvents={sheetLive ? 'none' : 'box-none'}
-        >
-          <Pressable onPress={() => { thump(); springTo(1); }}>
-            <Glass style={styles.activeSplitCard} interactive>
-              <View style={styles.activeSplitTop}>
-                <Text style={styles.activeSplitLabel}>Active split</Text>
-                {activeStreak > 0 && (
-                  <Text style={styles.activeSplitStreak}>🔥 {activeStreak}</Text>
-                )}
-              </View>
-              <Text style={styles.activeSplitName} numberOfLines={1}>
-                {activeSplit.name}
-              </Text>
-              {activeNextPlan && (
-                <Text style={styles.activeSplitNext} numberOfLines={1}>
-                  Next · Day {activeNextPlan.dayNumber} {activeNextPlan.name}
-                </Text>
-              )}
-            </Glass>
-          </Pressable>
-        </Animated.View>
-      )}
 
       {/* The morphing glass: pill when closed, stretches into the sheet */}
       <Animated.View
@@ -769,6 +857,71 @@ export default function HomeScreen({
           </Text>
         </Animated.View>
       )}
+
+      {/* Active-split picker: in-tree glass overlay (RN Modal breaks glass) */}
+      {splitPickerOpen && (
+        <View style={styles.pickerLayer} accessibilityViewIsModal>
+          <Pressable
+            accessible={false}
+            style={styles.pickerBackdrop}
+            onPress={() => setSplitPickerOpen(false)}
+          />
+          <View style={styles.pickerFrame}>
+            <Glass style={styles.pickerCard}>
+              <Text style={styles.pickerTitle}>Active split</Text>
+              <Text style={styles.pickerHint}>
+                Lives on your home screen with a streak and one-tap start.
+              </Text>
+              <ScrollView
+                style={styles.pickerList}
+                showsVerticalScrollIndicator={false}
+              >
+                {account.splits.data.map((split) => {
+                  const isCurrent = split.id === account.activeSplitId;
+                  return (
+                    <Pressable
+                      key={split.id}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Make ${split.name} the active split`}
+                      onPress={() => {
+                        thump();
+                        account.setActiveSplit(split.id);
+                        setSplitPickerOpen(false);
+                      }}
+                      style={styles.pickerRow}
+                    >
+                      <Text
+                        style={[styles.pickerRowText, isCurrent && styles.pickerRowCurrent]}
+                        numberOfLines={1}
+                      >
+                        {split.name}
+                      </Text>
+                      {isCurrent && <Text style={styles.pickerRowCurrent}>✓</Text>}
+                    </Pressable>
+                  );
+                })}
+                {account.splits.data.length === 0 && (
+                  <Text style={styles.pickerHint}>
+                    No splits yet — create one from the Workouts screen.
+                  </Text>
+                )}
+              </ScrollView>
+              {activeSplit && (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => {
+                    tick();
+                    account.setActiveSplit(null);
+                    setSplitPickerOpen(false);
+                  }}
+                >
+                  <Text style={styles.pickerClear}>Clear active split</Text>
+                </Pressable>
+              )}
+            </Glass>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -853,10 +1006,14 @@ const styles = StyleSheet.create({
     bottom: 0,
     overflow: 'hidden',
   },
-  dialWrap: {
+  topZoneWrap: {
     position: 'absolute',
     top: 132,
     left: 20,
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
   },
   dialGlass: {
     width: DIAL_SIZE,
@@ -869,6 +1026,16 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  dialParticleOrbit: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+  },
+  dialParticle: {
+    position: 'absolute',
+    top: 1,
+    borderRadius: 2,
+    backgroundColor: theme.accent,
   },
   dialValue: {
     color: theme.text,
@@ -884,49 +1051,108 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
-  activeSplitWrap: {
-    position: 'absolute',
-    left: 24,
-    right: 24,
-    bottom: 36 + PILL_H + 12,
-    alignItems: 'center',
+  activeZonePress: {
+    flex: 1,
+    maxWidth: 250,
+    marginLeft: 'auto',
   },
-  activeSplitCard: {
+  activeZone: {
     borderRadius: 20,
     paddingVertical: 11,
-    paddingHorizontal: 16,
-    minWidth: 220,
-    maxWidth: 340,
+    paddingHorizontal: 15,
   },
-  activeSplitTop: {
+  activeZoneTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 14,
+    gap: 12,
   },
-  activeSplitLabel: {
+  activeZoneLabel: {
     color: theme.accent,
     fontSize: 10,
     fontWeight: '800',
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  activeSplitStreak: {
+  activeZoneStreak: {
     color: theme.text,
     fontSize: 12,
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
   },
-  activeSplitName: {
+  activeZoneName: {
     color: theme.text,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
     marginTop: 3,
   },
-  activeSplitNext: {
+  activeZoneNext: {
+    color: theme.textDim,
+    fontSize: 11.5,
+    marginTop: 2,
+  },
+  pickerLayer: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    zIndex: 100,
+    elevation: 100,
+  },
+  pickerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  pickerFrame: {
+    width: '100%',
+    maxWidth: 380,
+  },
+  pickerCard: {
+    borderRadius: 24,
+    padding: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  pickerTitle: {
+    color: theme.text,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  pickerHint: {
     color: theme.textDim,
     fontSize: 12,
-    marginTop: 2,
+    lineHeight: 17,
+    marginTop: 5,
+    marginBottom: 8,
+  },
+  pickerList: {
+    maxHeight: 320,
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.09)',
+  },
+  pickerRowText: {
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: '600',
+    flexShrink: 1,
+  },
+  pickerRowCurrent: {
+    color: theme.accent,
+    fontWeight: '700',
+  },
+  pickerClear: {
+    color: '#E27878',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+    paddingTop: 14,
   },
   sheetCardActive: {
     borderColor: 'rgba(65,196,110,0.5)',
