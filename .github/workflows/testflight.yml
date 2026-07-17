@@ -88,8 +88,10 @@ jobs:
         run: eas build --platform ios --profile production --non-interactive --auto-submit
         working-directory: app
 
+      # !cancelled(): a run superseded by a newer push is not a failure — skip
+      # the email instead of sending a misleading ❌.
       - name: Email contributors the result
-        if: ${{ always() && env.GMAIL_APP_PASSWORD != '' }}
+        if: ${{ !cancelled() && env.GMAIL_APP_PASSWORD != '' }}
         continue-on-error: true
         uses: dawidd6/action-send-mail@v3
         with:

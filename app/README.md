@@ -1,6 +1,12 @@
-# fitapp — barebones draft
+# AlgoSplit app
 
-React Native (Expo) draft of the heatmap-first fitness app. Deliberately minimal — no navigation library, no persistence, no backend.
+React Native (Expo) client of the heatmap-first fitness app. Parts of this
+document date back to the barebones prototype — trust the source tree over
+prose here.
+
+Every push to main that touches `app/` triggers an EAS iOS build that
+auto-submits to TestFlight and emails both contributors
+(`.github/workflows/testflight.yml`).
 
 ## Run it
 
