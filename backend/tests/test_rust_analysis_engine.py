@@ -251,6 +251,159 @@ def test_rust_engine_matches_full_python_response_for_golden_cases(monkeypatch, 
     importlib.util.find_spec("analysis_engine_rs") is None,
     reason="analysis_engine_rs extension has not been built with maturin",
 )
+def test_rust_engine_matches_python_for_schoenfeld_high_volume_tail(monkeypatch):
+    request = SplitRequest(
+        name="Schoenfeld High Volume",
+        cycle_length=7,
+        stimulus_duration=48,
+        maintenance_volume=3,
+        dataset="schoenfeld",
+        include_breakdowns=True,
+        sessions=[
+            SessionInput(
+                name="High Volume Push",
+                day=1,
+                exercises=[ExerciseInput(name="Bench Press", sets=20)],
+            )
+        ],
+    )
+
+    monkeypatch.setenv("ANALYSIS_ENGINE", "python")
+    python_response = _run_split_analysis(request, user_id=None)
+    rust_response = run_rust_split_analysis(request)
+
+    assert compare_analysis_responses(python_response, rust_response) is None
+
+    prime_contribution = next(
+        contribution
+        for contribution in rust_response.session_breakdowns[0].exercises[0].muscle_contributions
+        if contribution.tier == "prime"
+    )
+    assert len(prime_contribution.sets) == 20
+    assert prime_contribution.sets[9].local_multiplier == pytest.approx(
+        prime_contribution.sets[8].local_multiplier * 0.97
+    )
+    assert any(suggestion.issue == "Excessive volume" for suggestion in rust_response.suggestions)
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("analysis_engine_rs") is None,
+    reason="analysis_engine_rs extension has not been built with maturin",
+)
+def test_rust_engine_matches_python_for_partial_recovery_atrophy_and_consecutive_fatigue(
+    monkeypatch,
+):
+    request = SplitRequest(
+        name="Recovery And Atrophy",
+        cycle_length=7,
+        stimulus_duration=48,
+        maintenance_volume=3,
+        dataset="average",
+        include_breakdowns=True,
+        sessions=[
+            SessionInput(
+                name="Push One",
+                day=1,
+                exercises=[ExerciseInput(name="Bench Press", sets=3)],
+            ),
+            SessionInput(
+                name="Push Two",
+                day=2,
+                exercises=[ExerciseInput(name="Bench Press", sets=3)],
+            ),
+        ],
+    )
+
+    monkeypatch.setenv("ANALYSIS_ENGINE", "python")
+    python_response = _run_split_analysis(request, user_id=None)
+    rust_response = run_rust_split_analysis(request)
+
+    assert compare_analysis_responses(python_response, rust_response) is None
+
+    second_session = next(
+        breakdown
+        for breakdown in rust_response.session_breakdowns
+        if breakdown.session_name == "Push Two"
+    )
+    prime_contribution = next(
+        contribution
+        for contribution in second_session.exercises[0].muscle_contributions
+        if contribution.tier == "prime"
+    )
+    assert {item.recovery_multiplier for item in prime_contribution.sets} == {0.5}
+    assert second_session.consecutive_days == 2
+    assert second_session.consecutive_day_penalty < 1.0
+    assert any(muscle.atrophy > 0.0 for muscle in rust_response.muscles if muscle.stimulus > 0.0)
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("analysis_engine_rs") is None,
+    reason="analysis_engine_rs extension has not been built with maturin",
+)
+def test_rust_engine_matches_python_for_all_resistance_profiles(monkeypatch):
+    request = SplitRequest(
+        name="Resistance Profiles",
+        cycle_length=7,
+        stimulus_duration=48,
+        maintenance_volume=3,
+        dataset="pelland",
+        include_breakdowns=True,
+        sessions=[
+            SessionInput(
+                name="Ascending",
+                day=1,
+                exercises=[
+                    ExerciseInput(name="Bench Press", sets=3, resistance_profile="ascending")
+                ],
+            ),
+            SessionInput(
+                name="Mid",
+                day=4,
+                exercises=[ExerciseInput(name="Bench Press", sets=3, resistance_profile="mid")],
+            ),
+            SessionInput(
+                name="Descending",
+                day=7,
+                exercises=[
+                    ExerciseInput(name="Bench Press", sets=3, resistance_profile="descending")
+                ],
+            ),
+        ],
+    )
+
+    monkeypatch.setenv("ANALYSIS_ENGINE", "python")
+    python_response = _run_split_analysis(request, user_id=None)
+    rust_response = run_rust_split_analysis(request)
+
+    assert compare_analysis_responses(python_response, rust_response) is None
+
+    exercises = {
+        breakdown.session_name: breakdown.exercises[0]
+        for breakdown in rust_response.session_breakdowns
+    }
+    assert {exercise.resistance_profile for exercise in exercises.values()} == {
+        "ascending",
+        "mid",
+        "descending",
+    }
+    ascending_weights = {
+        item.muscle_id: item.leverage_weight
+        for item in exercises["Ascending"].muscle_contributions
+    }
+    descending_weights = {
+        item.muscle_id: item.leverage_weight
+        for item in exercises["Descending"].muscle_contributions
+    }
+    assert any(
+        ascending_weights[muscle_id] != pytest.approx(descending_weights[muscle_id])
+        for muscle_id in ascending_weights.keys() & descending_weights.keys()
+    )
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("analysis_engine_rs") is None,
+    reason="analysis_engine_rs extension has not been built with maturin",
+)
 def test_rust_engine_matches_python_duplicate_day_breakdown_name(monkeypatch):
     request = SplitRequest(
         name="Duplicate Days",

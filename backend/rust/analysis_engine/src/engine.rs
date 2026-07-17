@@ -1153,6 +1153,18 @@ fn lcm(a: i32, b: i32) -> i32 {
 mod tests {
     use super::*;
 
+    fn test_region(region_id: &str, leverage: &str) -> RegionInput {
+        RegionInput {
+            region_id: region_id.to_string(),
+            display_name: region_id.to_uppercase(),
+            parent_group: "test".to_string(),
+            leverage: leverage.to_string(),
+            damage_tier: "0".to_string(),
+            recovery_modifier: 1.0,
+            axial_fatigue_contributor: false,
+        }
+    }
+
     #[test]
     fn cns_formula_matches_expected_shape() {
         let fresh = calculate_cns_fatigue(1, 0.0);
@@ -1166,29 +1178,85 @@ mod tests {
         let mut targets = TieredTargets::new();
         targets.insert(
             "prime".to_string(),
-            IndexMap::from([("a".to_string(), 0.7), ("b".to_string(), 0.3)]),
+            IndexMap::from([("a".to_string(), 0.5), ("b".to_string(), 0.5)]),
         );
         ensure_tiers(&mut targets);
-        let region_a = RegionInput {
-            region_id: "a".to_string(),
-            display_name: "A".to_string(),
-            parent_group: "x".to_string(),
-            leverage: "S".to_string(),
-            damage_tier: "0".to_string(),
-            recovery_modifier: 1.0,
-            axial_fatigue_contributor: false,
-        };
-        let region_b = RegionInput {
-            leverage: "L".to_string(),
-            region_id: "b".to_string(),
-            ..region_a.clone()
-        };
+        let region_a = test_region("a", "S");
+        let region_b = test_region("b", "L");
         let muscles = BTreeMap::from([
             ("a".to_string(), MuscleRegion::from(&region_a)),
             ("b".to_string(), MuscleRegion::from(&region_b)),
         ]);
-        let adjusted = redistribute_leverage_weights(&targets, "descending", &muscles);
-        let total: f64 = adjusted.values().flat_map(|tier| tier.values()).sum();
-        assert!((total - 1.0).abs() < 1e-9);
+        let descending = redistribute_leverage_weights(&targets, "descending", &muscles);
+        let ascending = redistribute_leverage_weights(&targets, "ascending", &muscles);
+        let descending_total: f64 = descending.values().flat_map(|tier| tier.values()).sum();
+        let ascending_total: f64 = ascending.values().flat_map(|tier| tier.values()).sum();
+
+        assert!((descending_total - 1.0).abs() < 1e-9);
+        assert!((ascending_total - 1.0).abs() < 1e-9);
+        assert!(descending["prime"]["b"] > descending["prime"]["a"]);
+        assert!(ascending["prime"]["a"] > ascending["prime"]["b"]);
+    }
+
+    #[test]
+    fn prime_marginal_tail_matches_python_after_nine_sets() {
+        let region = test_region("a", "M");
+        let mut muscle = MuscleRegion::from(&region);
+        let mut applied = Vec::new();
+
+        for _ in 0..10 {
+            applied.push(muscle.apply_stimulus(
+                1.0, "prime", false, false, None, 48, "average", 0.0, 1.0, false, 1.0,
+            ));
+        }
+
+        assert!((applied[8] - DA[8]).abs() < 1e-12);
+        assert!((applied[9] - DA[8] * 0.97).abs() < 1e-12);
+        assert_eq!(muscle.primary_sets, 10);
+        assert_eq!(muscle.prime_sets, 10);
+    }
+
+    #[test]
+    fn partial_recovery_and_atrophy_match_python_contract() {
+        let region = test_region("a", "M");
+        let mut muscle = MuscleRegion::from(&region);
+        muscle.last_session_time = Some(0.0);
+
+        let recovered_stimulus = muscle.apply_stimulus(
+            1.0,
+            "prime",
+            false,
+            false,
+            Some(24.0),
+            48,
+            "schoenfeld",
+            24.0,
+            1.0,
+            true,
+            1.0,
+        );
+        muscle
+            .apply_atrophy(Some(60.0), 48, 3, "schoenfeld")
+            .expect("valid maintenance volume");
+
+        assert!((recovered_stimulus - 0.5).abs() < 1e-12);
+        assert_eq!(muscle.last_breakdown.unwrap().recovery_multiplier, 0.5);
+        assert!((muscle.atrophy - 0.161).abs() < 1e-12);
+    }
+
+    #[test]
+    fn consecutive_day_penalty_matches_components_and_floor() {
+        let penalty = calculate_consecutive_day_penalty(3, 2.0, 10);
+
+        assert!((penalty - 0.5692).abs() < 1e-12);
+        assert_eq!(calculate_consecutive_day_penalty(1, 100.0, 100), 1.0);
+        assert_eq!(calculate_consecutive_day_penalty(8, 100.0, 100), 0.25);
+    }
+
+    #[test]
+    fn unilateral_bonus_is_applied_without_bilateral_penalty() {
+        assert_eq!(get_bilateral_modifier(true, false), 1.0);
+        assert_eq!(get_bilateral_modifier(false, true), 1.05);
+        assert_eq!(get_bilateral_modifier(true, true), 1.05);
     }
 }
