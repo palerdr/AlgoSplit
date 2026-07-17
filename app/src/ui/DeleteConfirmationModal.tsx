@@ -7,6 +7,7 @@ import {
 } from 'react-native';
 import { theme } from '../theme';
 import Glass from './Glass';
+import PopupLayer from './PopupLayer';
 
 interface DeleteConfirmationModalProps {
   visible: boolean;
@@ -18,13 +19,7 @@ interface DeleteConfirmationModalProps {
   onConfirm: () => void;
 }
 
-/**
- * A single, predictable confirmation surface for destructive actions.
- * Deliberately NOT an RN Modal: modals live in a separate native window where
- * GlassView cannot sample the screen behind it, so the card loses the liquid
- * glass look. Rendered in-tree as the last child of a full-screen container,
- * it overlays everything and the glass composites correctly.
- */
+/** A single, predictable confirmation surface for destructive actions. */
 export default function DeleteConfirmationModal({
   visible,
   title,
@@ -34,21 +29,9 @@ export default function DeleteConfirmationModal({
   onCancel,
   onConfirm,
 }: DeleteConfirmationModalProps) {
-  if (!visible) return null;
-
-  const cancel = () => {
-    if (!busy) onCancel();
-  };
-
   return (
-    <View style={styles.layer} accessibilityViewIsModal>
-      <Pressable
-        accessible={false}
-        style={styles.backdrop}
-        onPress={cancel}
-        disabled={busy}
-      />
-      <View accessible accessibilityRole="alert" style={styles.frame}>
+    <PopupLayer visible={visible} onDismiss={onCancel} dismissDisabled={busy}>
+      <View accessible accessibilityRole="alert">
         <Glass style={styles.card}>
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
@@ -56,7 +39,7 @@ export default function DeleteConfirmationModal({
           <View style={styles.actions}>
             <Pressable
               accessibilityRole="button"
-              onPress={cancel}
+              onPress={onCancel}
               disabled={busy}
               hitSlop={8}
               style={styles.actionButton}
@@ -78,27 +61,11 @@ export default function DeleteConfirmationModal({
           </View>
         </Glass>
       </View>
-    </View>
+    </PopupLayer>
   );
 }
 
 const styles = StyleSheet.create({
-  layer: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-    zIndex: 100,
-    elevation: 100,
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  frame: {
-    width: '100%',
-    maxWidth: 420,
-  },
   card: {
     borderRadius: 22,
     padding: 20,

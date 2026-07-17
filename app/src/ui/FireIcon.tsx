@@ -1,41 +1,59 @@
-import React from 'react';
-import { StyleProp, ViewStyle } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import React, { useEffect, useRef } from 'react';
+import { Animated, Easing, StyleProp, ViewStyle } from 'react-native';
+import Svg, { G, Path } from 'react-native-svg';
 
 interface FireIconProps {
-  /** Rendered height in points; width follows the glyph's aspect ratio. */
+  /** Rendered height in points; width follows the glyph's square viewBox. */
   size?: number;
   style?: StyleProp<ViewStyle>;
 }
 
-const ASPECT = 24 / 30; // width / height of the source path's viewBox
+// Lucide (ISC license, lucide.dev) "flame" glyph — a well-known, simple
+// open-source icon set. Kept as raw path data rather than the
+// lucide-react-native package: Lucide icons are single-color/stroke by
+// design, and the two-tone fill + inset core below needed the path twice
+// at different scales anyway, so there was nothing left for the package
+// to do that react-native-svg (already a dependency) doesn't.
+const FLAME_PATH =
+  'M12 3q1 4 4 6.5t3 5.5a1 1 0 0 1-14 0 5 5 0 0 1 1-3 1 1 0 0 0 5 0c0-2-1.5-3-1.5-5q0-2 2.5-4';
 
-/**
- * A small custom flame glyph for streak badges. Apple's 🔥 emoji renders
- * too cartoonish and inconsistently across OS versions at this size —
- * this is a flat two-tone flame designed to stay legible around 12-16pt.
- */
 export default function FireIcon({ size = 14, style }: FireIconProps) {
+  // A gentle continuous flicker — scale + a few degrees of wobble — rather
+  // than a heavier Lottie asset, which would add a native module for a
+  // 14pt badge and has open Expo-Go/web compatibility gaps.
+  const flicker = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(flicker, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(flicker, {
+          toValue: 0,
+          duration: 900,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [flicker]);
+
+  const scale = flicker.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] });
+  const rotate = flicker.interpolate({ inputRange: [0, 1], outputRange: ['-3deg', '3deg'] });
+
   return (
-    <Svg width={size * ASPECT} height={size} viewBox="0 0 24 30" style={style}>
-      <Path
-        d="M14 1
-          C19.5 4.5 21.5 9 20 14
-          C18.7 18.5 15 22.5 11 29
-          C7.5 24.5 4 19.5 4.5 14.5
-          C5 9.5 8.5 4.5 14 1
-          Z"
-        fill="#E8452A"
-      />
-      <Path
-        d="M14 11
-          C17 14 18 17.5 16.5 21.5
-          C15.5 24.5 13.5 27 11.5 29
-          C9 26 7 22.5 7.5 18.5
-          C8 14.5 10.5 11.5 14 11
-          Z"
-        fill="#FFB238"
-      />
-    </Svg>
+    <Animated.View style={[style, { transform: [{ scale }, { rotate }] }]}>
+      <Svg width={size} height={size} viewBox="0 0 24 24">
+        <Path fill="#E8452A" d={FLAME_PATH} />
+        <G transform="translate(6.2 9.5) scale(0.5)">
+          <Path fill="#FFB238" d={FLAME_PATH} />
+        </G>
+      </Svg>
+    </Animated.View>
   );
 }

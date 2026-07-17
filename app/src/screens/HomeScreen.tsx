@@ -17,6 +17,7 @@ import Svg, { Circle } from 'react-native-svg';
 import BodyHeatmap from '../3d/BodyHeatmap';
 import FireIcon from '../ui/FireIcon';
 import Glass from '../ui/Glass';
+import PopupLayer from '../ui/PopupLayer';
 import { levelsFromNet, stimulusScore } from '../analysis/stimulus';
 import { useAppState } from '../state/AppState';
 import { useAccountState } from '../state/AccountState';
@@ -854,112 +855,101 @@ export default function HomeScreen({
         </Animated.View>
       )}
 
-      {/* Active-split picker: in-tree glass overlay (RN Modal breaks glass) */}
-      {splitPickerOpen && (
-        <View style={styles.pickerLayer} accessibilityViewIsModal>
-          <Pressable
-            accessible={false}
-            style={styles.pickerBackdrop}
-            onPress={() => setSplitPickerOpen(false)}
-          />
-          <View style={styles.pickerFrame}>
-            <Glass style={styles.pickerCard}>
-              <Text style={styles.pickerTitle}>Active split</Text>
-              <Text style={styles.pickerHint}>
-                Lives on your home screen with a streak and one-tap start.
-              </Text>
-              <ScrollView
-                style={styles.pickerList}
-                showsVerticalScrollIndicator={false}
-              >
-                {account.splits.data.map((split) => {
-                  const isCurrent = split.id === account.activeSplitId;
-                  return (
-                    <Pressable
-                      key={split.id}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Make ${split.name} the active split`}
-                      onPress={() => {
-                        thump();
-                        account.setActiveSplit(split.id);
-                        setSplitPickerOpen(false);
-                      }}
-                      style={styles.pickerRow}
-                    >
-                      <Text
-                        style={[styles.pickerRowText, isCurrent && styles.pickerRowCurrent]}
-                        numberOfLines={1}
-                      >
-                        {split.name}
-                      </Text>
-                      {isCurrent && <Text style={styles.pickerRowCurrent}>✓</Text>}
-                    </Pressable>
-                  );
-                })}
-                {account.splits.data.length === 0 && (
-                  <Text style={styles.pickerHint}>
-                    No splits yet — create one from the Workouts screen.
-                  </Text>
-                )}
-              </ScrollView>
-              {activeSplit && (
+      {/* Active-split picker */}
+      <PopupLayer
+        visible={splitPickerOpen}
+        onDismiss={() => setSplitPickerOpen(false)}
+        maxWidth={380}
+      >
+        <Glass style={styles.pickerCard}>
+          <Text style={styles.pickerTitle}>Active split</Text>
+          <Text style={styles.pickerHint}>
+            Lives on your home screen with a streak and one-tap start.
+          </Text>
+          <ScrollView
+            style={styles.pickerList}
+            showsVerticalScrollIndicator={false}
+          >
+            {account.splits.data.map((split) => {
+              const isCurrent = split.id === account.activeSplitId;
+              return (
                 <Pressable
+                  key={split.id}
                   accessibilityRole="button"
+                  accessibilityLabel={`Make ${split.name} the active split`}
                   onPress={() => {
-                    tick();
-                    account.setActiveSplit(null);
+                    thump();
+                    account.setActiveSplit(split.id);
                     setSplitPickerOpen(false);
                   }}
+                  style={styles.pickerRow}
                 >
-                  <Text style={styles.pickerClear}>Clear active split</Text>
+                  <Text
+                    style={[styles.pickerRowText, isCurrent && styles.pickerRowCurrent]}
+                    numberOfLines={1}
+                  >
+                    {split.name}
+                  </Text>
+                  {isCurrent && <Text style={styles.pickerRowCurrent}>✓</Text>}
                 </Pressable>
-              )}
-            </Glass>
-          </View>
-        </View>
-      )}
-
-      {/* Force-start confirm: in-tree glass overlay (RN Modal breaks glass) */}
-      {forceStartPlan && (
-        <View style={styles.pickerLayer} accessibilityViewIsModal>
-          <Pressable
-            accessible={false}
-            style={styles.pickerBackdrop}
-            onPress={() => setForceStartPlan(null)}
-          />
-          <View style={styles.pickerFrame}>
-            <Glass style={styles.pickerCard}>
-              <Text style={styles.pickerTitle}>Already done for today</Text>
+              );
+            })}
+            {account.splits.data.length === 0 && (
               <Text style={styles.pickerHint}>
-                You’ve completed {activeSplit?.name ?? 'this split'}’s assigned workout for
-                today.
+                No splits yet — create one from the Workouts screen.
               </Text>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Start it anyway"
-                onPress={() => {
-                  const plan = forceStartPlan;
-                  setForceStartPlan(null);
-                  if (plan) pick(plan);
-                }}
-              >
-                <Glass style={styles.forceStartButton} interactive>
-                  <Text style={styles.forceStartButtonText}>Start it anyway</Text>
-                </Glass>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => {
-                  tick();
-                  setForceStartPlan(null);
-                }}
-              >
-                <Text style={styles.forceStartCancel}>Not now</Text>
-              </Pressable>
+            )}
+          </ScrollView>
+          {activeSplit && (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                tick();
+                account.setActiveSplit(null);
+                setSplitPickerOpen(false);
+              }}
+            >
+              <Text style={styles.pickerClear}>Clear active split</Text>
+            </Pressable>
+          )}
+        </Glass>
+      </PopupLayer>
+
+      {/* Force-start confirm */}
+      <PopupLayer
+        visible={forceStartPlan !== null}
+        onDismiss={() => setForceStartPlan(null)}
+        maxWidth={380}
+      >
+        <Glass style={styles.pickerCard}>
+          <Text style={styles.pickerTitle}>Already done for today</Text>
+          <Text style={styles.pickerHint}>
+            You’ve completed {activeSplit?.name ?? 'this split'}’s assigned workout for today.
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Start it anyway"
+            onPress={() => {
+              const plan = forceStartPlan;
+              setForceStartPlan(null);
+              if (plan) pick(plan);
+            }}
+          >
+            <Glass style={styles.forceStartButton} interactive>
+              <Text style={styles.forceStartButtonText}>Start it anyway</Text>
             </Glass>
-          </View>
-        </View>
-      )}
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => {
+              tick();
+              setForceStartPlan(null);
+            }}
+          >
+            <Text style={styles.forceStartCancel}>Not now</Text>
+          </Pressable>
+        </Glass>
+      </PopupLayer>
     </View>
   );
 }
@@ -1119,22 +1109,6 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     fontWeight: '700',
     marginTop: 2,
-  },
-  pickerLayer: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-    zIndex: 100,
-    elevation: 100,
-  },
-  pickerBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  pickerFrame: {
-    width: '100%',
-    maxWidth: 380,
   },
   pickerCard: {
     borderRadius: 24,
