@@ -39,6 +39,9 @@ jobs:
     runs-on: ubuntu-latest
     # EAS free-tier builds queue serially; leave room for a build ahead of us.
     timeout-minutes: 120
+    env:
+      GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -61,15 +64,15 @@ jobs:
         working-directory: app
 
       - name: Email contributors that a build started
-        if: ${{ secrets.GMAIL_APP_PASSWORD != '' }}
+        if: ${{ env.GMAIL_APP_PASSWORD != '' }}
         continue-on-error: true
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
           server_port: 465
           secure: true
-          username: ${{ secrets.GMAIL_USERNAME }}
-          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          username: ${{ env.GMAIL_USERNAME }}
+          password: ${{ env.GMAIL_APP_PASSWORD }}
           from: AlgoSplit CI
           to: ${{ env.NOTIFY_RECIPIENTS }}
           subject: '🏗 AlgoSplit TestFlight build started'
@@ -90,21 +93,18 @@ jobs:
         working-directory: app
 
       - name: Email contributors the result
-        if: ${{ always() && secrets.GMAIL_APP_PASSWORD != '' }}
+        if: ${{ always() && env.GMAIL_APP_PASSWORD != '' }}
         continue-on-error: true
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
           server_port: 465
           secure: true
-          username: ${{ secrets.GMAIL_USERNAME }}
-          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          username: ${{ env.GMAIL_USERNAME }}
+          password: ${{ env.GMAIL_APP_PASSWORD }}
           from: AlgoSplit CI
           to: ${{ env.NOTIFY_RECIPIENTS }}
-          subject: >-
-            ${{ steps.build.outcome == 'success'
-              && '✅ AlgoSplit build submitted to TestFlight'
-              || '❌ AlgoSplit TestFlight build failed' }}
+          subject: ${{ steps.build.outcome == 'success' && '✅ AlgoSplit build submitted to TestFlight' || '❌ AlgoSplit TestFlight build failed' }}
           body: |
             Build ${{ steps.build.outcome == 'success' && 'succeeded and was submitted to TestFlight — it will be installable once Apple finishes processing.' || 'failed — see the logs below.' }}
 
