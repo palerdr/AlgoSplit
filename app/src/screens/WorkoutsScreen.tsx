@@ -395,7 +395,12 @@ export default function WorkoutsScreen({
         ))}
 
         <FadeIn delay={60}>
-          <Text style={[styles.sectionLabel, styles.splitsLabel]}>Splits</Text>
+          <Text style={[styles.sectionLabel, styles.splitsLabel]}>
+            Splits{' '}
+            <Text style={styles.sectionHint}>
+              (a combination of workouts in a repeating schedule)
+            </Text>
+          </Text>
         </FadeIn>
         <FadeIn delay={90}>
           <Pressable
@@ -513,6 +518,13 @@ const styles = StyleSheet.create({
   },
   splitsLabel: {
     marginTop: 22,
+  },
+  sectionHint: {
+    color: theme.textDim,
+    fontSize: 10,
+    fontWeight: '500',
+    textTransform: 'none',
+    letterSpacing: 0.2,
   },
   newBtn: {
     borderRadius: 20,

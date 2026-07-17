@@ -472,7 +472,6 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
 
         <FadeIn delay={215}>
           <Glass style={[styles.card, styles.dangerCard]}>
-            <Text style={styles.dangerTitle}>Delete account</Text>
             <Text style={styles.body}>
               Permanently deletes your account, saved splits, workouts, progress, and local account cache.
             </Text>
@@ -620,7 +619,6 @@ const styles = StyleSheet.create({
   buttonText: { color: theme.accent, fontSize: 15, fontWeight: '700' },
   sessionDangerAction: { color: '#E27878', fontSize: 12, fontWeight: '700', textAlign: 'center', marginTop: 3 },
   dangerCard: { borderColor: 'rgba(226,120,120,0.28)' },
-  dangerTitle: { color: '#E27878', fontSize: 15, fontWeight: '700', marginBottom: 7 },
   dangerAction: { color: '#E27878', fontSize: 13, fontWeight: '700', marginTop: 15 },
   confirmArea: { marginTop: 15 },
   confirmLabel: { color: theme.textDim, fontSize: 12, marginBottom: 8 },

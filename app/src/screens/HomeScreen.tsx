@@ -22,6 +22,7 @@ import { workoutAnalysisNetStimulus } from '../api/accountData';
 import {
   AccountWorkoutPlan,
   accountWorkoutGroups,
+  templateWorkoutPlans,
 } from '../workout/splitSessions';
 import { theme } from '../theme';
 
@@ -69,6 +70,10 @@ export default function HomeScreen({
     () => accountWorkoutGroups(account.splits.data),
     [account.splits.data]
   );
+  const templatePlans = React.useMemo(
+    () => templateWorkoutPlans(account.workoutTemplates.data),
+    [account.workoutTemplates.data]
+  );
   const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
   const selectedWorkoutGroup =
     workoutGroups.find((group) => group.id === selectedSplitId) ?? null;
@@ -92,6 +97,13 @@ export default function HomeScreen({
 
   const SHEET_HEIGHT = Math.min(height * 0.64, 580);
   const OPEN_DRAG = SHEET_HEIGHT * 0.5; // finger travel that maps to fully open
+
+  useEffect(() => {
+    if (account.status === 'authenticated') {
+      account.ensureWorkoutTemplates();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account.status]);
 
   // ── Post-workout celebration ────────────────────────────────────
   // The SAME body model that lives on this screen plays the ending: zoomed in
@@ -467,19 +479,7 @@ export default function HomeScreen({
                 <Text style={styles.sheetStimValue}>{loadedWeekEffort ?? '—'}</Text>
               </View>
 
-              {account.splits.loading && !account.splits.loaded ? (
-                <Text style={styles.planStatus}>Loading your saved workouts…</Text>
-              ) : account.splits.error ? (
-                <Pressable onPress={account.refreshSplits}>
-                  <Text style={[styles.planStatus, styles.planError]}>
-                    Could not load saved workouts. Tap to retry.
-                  </Text>
-                </Pressable>
-              ) : workoutGroups.length === 0 ? (
-                <Text style={styles.planStatus}>
-                  No saved split sessions yet. Create a split to add planned workouts.
-                </Text>
-              ) : selectedWorkoutGroup ? (
+              {selectedWorkoutGroup ? (
                 <View>
                   <View style={styles.nestedHeader}>
                     <Pressable
@@ -513,31 +513,70 @@ export default function HomeScreen({
                 </View>
               ) : (
                 <View>
-                  {workoutGroups.map((group) => (
-                    <Pressable
-                      key={group.id}
-                      onPress={() => {
-                        tick();
-                        setSelectedSplitId(group.id);
-                      }}
-                    >
-                      {({ pressed }) => (
-                        <View style={[styles.sheetCard, pressed && styles.cardPressed]}>
-                          <View style={styles.planTitleRow}>
-                            <Text style={styles.cardTitle}>{group.name}</Text>
-                            <Text style={styles.planSplit}>›</Text>
-                          </View>
-                          <Text style={styles.cardSub} numberOfLines={1}>
-                            {group.sessions.length} workout {group.sessions.length === 1 ? 'day' : 'days'}
-                            {group.cycleLength ? ` · ${group.cycleLength}-day cycle` : ''}
-                            {group.sessions.length > 0
-                              ? ` · ${group.sessions.map((session) => session.name).join(' · ')}`
-                              : ''}
-                          </Text>
-                        </View>
-                      )}
+                  {/* Splits — the default section, no title needed */}
+                  {account.splits.loading && !account.splits.loaded ? (
+                    <Text style={styles.planStatus}>Loading your saved splits…</Text>
+                  ) : account.splits.error ? (
+                    <Pressable onPress={account.refreshSplits}>
+                      <Text style={[styles.planStatus, styles.planError]}>
+                        Could not load saved splits. Tap to retry.
+                      </Text>
                     </Pressable>
-                  ))}
+                  ) : workoutGroups.length === 0 ? (
+                    <Text style={styles.planStatus}>
+                      No saved splits yet. Create one from the Workouts screen.
+                    </Text>
+                  ) : (
+                    workoutGroups.map((group) => (
+                      <Pressable
+                        key={group.id}
+                        onPress={() => {
+                          tick();
+                          setSelectedSplitId(group.id);
+                        }}
+                      >
+                        {({ pressed }) => (
+                          <View style={[styles.sheetCard, pressed && styles.cardPressed]}>
+                            <View style={styles.planTitleRow}>
+                              <Text style={styles.cardTitle}>{group.name}</Text>
+                              <Text style={styles.planSplit}>›</Text>
+                            </View>
+                            <Text style={styles.cardSub} numberOfLines={1}>
+                              {group.sessions.length} workout {group.sessions.length === 1 ? 'day' : 'days'}
+                              {group.cycleLength ? ` · ${group.cycleLength}-day cycle` : ''}
+                              {group.sessions.length > 0
+                                ? ` · ${group.sessions.map((session) => session.name).join(' · ')}`
+                                : ''}
+                            </Text>
+                          </View>
+                        )}
+                      </Pressable>
+                    ))
+                  )}
+
+                  {/* Standalone saved workouts — start one without a split */}
+                  <Text style={styles.sheetSectionLabel}>Workouts</Text>
+                  {templatePlans.length === 0 ? (
+                    <Text style={styles.planStatus}>
+                      {account.workoutTemplates.loading && !account.workoutTemplates.loaded
+                        ? 'Loading your saved workouts…'
+                        : 'No saved workouts yet. Create one from the Workouts screen.'}
+                    </Text>
+                  ) : (
+                    templatePlans.map((plan) => (
+                      <Pressable key={plan.id} onPress={() => pick(plan)}>
+                        {({ pressed }) => (
+                          <View style={[styles.sheetCard, pressed && styles.cardPressed]}>
+                            <Text style={styles.cardTitle}>{plan.name}</Text>
+                            <Text style={styles.cardSub}>
+                              {plan.exercises.length}{' '}
+                              {plan.exercises.length === 1 ? 'exercise' : 'exercises'}
+                            </Text>
+                          </View>
+                        )}
+                      </Pressable>
+                    ))
+                  )}
 
                   {/* A free workout remains available without substituting demo plans. */}
                   <View style={styles.lastRow}>
@@ -705,6 +744,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'stretch',
     gap: 10,
+    marginTop: 8,
+  },
+  sheetSectionLabel: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    paddingHorizontal: 4,
+    marginTop: 14,
+    marginBottom: 9,
   },
   lastRowCard: {
     marginBottom: 0,

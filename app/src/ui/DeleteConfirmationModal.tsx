@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -19,7 +18,13 @@ interface DeleteConfirmationModalProps {
   onConfirm: () => void;
 }
 
-/** A single, predictable confirmation surface for destructive account actions. */
+/**
+ * A single, predictable confirmation surface for destructive actions.
+ * Deliberately NOT an RN Modal: modals live in a separate native window where
+ * GlassView cannot sample the screen behind it, so the card loses the liquid
+ * glass look. Rendered in-tree as the last child of a full-screen container,
+ * it overlays everything and the glass composites correctly.
+ */
 export default function DeleteConfirmationModal({
   visible,
   title,
@@ -29,70 +34,66 @@ export default function DeleteConfirmationModal({
   onCancel,
   onConfirm,
 }: DeleteConfirmationModalProps) {
+  if (!visible) return null;
+
   const cancel = () => {
     if (!busy) onCancel();
   };
 
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      statusBarTranslucent
-      onRequestClose={cancel}
-    >
-      <View style={styles.layer} accessibilityViewIsModal>
-        <Pressable
-          accessible={false}
-          style={styles.backdrop}
-          onPress={cancel}
-          disabled={busy}
-        />
-        <View accessible accessibilityRole="alert" style={styles.frame}>
-          <Glass style={styles.card}>
-            <Text style={styles.title}>{title}</Text>
-            <Text style={styles.message}>{message}</Text>
-            {error ? <Text style={styles.error}>{error}</Text> : null}
-            <View style={styles.actions}>
-              <Pressable
-                accessibilityRole="button"
-                onPress={cancel}
-                disabled={busy}
-                hitSlop={8}
-                style={styles.actionButton}
-              >
-                <Text style={[styles.cancel, busy && styles.disabled]}>Cancel</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={busy ? 'Deleting' : 'Confirm delete'}
-                onPress={onConfirm}
-                disabled={busy}
-                hitSlop={8}
-                style={styles.actionButton}
-              >
-                <Text style={[styles.confirm, busy && styles.disabled]}>
-                  {busy ? 'Deleting…' : 'Delete'}
-                </Text>
-              </Pressable>
-            </View>
-          </Glass>
-        </View>
+    <View style={styles.layer} accessibilityViewIsModal>
+      <Pressable
+        accessible={false}
+        style={styles.backdrop}
+        onPress={cancel}
+        disabled={busy}
+      />
+      <View accessible accessibilityRole="alert" style={styles.frame}>
+        <Glass style={styles.card}>
+          <Text style={styles.title}>{title}</Text>
+          <Text style={styles.message}>{message}</Text>
+          {error ? <Text style={styles.error}>{error}</Text> : null}
+          <View style={styles.actions}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={cancel}
+              disabled={busy}
+              hitSlop={8}
+              style={styles.actionButton}
+            >
+              <Text style={[styles.cancel, busy && styles.disabled]}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={busy ? 'Deleting' : 'Confirm delete'}
+              onPress={onConfirm}
+              disabled={busy}
+              hitSlop={8}
+              style={styles.actionButton}
+            >
+              <Text style={[styles.confirm, busy && styles.disabled]}>
+                {busy ? 'Deleting…' : 'Delete'}
+              </Text>
+            </Pressable>
+          </View>
+        </Glass>
       </View>
-    </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   layer: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
+    zIndex: 100,
+    elevation: 100,
   },
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.72)',
+    backgroundColor: 'rgba(0,0,0,0.55)',
   },
   frame: {
     width: '100%',

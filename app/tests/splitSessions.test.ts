@@ -1,9 +1,14 @@
-import type { ExerciseResponse, SplitResponse } from '../src/api/backend';
+import type {
+  ExerciseResponse,
+  SessionTemplateResponse,
+  SplitResponse,
+} from '../src/api/backend';
 import {
   accountWorkoutEditorGroups,
   accountWorkoutGroups,
   accountWorkoutPlans,
   resolveSavedExercise,
+  templateWorkoutPlans,
 } from '../src/workout/splitSessions';
 
 function exercise(
@@ -161,5 +166,59 @@ describe('account workout plans', () => {
       1,
       4,
     ]);
+  });
+
+  it('presents saved workout templates as startable unlinked plans', () => {
+    const template: SessionTemplateResponse = {
+      id: 'template-1',
+      user_id: 'user-1',
+      name: 'Push',
+      source_session_id: null,
+      source_split_id: null,
+      notes: null,
+      exercises: [
+        {
+          id: 'tex-2',
+          template_id: 'template-1',
+          exercise_name: 'Overhead Press',
+          sets: 3,
+          order_index: 1,
+          unilateral: false,
+          resistance_profile: null,
+          created_at: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 'tex-1',
+          template_id: 'template-1',
+          exercise_name: 'Bench Press',
+          sets: 4,
+          order_index: 0,
+          unilateral: false,
+          resistance_profile: 'mid',
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+    const empty: SessionTemplateResponse = { ...template, id: 'template-2', exercises: [] };
+
+    const plans = templateWorkoutPlans([template, empty]);
+
+    // Empty ids keep synced workouts unlinked from any split; exercise-less
+    // templates are not startable.
+    expect(plans).toHaveLength(1);
+    expect(plans[0]).toMatchObject({
+      kind: 'workout',
+      id: 'template:template-1',
+      splitId: '',
+      sessionId: '',
+      name: 'Push',
+    });
+    expect(plans[0].exercises.map(({ exercise }) => exercise.name)).toEqual([
+      'Bench Press',
+      'Overhead Press',
+    ]);
+    expect(plans[0].exercises.map(({ sets }) => sets)).toEqual([4, 3]);
   });
 });

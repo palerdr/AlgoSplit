@@ -1,4 +1,4 @@
-import type { SessionTemplateResponse } from '../src/api/backend';
+import type { SessionResponse, SessionTemplateResponse } from '../src/api/backend';
 import type { AnalysisPreferences } from '../src/state/localPersistence';
 import type { WizardWorkout } from '../src/workout/splitWizard';
 import {
@@ -7,6 +7,7 @@ import {
   clearWizardDay,
   createSplitWizardDraft,
   moveWizardDay,
+  sessionToWizardWorkout,
   setWizardCycleLength,
   templateToWizardWorkout,
   wizardDraftError,
@@ -131,6 +132,47 @@ describe('split wizard draft', () => {
       sessions: [
         { name: 'Push', day_number: 1, exercises: pushWorkout.exercises },
         { name: 'Pull', day_number: 9, exercises: pullWorkout.exercises },
+      ],
+    });
+  });
+
+  it('copies a split day into the wizard preserving order and null profiles', () => {
+    const session: SessionResponse = {
+      id: 'session-1',
+      split_id: 'split-1',
+      name: 'Upper',
+      day_number: 3,
+      exercises: [
+        {
+          id: 'ex-2',
+          session_id: 'session-1',
+          exercise_name: 'Barbell Row',
+          sets: 4,
+          order_index: 1,
+          unilateral: false,
+          resistance_profile: null,
+          created_at: '2026-01-01T00:00:00Z',
+        },
+        {
+          id: 'ex-1',
+          session_id: 'session-1',
+          exercise_name: 'Bench Press',
+          sets: 4,
+          order_index: 0,
+          unilateral: false,
+          resistance_profile: 'descending',
+          created_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+
+    expect(sessionToWizardWorkout(session)).toEqual({
+      name: 'Upper',
+      exercises: [
+        { name: 'Bench Press', sets: 4, unilateral: false, resistance_profile: 'descending' },
+        { name: 'Barbell Row', sets: 4, unilateral: false, resistance_profile: null },
       ],
     });
   });

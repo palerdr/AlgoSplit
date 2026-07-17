@@ -1,4 +1,8 @@
-import type { ExerciseResponse, SplitResponse } from '../api/backend';
+import type {
+  ExerciseResponse,
+  SessionTemplateResponse,
+  SplitResponse,
+} from '../api/backend';
 import { EXERCISES, type Exercise } from '../data/exercises';
 
 export interface PlannedExercise {
@@ -65,7 +69,9 @@ function resistanceProfile(
 }
 
 /** Resolve a persisted split exercise without dropping custom/unknown names. */
-export function resolveSavedExercise(saved: ExerciseResponse): Exercise {
+export function resolveSavedExercise(
+  saved: Pick<ExerciseResponse, 'id' | 'exercise_name' | 'unilateral' | 'resistance_profile'>
+): Exercise {
   const catalog = EXERCISES_BY_NAME.get(normalizeExerciseName(saved.exercise_name));
   if (catalog) {
     return {
@@ -177,4 +183,31 @@ export function accountWorkoutEditorGroups(
 /** Flat form retained for calculations and callers that do not render hierarchy. */
 export function accountWorkoutPlans(splits: readonly SplitResponse[]): AccountWorkoutPlan[] {
   return accountWorkoutGroups(splits).flatMap((group) => group.sessions);
+}
+
+/**
+ * Present saved standalone workouts (session templates) as startable plans.
+ * Empty splitId/sessionId keep the synced workout unlinked from any split —
+ * buildWorkoutPayload omits falsy ids.
+ */
+export function templateWorkoutPlans(
+  templates: readonly SessionTemplateResponse[]
+): AccountWorkoutPlan[] {
+  return templates
+    .filter((template) => template.exercises.length > 0)
+    .map((template) => ({
+      kind: 'workout' as const,
+      id: `template:${template.id}`,
+      splitId: '',
+      splitName: '',
+      sessionId: '',
+      name: template.name,
+      dayNumber: 1,
+      exercises: [...template.exercises]
+        .sort((left, right) => left.order_index - right.order_index)
+        .map((saved) => ({
+          exercise: resolveSavedExercise(saved),
+          sets: Math.max(1, saved.sets),
+        })),
+    }));
 }

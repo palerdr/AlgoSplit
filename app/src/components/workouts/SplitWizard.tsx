@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  FlatList,
   Modal,
   Pressable,
   ScrollView,
@@ -14,7 +13,7 @@ import DraggableFlatList, {
   RenderItemParams,
   ScaleDecorator,
 } from 'react-native-draggable-flatlist';
-import type { SessionTemplateResponse, SplitResponse } from '../../api/backend';
+import type { SplitResponse } from '../../api/backend';
 import { useAccountState } from '../../state/AccountState';
 import { theme } from '../../theme';
 import FadeIn from '../../ui/FadeIn';
@@ -28,6 +27,7 @@ import {
   clearWizardDay,
   createSplitWizardDraft,
   moveWizardDay,
+  sessionToWizardWorkout,
   setWizardCycleLength,
   templateToWizardWorkout,
   wizardDraftError,
@@ -43,6 +43,38 @@ interface SplitWizardProps {
 }
 
 const tick = () => Haptics.selectionAsync().catch(() => {});
+
+/** Two-part progress bar under the title, mirroring the session screen's set segments. */
+function StepBar({
+  step,
+  onStepPress,
+}: {
+  step: 1 | 2;
+  onStepPress: (step: 1 | 2) => void;
+}) {
+  return (
+    <View style={styles.stepBar}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Split basics"
+        onPress={() => onStepPress(1)}
+        hitSlop={10}
+        style={styles.stepSegment}
+      >
+        <View style={[styles.stepFill, { width: '100%' }]} />
+      </Pressable>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Workout days"
+        onPress={() => onStepPress(2)}
+        hitSlop={10}
+        style={styles.stepSegment}
+      >
+        {step === 2 && <View style={[styles.stepFill, { width: '100%' }]} />}
+      </Pressable>
+    </View>
+  );
+}
 
 export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
   const account = useAccountState();
@@ -66,6 +98,20 @@ export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account.status]);
+
+  const goToStep = (next: 1 | 2) => {
+    if (next === step) return;
+    if (next === 2) {
+      const validation = wizardNameError(draft);
+      if (validation) {
+        setError(validation);
+        return;
+      }
+    }
+    tick();
+    setError(null);
+    setStep(next);
+  };
 
   const changeCycleLength = (delta: number) => {
     const next = draft.cycleLength + delta;
@@ -168,16 +214,7 @@ export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Continue to workout days"
-            onPress={() => {
-              const validation = wizardNameError(draft);
-              if (validation) {
-                setError(validation);
-                return;
-              }
-              tick();
-              setError(null);
-              setStep(2);
-            }}
+            onPress={() => goToStep(2)}
           >
             <Glass style={styles.headerButton} interactive>
               <Text style={styles.headerButtonText}>Next</Text>
@@ -186,7 +223,7 @@ export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
         </View>
 
         <Text style={styles.title}>New Split</Text>
-        <Text style={styles.subtitle}>Step 1 of 2 · The basics</Text>
+        <StepBar step={1} onStepPress={goToStep} />
 
         <ScrollView
           keyboardShouldPersistTaps="handled"
@@ -241,11 +278,6 @@ export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
               <Text style={styles.repeatButtonText}>+</Text>
             </Pressable>
           </Glass>
-          <Text style={styles.repeatHint}>
-            Your split starts over every {draft.cycleLength}{' '}
-            {draft.cycleLength === 1 ? 'day' : 'days'}. It no longer has to fit a week —
-            anything from {MIN_CYCLE_LENGTH} to {MAX_CYCLE_LENGTH} days works.
-          </Text>
           {lengthNotice && <Text style={styles.lengthNotice}>{lengthNotice}</Text>}
         </ScrollView>
       </View>
@@ -324,19 +356,16 @@ export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
   const displayPickerIndex = pickerDayIndex ?? lastPickerIndexRef.current;
   const pickerDay = draft.days[displayPickerIndex] ?? null;
   const templates = account.workoutTemplates.data;
+  const splitDayOptions = account.splits.data.flatMap((split) =>
+    split.sessions
+      .filter((session) => session.exercises.length > 0)
+      .map((session) => ({ splitName: split.name, session }))
+  );
 
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-        <Pressable
-          onPress={() => {
-            tick();
-            setError(null);
-            setStep(1);
-          }}
-          hitSlop={12}
-          disabled={saving}
-        >
+        <Pressable onPress={() => goToStep(1)} hitSlop={12} disabled={saving}>
           <Text style={styles.cancel}>‹ Back</Text>
         </Pressable>
         <Pressable onPress={save} disabled={saving}>
@@ -349,9 +378,7 @@ export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
       </View>
 
       <Text style={styles.title}>{draft.name.trim() || 'New Split'}</Text>
-      <Text style={styles.subtitle}>
-        Step 2 of 2 · {draft.cycleLength}-day cycle
-      </Text>
+      <StepBar step={2} onStepPress={goToStep} />
 
       {error && <Text style={styles.error}>{error}</Text>}
 
@@ -420,53 +447,85 @@ export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
             </Glass>
           </Pressable>
 
-          <Text style={[styles.sectionLabel, styles.reuseLabel]}>
-            Or reuse a saved workout
-          </Text>
-          {templates.length === 0 && (
-            <Text style={styles.gridHint}>
-              {account.workoutTemplates.loading
-                ? 'Loading your saved workouts…'
-                : 'Nothing saved yet. New workouts you create will show up here.'}
-            </Text>
-          )}
-          <FlatList
-            data={templates}
-            keyExtractor={(template) => template.id}
+          <ScrollView
             showsVerticalScrollIndicator={false}
-            renderItem={({ item }: { item: SessionTemplateResponse }) => (
-              <Glass style={styles.templateRow} interactive>
+            contentContainerStyle={styles.content}
+          >
+            <Text style={[styles.sectionLabel, styles.reuseLabel]}>
+              Or reuse a saved workout
+            </Text>
+            {templates.length === 0 && (
+              <Text style={styles.gridHint}>
+                {account.workoutTemplates.loading
+                  ? 'Loading your saved workouts…'
+                  : 'Nothing saved yet. New workouts you create will show up here.'}
+              </Text>
+            )}
+            {templates.map((template) => (
+              <Glass key={template.id} style={styles.templateRow} interactive>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`Use ${item.name}`}
+                  accessibilityLabel={`Use ${template.name}`}
                   onPress={() => {
                     if (pickerDayIndex === null) return;
                     tick();
-                    placeWorkout(pickerDayIndex, templateToWizardWorkout(item));
+                    placeWorkout(pickerDayIndex, templateToWizardWorkout(template));
                     setPickerDayIndex(null);
                   }}
                   style={styles.templateMain}
                 >
                   <View style={styles.dayCopy}>
                     <Text style={styles.dayName} numberOfLines={1}>
-                      {item.name}
+                      {template.name}
                     </Text>
                     <Text style={styles.dayMeta}>
-                      {item.exercises.length}{' '}
-                      {item.exercises.length === 1 ? 'exercise' : 'exercises'}
+                      {template.exercises.length}{' '}
+                      {template.exercises.length === 1 ? 'exercise' : 'exercises'}
                     </Text>
                   </View>
                   <Text style={styles.dayAdd}>+</Text>
                 </Pressable>
               </Glass>
+            ))}
+
+            {splitDayOptions.length > 0 && (
+              <Text style={[styles.sectionLabel, styles.reuseLabel]}>
+                From your splits
+              </Text>
             )}
-            contentContainerStyle={styles.content}
-          />
-          {pickerDay?.workout && (
-            <Text style={styles.gridHint}>
-              Picking a workout replaces “{pickerDay.workout.name}” on this day.
-            </Text>
-          )}
+            {splitDayOptions.map(({ splitName, session }) => (
+              <Glass key={session.id} style={styles.templateRow} interactive>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Use ${session.name} from ${splitName}`}
+                  onPress={() => {
+                    if (pickerDayIndex === null) return;
+                    tick();
+                    placeWorkout(pickerDayIndex, sessionToWizardWorkout(session));
+                    setPickerDayIndex(null);
+                  }}
+                  style={styles.templateMain}
+                >
+                  <View style={styles.dayCopy}>
+                    <Text style={styles.dayName} numberOfLines={1}>
+                      {session.name}
+                    </Text>
+                    <Text style={styles.dayMeta} numberOfLines={1}>
+                      {splitName} · {session.exercises.length}{' '}
+                      {session.exercises.length === 1 ? 'exercise' : 'exercises'}
+                    </Text>
+                  </View>
+                  <Text style={styles.dayAdd}>+</Text>
+                </Pressable>
+              </Glass>
+            ))}
+
+            {pickerDay?.workout && (
+              <Text style={styles.gridHint}>
+                Picking a workout replaces “{pickerDay.workout.name}” on this day.
+              </Text>
+            )}
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -491,12 +550,23 @@ const styles = StyleSheet.create({
   headerButtonText: { color: theme.accent, fontSize: 14, fontWeight: '700' },
   disabled: { opacity: 0.35 },
   title: { color: theme.text, fontSize: 28, fontWeight: '700' },
-  subtitle: {
-    color: theme.accent,
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 5,
+  stepBar: {
+    flexDirection: 'row',
+    gap: 3,
+    marginTop: 12,
     marginBottom: 20,
+  },
+  stepSegment: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    overflow: 'hidden',
+  },
+  stepFill: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: theme.accent,
   },
   content: { paddingBottom: 40 },
   error: { color: '#E27878', fontSize: 12, lineHeight: 17, marginBottom: 12 },
@@ -536,7 +606,6 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   repeatUnit: { color: theme.textDim, fontSize: 11, fontWeight: '700', marginTop: 2 },
-  repeatHint: { color: theme.textDim, fontSize: 12, lineHeight: 18, marginTop: 12 },
   lengthNotice: { color: '#E2B778', fontSize: 12, lineHeight: 18, marginTop: 10 },
   gridHint: { color: theme.textDim, fontSize: 12, lineHeight: 18, marginBottom: 14 },
   // Bounds the draggable list to the remaining screen height; without this the

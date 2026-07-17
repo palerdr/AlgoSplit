@@ -1,5 +1,6 @@
 import type {
   ExerciseCreate,
+  SessionResponse,
   SessionTemplateResponse,
   SplitCreate,
 } from '../api/backend';
@@ -135,6 +136,21 @@ export function templateToWizardWorkout(
   return {
     name: template.name,
     exercises: [...template.exercises]
+      .sort((left, right) => left.order_index - right.order_index)
+      .map((exercise) => ({
+        name: exercise.exercise_name,
+        sets: exercise.sets,
+        unilateral: exercise.unilateral,
+        resistance_profile: resistanceProfileOrNull(exercise.resistance_profile),
+      })),
+  };
+}
+
+/** Copy a workout day from an existing split onto a wizard day. */
+export function sessionToWizardWorkout(session: SessionResponse): WizardWorkout {
+  return {
+    name: session.name,
+    exercises: [...session.exercises]
       .sort((left, right) => left.order_index - right.order_index)
       .map((exercise) => ({
         name: exercise.exercise_name,
