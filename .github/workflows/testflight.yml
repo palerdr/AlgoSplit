@@ -1,5 +1,10 @@
-# Builds an EAS iOS production build for every push to main that touches
-# the app, and auto-submits the finished build to TestFlight.
+# Builds an iOS production build for every push to main that touches the app,
+# and submits it to TestFlight.
+#
+# The build runs LOCALLY on the (free, public-repo) macOS runner via
+# `eas build --local` — it consumes no EAS-hosted build quota, so the monthly
+# free-plan cap can never fail a release again. Credentials, the remote build
+# number, and submission still come from EAS/App Store Connect servers.
 #
 # Requirements (one-time setup, all done):
 # - EXPO_TOKEN repository secret: a robot access token for the account that
@@ -7,10 +12,10 @@
 # - The app linked to the EAS project (extra.eas.projectId in app/app.json) —
 #   robot tokens cannot run `eas init` themselves.
 # - iOS signing credentials stored with EAS (distribution certificate +
-#   provisioning profile) and an App Store Connect API key for `--auto-submit`.
+#   provisioning profile) and an App Store Connect API key for submission.
 #
-# The job waits for the EAS build and submission so a failure anywhere in the
-# chain turns this check red instead of failing silently on expo.dev.
+# The job waits for build and submission so a failure anywhere in the chain
+# turns this check red instead of failing silently.
 
 name: TestFlight
 
@@ -38,8 +43,7 @@ env:
 jobs:
   build-and-submit:
     name: EAS iOS build → TestFlight
-    runs-on: ubuntu-latest
-    # EAS free-tier builds queue serially; leave room for a build ahead of us.
+    runs-on: macos-15
     timeout-minutes: 120
     env:
       GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
@@ -90,7 +94,9 @@ jobs:
 
       - name: Build and submit to TestFlight
         id: build
-        run: eas build --platform ios --profile production --non-interactive --auto-submit
+        run: |
+          eas build --platform ios --profile production --local --non-interactive --output "$RUNNER_TEMP/AlgoSplit.ipa"
+          eas submit --platform ios --path "$RUNNER_TEMP/AlgoSplit.ipa" --non-interactive
         working-directory: app
 
       # !cancelled(): a run superseded by a newer push is not a failure — skip
