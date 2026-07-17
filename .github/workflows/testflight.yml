@@ -25,6 +25,14 @@ concurrency:
   group: testflight
   cancel-in-progress: true
 
+# Build notifications for the two contributors. Sending requires two more
+# repository secrets — GMAIL_USERNAME (a Gmail address) and GMAIL_APP_PASSWORD
+# (an app password from myaccount.google.com/apppasswords). Until they exist,
+# the email steps skip silently and the pipeline is unaffected. TestFlight
+# separately emails testers when a build becomes installable.
+env:
+  NOTIFY_RECIPIENTS: ab3233@cornell.edu,jdewitte632@gmail.com
+
 jobs:
   build-and-submit:
     name: EAS iOS build → TestFlight
@@ -52,6 +60,58 @@ jobs:
         run: npm ci
         working-directory: app
 
+      - name: Email contributors that a build started
+        if: ${{ secrets.GMAIL_APP_PASSWORD != '' }}
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          from: AlgoSplit CI
+          to: ${{ env.NOTIFY_RECIPIENTS }}
+          subject: '🏗 AlgoSplit TestFlight build started'
+          body: |
+            A new AlgoSplit iOS build was triggered by a push to main.
+
+            Commit: ${{ github.event.head_commit.message }}
+            Author: ${{ github.actor }}
+            SHA: ${{ github.sha }}
+
+            Follow along:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            https://expo.dev/accounts/aboufa2322/projects/algosplit/builds
+
       - name: Build and submit to TestFlight
+        id: build
         run: eas build --platform ios --profile production --non-interactive --auto-submit
         working-directory: app
+
+      - name: Email contributors the result
+        if: ${{ always() && secrets.GMAIL_APP_PASSWORD != '' }}
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USERNAME }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          from: AlgoSplit CI
+          to: ${{ env.NOTIFY_RECIPIENTS }}
+          subject: >-
+            ${{ steps.build.outcome == 'success'
+              && '✅ AlgoSplit build submitted to TestFlight'
+              || '❌ AlgoSplit TestFlight build failed' }}
+          body: |
+            Build ${{ steps.build.outcome == 'success' && 'succeeded and was submitted to TestFlight — it will be installable once Apple finishes processing.' || 'failed — see the logs below.' }}
+
+            Commit: ${{ github.event.head_commit.message }}
+            Author: ${{ github.actor }}
+            SHA: ${{ github.sha }}
+
+            Logs:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            https://expo.dev/accounts/aboufa2322/projects/algosplit/builds
