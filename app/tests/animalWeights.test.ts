@@ -1,31 +1,31 @@
-import { ANIMAL_WEIGHT_TIERS, animalTierForWeight } from '../src/data/animalWeights';
+import { ANIMAL_WEIGHT_TIERS, animalLiftMultiplier, animalTierForWeight } from '../src/data/animalWeights';
 import { ANIMAL_PATHS } from '../src/data/animalPaths';
 
 describe('animal weight comparison', () => {
-  it('returns null for bodyweight-only sets (0 lb or below)', () => {
+  it('returns null for a week with no volume yet (0 lb or below)', () => {
     expect(animalTierForWeight(0)).toBeNull();
     expect(animalTierForWeight(-5)).toBeNull();
   });
 
   it('picks the lightest tier just above 0', () => {
-    expect(animalTierForWeight(5)?.name).toBe('Dog');
-    expect(animalTierForWeight(45)?.name).toBe('Dog');
+    expect(animalTierForWeight(5)?.name).toBe('Human');
+    expect(animalTierForWeight(500)?.name).toBe('Human');
   });
 
   it('steps up through tiers at their boundaries', () => {
-    expect(animalTierForWeight(46)?.name).toBe('Wolf');
-    expect(animalTierForWeight(95)?.name).toBe('Wolf');
-    expect(animalTierForWeight(96)?.name).toBe('Human');
-    expect(animalTierForWeight(145)?.name).toBe('Human');
-    expect(animalTierForWeight(146)?.name).toBe('Deer');
-    expect(animalTierForWeight(195)?.name).toBe('Deer');
-    expect(animalTierForWeight(196)?.name).toBe('Lion');
-    expect(animalTierForWeight(245)?.name).toBe('Lion');
+    expect(animalTierForWeight(501)?.name).toBe('Deer');
+    expect(animalTierForWeight(2_000)?.name).toBe('Deer');
+    expect(animalTierForWeight(2_001)?.name).toBe('Cow');
+    expect(animalTierForWeight(8_000)?.name).toBe('Cow');
+    expect(animalTierForWeight(8_001)?.name).toBe('Bull');
+    expect(animalTierForWeight(20_000)?.name).toBe('Bull');
+    expect(animalTierForWeight(20_001)?.name).toBe('Elephant');
+    expect(animalTierForWeight(60_000)?.name).toBe('Elephant');
   });
 
-  it('tops out at the heaviest tier for the rest of the wheel range', () => {
-    expect(animalTierForWeight(246)?.name).toBe('Gorilla');
-    expect(animalTierForWeight(300)?.name).toBe('Gorilla');
+  it('tops out at the heaviest tier for any volume beyond it', () => {
+    expect(animalTierForWeight(60_001)?.name).toBe('Whale');
+    expect(animalTierForWeight(500_000)?.name).toBe('Whale');
   });
 
   it('every tier has a valid, present silhouette path', () => {
@@ -40,5 +40,20 @@ describe('animal weight comparison', () => {
     for (let i = 1; i < sizes.length; i += 1) {
       expect(sizes[i]).toBeGreaterThan(sizes[i - 1]);
     }
+  });
+
+  it('every tier has a plural for the "lift N ___!" phrasing, Deer included', () => {
+    for (const tier of ANIMAL_WEIGHT_TIERS) {
+      expect(tier.plural.length).toBeGreaterThan(0);
+    }
+    expect(ANIMAL_WEIGHT_TIERS.find((t) => t.name === 'Deer')?.plural).toBe('Deer');
+  });
+
+  it('lift multiplier is always a whole number, never below 1', () => {
+    const deer = ANIMAL_WEIGHT_TIERS.find((t) => t.name === 'Deer')!;
+    expect(animalLiftMultiplier(1, deer)).toBe(1);
+    expect(animalLiftMultiplier(250, deer)).toBe(1);
+    expect(animalLiftMultiplier(1_800, deer)).toBe(7);
+    expect(Number.isInteger(animalLiftMultiplier(1_337, deer))).toBe(true);
   });
 });

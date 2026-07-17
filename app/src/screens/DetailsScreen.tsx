@@ -1,12 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useAppState } from '../state/AppState';
 import { rollingNet, stimulusScore } from '../analysis/stimulus';
 import { useAccountState } from '../state/AccountState';
+import { animalLiftMultiplier, animalTierForWeight } from '../data/animalWeights';
 import { theme } from '../theme';
+import AnimalSilhouette from '../ui/AnimalSilhouette';
 import Glass from '../ui/Glass';
 import FadeIn from '../ui/FadeIn';
+import Tooltip from '../ui/Tooltip';
 import ProgressTab from '../components/details/ProgressTab';
 import SplitsTab from '../components/details/SplitsTab';
 import HistoryTab from '../components/details/HistoryTab';
@@ -236,6 +239,22 @@ export default function DetailsScreen({ onBack }: DetailsScreenProps) {
   const thisWeek = overviewHistory.filter((w) => new Date(w.date).getTime() >= weekAgo);
   const weekSets = thisWeek.reduce((n, w) => n + w.totalSets, 0);
   const weekVolume = thisWeek.reduce((n, w) => n + w.volume, 0);
+  const weekAnimalTier = animalTierForWeight(weekVolume);
+
+  // Tapping the animal silhouette explains the comparison briefly, then fades on its own.
+  const [animalTipVisible, setAnimalTipVisible] = useState(false);
+  const animalTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showAnimalTip = () => {
+    tick();
+    if (animalTipTimerRef.current) clearTimeout(animalTipTimerRef.current);
+    setAnimalTipVisible(true);
+    animalTipTimerRef.current = setTimeout(() => setAnimalTipVisible(false), 2600);
+  };
+  useEffect(() => {
+    return () => {
+      if (animalTipTimerRef.current) clearTimeout(animalTipTimerRef.current);
+    };
+  }, []);
 
   const overviewLoading =
     account.status === 'checking' ||
@@ -285,6 +304,38 @@ export default function DetailsScreen({ onBack }: DetailsScreenProps) {
         <StatTile value={`${weekSets}`} label="sets" delay={45} />
         <StatTile value={fmtVolume(weekVolume)} label="lbs moved" delay={90} />
       </View>
+
+      {weekAnimalTier && (
+        <View style={styles.animalWrap}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Weight moved this week compares to lifting ${animalLiftMultiplier(
+              weekVolume,
+              weekAnimalTier
+            )} ${weekAnimalTier.plural}`}
+            hitSlop={8}
+            style={styles.animalRow}
+            onPress={showAnimalTip}
+          >
+            <AnimalSilhouette
+              slug={weekAnimalTier.slug}
+              size={weekAnimalTier.iconSize}
+              color={theme.textDim}
+            />
+            <Text style={styles.animalLabel}>{weekAnimalTier.name}</Text>
+          </Pressable>
+          <Tooltip
+            visible={animalTipVisible}
+            text={`You've moved enough to lift ${animalLiftMultiplier(
+              weekVolume,
+              weekAnimalTier
+            )} ${weekAnimalTier.plural}!`}
+            pointer="top"
+            maxWidth={210}
+            style={styles.animalTipPosition}
+          />
+        </View>
+      )}
 
       {accountMode && account.recentStimulus.error && (
         <OverviewNotice
@@ -443,6 +494,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     marginBottom: 14,
+  },
+  animalWrap: {
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  animalRow: {
+    alignItems: 'center',
+    gap: 6,
+  },
+  animalLabel: {
+    color: theme.textDim,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  animalTipPosition: {
+    position: 'absolute',
+    top: 78,
+    left: 0,
+    right: 0,
   },
   statTile: {
     borderRadius: 18,

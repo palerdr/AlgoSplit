@@ -489,7 +489,10 @@ export default function HomeScreen({
                   <Text style={styles.activeZoneName} numberOfLines={1}>
                     {activeSplit.name}
                   </Text>
-                  <FireIcon size={15} lit={activeStreak > 0} />
+                  <View style={styles.activeStreakRow}>
+                    <FireIcon size={15} lit={activeStreak > 0} />
+                    {activeStreak > 0 && <Text style={styles.activeTag}>{activeStreak}</Text>}
+                  </View>
                 </View>
               ) : (
                 <View style={styles.activeZoneRow}>
@@ -1092,13 +1095,13 @@ const styles = StyleSheet.create({
   // Hugs the right edge and stays narrow so the body model keeps its space.
   activeZonePress: {
     marginLeft: 'auto',
-    maxWidth: 168,
+    width: 168,
   },
-  // Thick pill — same circular "format" as the stim dial beside it: radius
-  // is exactly half the height, same centered glass treatment.
+  // Same circular "format" as the stim dial beside it — height and radius
+  // both derive from DIAL_SIZE so the two stay in lockstep.
   activeZone: {
-    height: 40,
-    borderRadius: 20,
+    height: DIAL_SIZE,
+    borderRadius: DIAL_SIZE / 2,
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1201,8 +1204,8 @@ const styles = StyleSheet.create({
   },
   activeTag: {
     color: theme.accent,
-    fontSize: 11,
-    fontWeight: '800',
+    fontSize: 9,
+    fontWeight: '400',
     letterSpacing: 0.5,
   },
   activeStreakRow: {

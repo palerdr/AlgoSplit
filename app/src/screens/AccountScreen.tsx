@@ -432,6 +432,9 @@ export default function AccountScreen({ onBack, onPrivacy }: AccountScreenProps)
             <Text style={styles.body}>
               Animal silhouettes by game-icons.net contributors, licensed CC BY 3.0.
             </Text>
+            <Text style={styles.body}>
+              Flame icon from Microsoft Fluent Emoji, licensed MIT.
+            </Text>
           </Glass>
         </FadeIn>
 

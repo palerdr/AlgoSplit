@@ -18,12 +18,9 @@ import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { useAccountState } from '../state/AccountState';
 import { EXERCISES } from '../data/exercises';
-import { animalTierForWeight } from '../data/animalWeights';
 import { useAppState, ActiveSession, SetRecord } from '../state/AppState';
 import { theme } from '../theme';
-import AnimalSilhouette from '../ui/AnimalSilhouette';
 import Glass from '../ui/Glass';
-import Tooltip from '../ui/Tooltip';
 import {
   PreviousExerciseData,
   previousLocalExercise,
@@ -495,28 +492,6 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wheelEpoch]);
 
-  // A fun, tappable comparison for the selected weight — null (nothing
-  // shown) at 0 lb, since "bodyweight only" isn't a weight to compare.
-  const animalTier = animalTierForWeight(weight);
-  const [animalTipVisible, setAnimalTipVisible] = useState(false);
-  const animalTipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showAnimalTip = () => {
-    tick();
-    if (animalTipTimerRef.current) clearTimeout(animalTipTimerRef.current);
-    setAnimalTipVisible(true);
-    animalTipTimerRef.current = setTimeout(() => setAnimalTipVisible(false), 2600);
-  };
-  useEffect(() => {
-    return () => {
-      if (animalTipTimerRef.current) clearTimeout(animalTipTimerRef.current);
-    };
-  }, []);
-  // A new weight tier (or losing the tier entirely at 0 lb) makes the old
-  // tooltip's text stale — dismiss immediately rather than let it linger.
-  useEffect(() => {
-    setAnimalTipVisible(false);
-  }, [animalTier?.slug]);
-
   const notesInitialized = useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!view || !currentId || !previous) return;
@@ -687,31 +662,6 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
           </View>
 
           <View style={styles.entryArea}>
-            {animalTier && (
-              <View style={styles.animalWrap}>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`About as heavy as a ${animalTier.name}`}
-                  onPress={showAnimalTip}
-                  hitSlop={8}
-                  style={styles.animalRow}
-                >
-                  <AnimalSilhouette
-                    slug={animalTier.slug}
-                    size={animalTier.iconSize}
-                    color={theme.textDim}
-                  />
-                  <Text style={styles.animalLabel}>≈ {animalTier.name}</Text>
-                </Pressable>
-                <Tooltip
-                  visible={animalTipVisible}
-                  text={`About as heavy as a ${animalTier.name} (~${animalTier.avgWeightLb} lb)!`}
-                  pointer="top"
-                  maxWidth={170}
-                  style={styles.animalTipPosition}
-                />
-              </View>
-            )}
             <View style={styles.wheelsRow}>
               <Wheel
                 key={`${wheelEpoch}-w`}
@@ -1052,26 +1002,6 @@ const styles = StyleSheet.create({
   },
   entryArea: {
     gap: 8,
-  },
-  animalWrap: {
-    alignItems: 'center',
-  },
-  animalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 4,
-    paddingHorizontal: 4,
-  },
-  animalLabel: {
-    color: theme.textDim,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  animalTipPosition: {
-    position: 'absolute',
-    top: '100%',
-    marginTop: 6,
   },
   wheelsRow: {
     flexDirection: 'row',

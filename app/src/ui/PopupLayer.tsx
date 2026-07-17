@@ -15,6 +15,10 @@ interface PopupLayerProps {
 
 const OPEN_MS = 220;
 const CLOSE_MS = 140;
+// Unmounting is timer-driven, not callback-driven (see below) — this is
+// slack on top of CLOSE_MS so a slow JS thread can't make the timer fire
+// before the animation has actually finished painting.
+const CLOSE_UNMOUNT_BUFFER_MS = 60;
 
 /**
  * Shared entrance/exit for in-tree glass popups (confirm dialogs, pickers).
@@ -34,8 +38,18 @@ const CLOSE_MS = 140;
  *    reverses on close — the viewer sees the card itself fade, without the
  *    card's own opacity ever changing.
  *
+ * Both layers derive from ONE shared `progress` value rather than two
+ * independent ones — they can never drift apart and briefly show the cover
+ * without the backdrop dimming it (or vice versa).
+ *
  * Closing plays the reverse fade before actually unmounting, instead of the
- * popup just vanishing the instant `visible` goes false.
+ * popup just vanishing the instant `visible` goes false. Unmounting is
+ * triggered by a fixed setTimeout, NOT the animation's own `.start(cb)`
+ * callback: that callback fires on the JS thread and can lag a frame or
+ * more behind the native-driven animation actually finishing, during which
+ * the fully-opaque cover sits alone over an already-undimmed backdrop —
+ * visible as a stray dark rounded rectangle ("black bar") right before it
+ * finally unmounts.
  */
 export default function PopupLayer({
   visible,
@@ -46,51 +60,51 @@ export default function PopupLayer({
   children,
 }: PopupLayerProps) {
   const [mounted, setMounted] = useState(visible);
-  const backdropOpacity = useRef(new Animated.Value(0)).current;
-  const coverOpacity = useRef(new Animated.Value(1)).current;
+  const progress = useRef(new Animated.Value(visible ? 1 : 0)).current;
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Mount immediately so the reveal animation below has a real view to
+  // animate — starting it in the same tick as setMounted risks animating
+  // toward a view that hasn't committed yet.
   useEffect(() => {
-    if (visible) {
-      setMounted(true);
-      backdropOpacity.setValue(0);
-      coverOpacity.setValue(1);
-      Animated.parallel([
-        Animated.timing(backdropOpacity, {
-          toValue: 1,
-          duration: OPEN_MS,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(coverOpacity, {
-          toValue: 0,
-          duration: OPEN_MS,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]).start();
-      return;
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
     }
-    if (!mounted) return;
-    Animated.parallel([
-      Animated.timing(backdropOpacity, {
-        toValue: 0,
-        duration: CLOSE_MS,
-        easing: Easing.in(Easing.quad),
-        useNativeDriver: true,
-      }),
-      Animated.timing(coverOpacity, {
-        toValue: 1,
-        duration: CLOSE_MS,
-        easing: Easing.in(Easing.quad),
-        useNativeDriver: true,
-      }),
-    ]).start(({ finished }) => {
-      if (finished) setMounted(false);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (visible) setMounted(true);
   }, [visible]);
 
+  useEffect(() => {
+    if (!visible || !mounted) return;
+    Animated.timing(progress, {
+      toValue: 1,
+      duration: OPEN_MS,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [mounted, visible, progress]);
+
+  useEffect(() => {
+    if (visible || !mounted) return;
+    Animated.timing(progress, {
+      toValue: 0,
+      duration: CLOSE_MS,
+      easing: Easing.in(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null;
+      setMounted(false);
+    }, CLOSE_MS + CLOSE_UNMOUNT_BUFFER_MS);
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    };
+  }, [visible, mounted, progress]);
+
   if (!mounted) return null;
+
+  const backdropOpacity = progress;
+  const coverOpacity = progress.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
 
   return (
     <View style={styles.layer} accessibilityViewIsModal>
