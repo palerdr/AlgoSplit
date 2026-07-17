@@ -27,6 +27,26 @@ export function analysisPreferencesKey(userId: string): string {
   return `${APP_STORAGE_PREFIX}:analysis:${encodeURIComponent(userId)}`;
 }
 
+export function activeSplitKey(userId: string): string {
+  return `${APP_STORAGE_PREFIX}:activeSplit:${encodeURIComponent(userId)}`;
+}
+
+/** Per-device choice of which split is "active" (drives home-screen streak/quick start). */
+export async function loadActiveSplitId(userId: string): Promise<string | null> {
+  const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
+  const raw = await AsyncStorage.getItem(activeSplitKey(userId));
+  return raw && raw.length > 0 ? raw : null;
+}
+
+export async function saveActiveSplitId(userId: string, splitId: string | null): Promise<void> {
+  const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
+  if (splitId) {
+    await AsyncStorage.setItem(activeSplitKey(userId), splitId);
+  } else {
+    await AsyncStorage.removeItem(activeSplitKey(userId));
+  }
+}
+
 export function normalizeAnalysisPreferences(
   value: Partial<AnalysisPreferences> | null | undefined
 ): AnalysisPreferences {
@@ -77,6 +97,7 @@ export async function clearPersistedAccountData(userId: string): Promise<void> {
   await Promise.all([
     AsyncStorage.removeItem(accountStorageKey(userId)),
     AsyncStorage.removeItem(analysisPreferencesKey(userId)),
+    AsyncStorage.removeItem(activeSplitKey(userId)),
   ]);
 }
 

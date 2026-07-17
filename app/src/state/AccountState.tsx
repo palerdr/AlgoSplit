@@ -56,8 +56,10 @@ import {
   AnalysisPreferences,
   DEFAULT_ANALYSIS_PREFERENCES,
   clearPersistedAccountData,
+  loadActiveSplitId,
   loadAnalysisPreferences,
   normalizeAnalysisPreferences,
+  saveActiveSplitId,
   saveAnalysisPreferences,
 } from './localPersistence';
 
@@ -96,6 +98,9 @@ interface AccountState {
   recentStimulus: RemoteResource<AnalysisResponse | null>;
   analysisPreferences: AnalysisPreferences;
   analysisPreferencesReady: boolean;
+  /** Per-device: the split driving the home-screen streak and quick start. */
+  activeSplitId: string | null;
+  setActiveSplit: (splitId: string | null) => void;
   refreshSession: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string) => Promise<string | null>;
@@ -217,6 +222,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     DEFAULT_ANALYSIS_PREFERENCES
   );
   const [analysisPreferencesReady, setAnalysisPreferencesReady] = useState(false);
+  const [activeSplitId, setActiveSplitId] = useState<string | null>(null);
 
   const splitRef = useRef(splitResource);
   const workoutTemplatesRef = useRef(workoutTemplateResource);
@@ -884,10 +890,23 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     [markSignedOut]
   );
 
+  const setActiveSplit = useCallback(
+    (splitId: string | null) => {
+      setActiveSplitId(splitId);
+      if (user?.id) void saveActiveSplitId(user.id, splitId).catch(() => {});
+    },
+    [user?.id]
+  );
+
   const deleteSplit = useCallback(
     async (splitId: string) => {
       try {
         await splitsApi.remove(splitId);
+        setActiveSplitId((previous) => {
+          if (previous !== splitId) return previous;
+          if (user?.id) void saveActiveSplitId(user.id, null).catch(() => {});
+          return null;
+        });
         clearSplitAnalysisCache();
         setSplitResource((previous) => ({
           data: previous.data.filter((candidate) => candidate.id !== splitId),
@@ -1339,6 +1358,22 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   }, [user?.id]);
 
   useEffect(() => {
+    let cancelled = false;
+    if (!user?.id) {
+      setActiveSplitId(null);
+      return;
+    }
+    loadActiveSplitId(user.id)
+      .then((splitId) => {
+        if (!cancelled) setActiveSplitId(splitId);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
     if (status === 'authenticated') ensureSplits();
   }, [status, ensureSplits]);
 
@@ -1365,6 +1400,8 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       recentStimulus,
       analysisPreferences,
       analysisPreferencesReady,
+      activeSplitId,
+      setActiveSplit,
       refreshSession,
       login,
       signup,
@@ -1421,6 +1458,8 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       recentStimulus,
       analysisPreferences,
       analysisPreferencesReady,
+      activeSplitId,
+      setActiveSplit,
       refreshSession,
       login,
       signup,

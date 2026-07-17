@@ -201,20 +201,47 @@ export default function WorkoutsScreen({
               <Text style={styles.backText}>‹ Workouts</Text>
             </Glass>
           </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Delete ${selectedGroup.name} split`}
-            onPress={() => {
-              tick();
-              setActionError(null);
-              setDeleteTarget({ splitId: selectedGroup.id, name: selectedGroup.name });
-            }}
-            disabled={deleting}
-          >
-            <Glass style={styles.headerDeleteButton} interactive>
-              <Text style={styles.headerDeleteText}>Delete</Text>
-            </Glass>
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                account.activeSplitId === selectedGroup.id
+                  ? `Deactivate ${selectedGroup.name}`
+                  : `Make ${selectedGroup.name} the active split`
+              }
+              onPress={() => {
+                tick();
+                account.setActiveSplit(
+                  account.activeSplitId === selectedGroup.id ? null : selectedGroup.id
+                );
+              }}
+            >
+              <Glass style={styles.headerDeleteButton} interactive>
+                <Text
+                  style={[
+                    styles.headerActivateText,
+                    account.activeSplitId === selectedGroup.id && styles.headerActivateOn,
+                  ]}
+                >
+                  {account.activeSplitId === selectedGroup.id ? 'Active ✓' : 'Set active'}
+                </Text>
+              </Glass>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Delete ${selectedGroup.name} split`}
+              onPress={() => {
+                tick();
+                setActionError(null);
+                setDeleteTarget({ splitId: selectedGroup.id, name: selectedGroup.name });
+              }}
+              disabled={deleting}
+            >
+              <Glass style={styles.headerDeleteButton} interactive>
+                <Text style={styles.headerDeleteText}>Delete</Text>
+              </Glass>
+            </Pressable>
+          </View>
         </View>
         <Text style={styles.title}>{selectedGroup.name}</Text>
 
@@ -326,83 +353,14 @@ export default function WorkoutsScreen({
         contentContainerStyle={{ paddingBottom: 40 }}
       >
         <FadeIn>
-          <Text style={styles.sectionLabel}>Workouts</Text>
-        </FadeIn>
-        <FadeIn delay={30}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Create a new workout"
-            onPress={() => {
-              tick();
-              setEditingTemplate(null);
-              setMode('templateEditor');
-            }}
-          >
-            <Glass style={styles.newBtn} interactive>
-              <Text style={styles.newBtnText}>+ New workout</Text>
-            </Glass>
-          </Pressable>
-        </FadeIn>
-        {templates.loading && !templates.loaded && (
-          <Glass style={styles.notice}>
-            <Text style={styles.noticeText}>Loading your saved workouts…</Text>
-          </Glass>
-        )}
-        {templates.error && (
-          <Pressable onPress={account.refreshWorkoutTemplates}>
-            <Glass style={styles.notice} interactive>
-              <Text style={styles.errorText}>Saved workouts could not load.</Text>
-              <Text style={styles.noticeText}>Tap to retry.</Text>
-            </Glass>
-          </Pressable>
-        )}
-        {templates.loaded && !templates.error && templates.data.length === 0 && (
-          <Glass style={styles.notice}>
-            <Text style={styles.noticeText}>
-              No saved workouts yet. Create one and it will appear here.
-            </Text>
-          </Glass>
-        )}
-        {templates.data.map((template: SessionTemplateResponse, index) => (
-          <FadeIn key={template.id} delay={(index + 2) * 30}>
-            <Glass style={styles.nameRow} interactive>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Edit ${template.name}`}
-                onPress={() => {
-                  tick();
-                  setEditingTemplate(template);
-                  setMode('templateEditor');
-                }}
-                style={styles.openRow}
-              >
-                <View style={styles.rowCopy}>
-                  <Text style={styles.nameRowText}>{template.name}</Text>
-                  <Text style={styles.rowMeta} numberOfLines={1}>
-                    {template.exercises.length}{' '}
-                    {template.exercises.length === 1 ? 'exercise' : 'exercises'}
-                    {template.exercises.length > 0
-                      ? ` · ${template.exercises
-                          .map((exercise) => exercise.exercise_name)
-                          .join(' · ')}`
-                      : ''}
-                  </Text>
-                </View>
-                <Text style={styles.chevron}>›</Text>
-              </Pressable>
-            </Glass>
-          </FadeIn>
-        ))}
-
-        <FadeIn delay={60}>
-          <Text style={[styles.sectionLabel, styles.splitsLabel]}>
+          <Text style={styles.sectionLabel}>
             Splits{' '}
             <Text style={styles.sectionHint}>
               (a combination of workouts in a repeating schedule)
             </Text>
           </Text>
         </FadeIn>
-        <FadeIn delay={90}>
+        <FadeIn delay={30}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Create a new split"
@@ -440,8 +398,9 @@ export default function WorkoutsScreen({
           const workoutDays = group.sessions.filter(
             (session: AccountWorkoutEditorEntry) => session.kind === 'workout'
           );
+          const isActive = group.id === account.activeSplitId;
           return (
-            <FadeIn key={group.id} delay={(index + 4) * 30}>
+            <FadeIn key={group.id} delay={(index + 2) * 30}>
               <Glass style={styles.nameRow} interactive>
                 <Pressable
                   accessibilityRole="button"
@@ -455,7 +414,10 @@ export default function WorkoutsScreen({
                   style={styles.openRow}
                 >
                   <View style={styles.rowCopy}>
-                    <Text style={styles.nameRowText}>{group.name}</Text>
+                    <View style={styles.rowTitleLine}>
+                      <Text style={styles.nameRowText}>{group.name}</Text>
+                      {isActive && <Text style={styles.activeBadge}>ACTIVE</Text>}
+                    </View>
                     <Text style={styles.rowMeta} numberOfLines={1}>
                       {workoutDays.length} workout{' '}
                       {workoutDays.length === 1 ? 'day' : 'days'}
@@ -471,6 +433,76 @@ export default function WorkoutsScreen({
             </FadeIn>
           );
         })}
+
+        <FadeIn delay={60}>
+          <Text style={[styles.sectionLabel, styles.splitsLabel]}>Workouts</Text>
+        </FadeIn>
+        <FadeIn delay={90}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Create a new workout"
+            onPress={() => {
+              tick();
+              setEditingTemplate(null);
+              setMode('templateEditor');
+            }}
+          >
+            <Glass style={styles.newBtn} interactive>
+              <Text style={styles.newBtnText}>+ New workout</Text>
+            </Glass>
+          </Pressable>
+        </FadeIn>
+        {templates.loading && !templates.loaded && (
+          <Glass style={styles.notice}>
+            <Text style={styles.noticeText}>Loading your saved workouts…</Text>
+          </Glass>
+        )}
+        {templates.error && (
+          <Pressable onPress={account.refreshWorkoutTemplates}>
+            <Glass style={styles.notice} interactive>
+              <Text style={styles.errorText}>Saved workouts could not load.</Text>
+              <Text style={styles.noticeText}>Tap to retry.</Text>
+            </Glass>
+          </Pressable>
+        )}
+        {templates.loaded && !templates.error && templates.data.length === 0 && (
+          <Glass style={styles.notice}>
+            <Text style={styles.noticeText}>
+              No saved workouts yet. Create one and it will appear here.
+            </Text>
+          </Glass>
+        )}
+        <View style={styles.workoutGrid}>
+          {templates.data.map((template: SessionTemplateResponse, index) => (
+            <FadeIn key={template.id} style={styles.workoutCell} delay={(index + 4) * 30}>
+              <Glass style={styles.workoutCard} interactive>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit ${template.name}`}
+                  onPress={() => {
+                    tick();
+                    setEditingTemplate(template);
+                    setMode('templateEditor');
+                  }}
+                  style={styles.workoutCardPress}
+                >
+                  <Text style={styles.nameRowText} numberOfLines={1}>
+                    {template.name}
+                  </Text>
+                  <Text style={styles.rowMeta} numberOfLines={2}>
+                    {template.exercises.length}{' '}
+                    {template.exercises.length === 1 ? 'exercise' : 'exercises'}
+                    {template.exercises.length > 0
+                      ? ` · ${template.exercises
+                          .map((exercise) => exercise.exercise_name)
+                          .join(' · ')}`
+                      : ''}
+                  </Text>
+                </Pressable>
+              </Glass>
+            </FadeIn>
+          ))}
+        </View>
       </ScrollView>
     </View>
   );
@@ -560,6 +592,11 @@ const styles = StyleSheet.create({
     color: theme.textDim,
     fontSize: 20,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   headerDeleteButton: {
     borderRadius: 17,
     paddingVertical: 8,
@@ -569,6 +606,37 @@ const styles = StyleSheet.create({
     color: '#E27878',
     fontSize: 13,
     fontWeight: '700',
+  },
+  headerActivateText: {
+    color: theme.textDim,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  headerActivateOn: {
+    color: theme.accent,
+  },
+  activeBadge: {
+    color: theme.accent,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  workoutGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  workoutCell: {
+    width: '48.5%',
+  },
+  workoutCard: {
+    borderRadius: 18,
+    marginBottom: 10,
+  },
+  workoutCardPress: {
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    minHeight: 78,
   },
   notice: {
     borderRadius: 18,

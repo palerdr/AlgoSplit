@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
+import Svg, { Circle } from 'react-native-svg';
 import BodyHeatmap from '../3d/BodyHeatmap';
 import Glass from '../ui/Glass';
 import { levelsFromNet, stimulusScore } from '../analysis/stimulus';
@@ -24,6 +25,11 @@ import {
   accountWorkoutGroups,
   templateWorkoutPlans,
 } from '../workout/splitSessions';
+import {
+  mergeSplitLogs,
+  nextSplitPlan,
+  splitWorkoutStreak,
+} from '../workout/splitStreak';
 import { theme } from '../theme';
 
 interface HomeScreenProps {
@@ -47,6 +53,48 @@ const thump = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catc
 // Diminishing returns for dragging past the end of the track.
 const rubber = (x: number) => x / (1 + x * 1.6);
 
+// ── Weekly stimulus dial ─────────────────────────────────────────
+// Floats next to the body model; a static arc, never opacity-animated.
+const DIAL_SIZE = 74;
+const DIAL_STROKE = 5;
+const DIAL_R = (DIAL_SIZE - DIAL_STROKE) / 2;
+const DIAL_C = 2 * Math.PI * DIAL_R;
+
+function StimulusDial({ value }: { value: number | null }) {
+  const frac = value === null ? 0 : Math.min(100, Math.max(0, value)) / 100;
+  return (
+    <Glass style={styles.dialGlass}>
+      <Svg width={DIAL_SIZE} height={DIAL_SIZE}>
+        <Circle
+          cx={DIAL_SIZE / 2}
+          cy={DIAL_SIZE / 2}
+          r={DIAL_R}
+          stroke="rgba(255,255,255,0.14)"
+          strokeWidth={DIAL_STROKE}
+          fill="none"
+        />
+        {frac > 0 && (
+          <Circle
+            cx={DIAL_SIZE / 2}
+            cy={DIAL_SIZE / 2}
+            r={DIAL_R}
+            stroke={theme.accent}
+            strokeWidth={DIAL_STROKE}
+            strokeLinecap="round"
+            fill="none"
+            strokeDasharray={`${DIAL_C * frac} ${DIAL_C}`}
+            transform={`rotate(-90 ${DIAL_SIZE / 2} ${DIAL_SIZE / 2})`}
+          />
+        )}
+      </Svg>
+      <View style={styles.dialCenter} pointerEvents="none">
+        <Text style={styles.dialValue}>{value === null ? '—' : Math.round(value)}</Text>
+        <Text style={styles.dialLabel}>week</Text>
+      </View>
+    </Glass>
+  );
+}
+
 export default function HomeScreen({
   celebrate,
   onCelebrateHandled,
@@ -60,6 +108,7 @@ export default function HomeScreen({
     startPlannedSession,
     startFreeSession,
     lastCompleted,
+    history,
     pendingSyncCount,
     failedSyncCount,
     syncingWorkoutId,
@@ -78,6 +127,28 @@ export default function HomeScreen({
   const selectedWorkoutGroup =
     workoutGroups.find((group) => group.id === selectedSplitId) ?? null;
   const { width, height } = useWindowDimensions();
+
+  // ── Active split: streak + the workout a quick start launches ──
+  const activeSplit =
+    account.splits.data.find((split) => split.id === account.activeSplitId) ?? null;
+  const splitLogs = React.useMemo(
+    () => mergeSplitLogs(account.workoutSummaries.data.workouts, history),
+    [account.workoutSummaries.data.workouts, history]
+  );
+  const activeStreak = React.useMemo(
+    () => (activeSplit ? splitWorkoutStreak(activeSplit, splitLogs, Date.now()) : 0),
+    [activeSplit, splitLogs]
+  );
+  const activeNextPlan = React.useMemo(
+    () => (activeSplit ? nextSplitPlan(activeSplit, splitLogs, Date.now()) : null),
+    [activeSplit, splitLogs]
+  );
+  const orderedGroups = React.useMemo(() => {
+    if (!activeSplit) return workoutGroups;
+    const active = workoutGroups.find((group) => group.id === activeSplit.id);
+    if (!active) return workoutGroups;
+    return [active, ...workoutGroups.filter((group) => group.id !== active.id)];
+  }, [activeSplit, workoutGroups]);
 
   const accountStimulusNet = React.useMemo(
     () =>
@@ -104,6 +175,14 @@ export default function HomeScreen({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account.status]);
+
+  // Streak and quick-start need logged-workout attribution.
+  useEffect(() => {
+    if (account.status === 'authenticated' && account.activeSplitId) {
+      account.ensureWorkoutSummaries();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [account.status, account.activeSplitId]);
 
   // ── Post-workout celebration ────────────────────────────────────
   // The SAME body model that lives on this screen plays the ending: zoomed in
@@ -287,6 +366,21 @@ export default function HomeScreen({
         </Animated.View>
       </Animated.View>
 
+      {/* Weekly stimulus dial, floating beside the body model */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.dialWrap,
+          {
+            transform: [
+              { translateY: uiAnim.interpolate({ inputRange: [0, 1], outputRange: [-180, 0] }) },
+            ],
+          },
+        ]}
+      >
+        <StimulusDial value={loadedWeekEffort} />
+      </Animated.View>
+
       {accountStimulusPending && (
         <View pointerEvents="none" style={styles.stimulusLoadingWrap}>
           <Glass style={styles.stimulusLoadingPill}>
@@ -381,6 +475,40 @@ export default function HomeScreen({
         <Pressable style={StyleSheet.absoluteFill} onPress={() => { tick(); springTo(0); }} />
       </Animated.View>
 
+      {/* Active split: name, next workout, streak — the growing sheet covers it */}
+      {activeSplit && (
+        <Animated.View
+          style={[
+            styles.activeSplitWrap,
+            {
+              transform: [
+                { translateY: uiAnim.interpolate({ inputRange: [0, 1], outputRange: [240, 0] }) },
+              ],
+            },
+          ]}
+          pointerEvents={sheetLive ? 'none' : 'box-none'}
+        >
+          <Pressable onPress={() => { thump(); springTo(1); }}>
+            <Glass style={styles.activeSplitCard} interactive>
+              <View style={styles.activeSplitTop}>
+                <Text style={styles.activeSplitLabel}>Active split</Text>
+                {activeStreak > 0 && (
+                  <Text style={styles.activeSplitStreak}>🔥 {activeStreak}</Text>
+                )}
+              </View>
+              <Text style={styles.activeSplitName} numberOfLines={1}>
+                {activeSplit.name}
+              </Text>
+              {activeNextPlan && (
+                <Text style={styles.activeSplitNext} numberOfLines={1}>
+                  Next · Day {activeNextPlan.dayNumber} {activeNextPlan.name}
+                </Text>
+              )}
+            </Glass>
+          </Pressable>
+        </Animated.View>
+      )}
+
       {/* The morphing glass: pill when closed, stretches into the sheet */}
       <Animated.View
         style={[
@@ -465,20 +593,6 @@ export default function HomeScreen({
                 scrollEnabled={sheetLive}
                 contentContainerStyle={styles.cardsScroll}
               >
-              {/* Clear weekly stimulus read inside the open sheet */}
-              <View style={styles.sheetStimRow}>
-                <Text style={styles.sheetStimLabel}>Weekly stimulus</Text>
-                <View style={styles.sheetStimTrack}>
-                  <View
-                    style={[
-                      styles.sheetStimFill,
-                      { width: `${Math.min(100, loadedWeekEffort ?? 0)}%` },
-                    ]}
-                  />
-                </View>
-                <Text style={styles.sheetStimValue}>{loadedWeekEffort ?? '—'}</Text>
-              </View>
-
               {selectedWorkoutGroup ? (
                 <View>
                   <View style={styles.nestedHeader}>
@@ -527,31 +641,59 @@ export default function HomeScreen({
                       No saved splits yet. Create one from the Workouts screen.
                     </Text>
                   ) : (
-                    workoutGroups.map((group) => (
-                      <Pressable
-                        key={group.id}
-                        onPress={() => {
-                          tick();
-                          setSelectedSplitId(group.id);
-                        }}
-                      >
-                        {({ pressed }) => (
-                          <View style={[styles.sheetCard, pressed && styles.cardPressed]}>
-                            <View style={styles.planTitleRow}>
-                              <Text style={styles.cardTitle}>{group.name}</Text>
-                              <Text style={styles.planSplit}>›</Text>
+                    orderedGroups.map((group) => {
+                      const isActive = group.id === activeSplit?.id;
+                      const quickStart = isActive ? activeNextPlan : null;
+                      return (
+                        <Pressable
+                          key={group.id}
+                          onPress={() => {
+                            // The active split starts its next workout on the
+                            // spot; other splits open their day list.
+                            if (quickStart) {
+                              pick(quickStart);
+                              return;
+                            }
+                            tick();
+                            setSelectedSplitId(group.id);
+                          }}
+                        >
+                          {({ pressed }) => (
+                            <View
+                              style={[
+                                styles.sheetCard,
+                                isActive && styles.sheetCardActive,
+                                pressed && styles.cardPressed,
+                              ]}
+                            >
+                              <View style={styles.planTitleRow}>
+                                <Text style={styles.cardTitle}>{group.name}</Text>
+                                {isActive ? (
+                                  <Text style={styles.activeTag}>
+                                    {activeStreak > 0 ? `🔥 ${activeStreak}` : 'ACTIVE'}
+                                  </Text>
+                                ) : (
+                                  <Text style={styles.planSplit}>›</Text>
+                                )}
+                              </View>
+                              <Text style={styles.cardSub} numberOfLines={1}>
+                                {quickStart
+                                  ? `Starts Day ${quickStart.dayNumber} ${quickStart.name} · ${
+                                      quickStart.exercises.length
+                                    } ${quickStart.exercises.length === 1 ? 'exercise' : 'exercises'}`
+                                  : `${group.sessions.length} workout ${
+                                      group.sessions.length === 1 ? 'day' : 'days'
+                                    }${group.cycleLength ? ` · ${group.cycleLength}-day cycle` : ''}${
+                                      group.sessions.length > 0
+                                        ? ` · ${group.sessions.map((session) => session.name).join(' · ')}`
+                                        : ''
+                                    }`}
+                              </Text>
                             </View>
-                            <Text style={styles.cardSub} numberOfLines={1}>
-                              {group.sessions.length} workout {group.sessions.length === 1 ? 'day' : 'days'}
-                              {group.cycleLength ? ` · ${group.cycleLength}-day cycle` : ''}
-                              {group.sessions.length > 0
-                                ? ` · ${group.sessions.map((session) => session.name).join(' · ')}`
-                                : ''}
-                            </Text>
-                          </View>
-                        )}
-                      </Pressable>
-                    ))
+                          )}
+                        </Pressable>
+                      );
+                    })
                   )}
 
                   {/* Standalone saved workouts — start one without a split */}
@@ -711,34 +853,90 @@ const styles = StyleSheet.create({
     bottom: 0,
     overflow: 'hidden',
   },
-  sheetStimRow: {
+  dialWrap: {
+    position: 'absolute',
+    top: 132,
+    left: 20,
+  },
+  dialGlass: {
+    width: DIAL_SIZE,
+    height: DIAL_SIZE,
+    borderRadius: DIAL_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialCenter: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dialValue: {
+    color: theme.text,
+    fontSize: 18,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+    lineHeight: 20,
+  },
+  dialLabel: {
+    color: theme.textDim,
+    fontSize: 9,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  activeSplitWrap: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
+    bottom: 36 + PILL_H + 12,
+    alignItems: 'center',
+  },
+  activeSplitCard: {
+    borderRadius: 20,
+    paddingVertical: 11,
+    paddingHorizontal: 16,
+    minWidth: 220,
+    maxWidth: 340,
+  },
+  activeSplitTop: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 4,
-    paddingBottom: 12,
+    justifyContent: 'space-between',
+    gap: 14,
   },
-  sheetStimLabel: {
-    color: theme.textDim,
-    fontSize: 12,
+  activeSplitLabel: {
+    color: theme.accent,
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
-  sheetStimTrack: {
-    flex: 1,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    overflow: 'hidden',
-  },
-  sheetStimFill: {
-    height: '100%',
-    borderRadius: 2.5,
-    backgroundColor: theme.accent,
-  },
-  sheetStimValue: {
+  activeSplitStreak: {
     color: theme.text,
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
     fontVariant: ['tabular-nums'],
+  },
+  activeSplitName: {
+    color: theme.text,
+    fontSize: 16,
+    fontWeight: '700',
+    marginTop: 3,
+  },
+  activeSplitNext: {
+    color: theme.textDim,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  sheetCardActive: {
+    borderColor: 'rgba(65,196,110,0.5)',
+    backgroundColor: 'rgba(65,196,110,0.10)',
+  },
+  activeTag: {
+    color: theme.accent,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   lastRow: {
     flexDirection: 'row',
