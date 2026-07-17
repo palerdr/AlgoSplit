@@ -148,24 +148,23 @@ def workout_exercise_rows(workout: WorkoutLogCreate, workout_log_id: str) -> lis
     return rows
 
 
-def find_idempotent_workout(
+def _missing_client_request_id_column(exc: Exception) -> bool:
+    """Recognize production databases that have not applied migration 011."""
+    code = str(getattr(exc, "code", ""))
+    message = str(getattr(exc, "message", exc)).lower()
+    return (
+        code in {"42703", "PGRST204"}
+        and "workout_logs" in message
+        and "client_request_id" in message
+    )
+
+
+def _existing_workout_response(
     supabase,
-    user_id: str,
-    client_request_id: str,
+    workout_data: dict,
     workout: WorkoutLogCreate | None = None,
 ):
-    """Return an existing retry and repair a log interrupted before exercise insertion."""
-    existing_result = (
-        supabase.table("workout_logs")
-        .select("*")
-        .eq("user_id", user_id)
-        .eq("client_request_id", client_request_id)
-        .limit(1)
-        .execute()
-    )
-    if not existing_result.data:
-        return None
-    workout_data = existing_result.data[0]
+    """Load an existing workout and repair a retry interrupted before its exercises."""
     exercises_result = (
         supabase.table("workout_exercises")
         .select("*")
@@ -191,6 +190,53 @@ def find_idempotent_workout(
             )
             exercises_data = repaired.data or []
     return build_workout_response(workout_data, exercises_data)
+
+
+def find_idempotent_workout(
+    supabase,
+    user_id: str,
+    client_request_id: str,
+    workout: WorkoutLogCreate | None = None,
+):
+    """Return an existing retry and repair a log interrupted before exercise insertion."""
+    existing_result = (
+        supabase.table("workout_logs")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("client_request_id", client_request_id)
+        .limit(1)
+        .execute()
+    )
+    if not existing_result.data:
+        return None
+    return _existing_workout_response(supabase, existing_result.data[0], workout)
+
+
+def find_legacy_idempotent_workout(
+    supabase,
+    user_id: str,
+    workout: WorkoutLogCreate,
+):
+    """Best-effort retry lookup while migration 011 is unavailable.
+
+    The app persists ``completed_at`` with the failed upload, so the tuple below
+    remains stable across retries. Migration 011's unique client key remains the
+    authoritative path whenever that column exists.
+    """
+    if workout.completed_at is None:
+        return None
+    existing_result = (
+        supabase.table("workout_logs")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("session_name", workout.session_name)
+        .eq("completed_at", workout.completed_at.isoformat())
+        .limit(1)
+        .execute()
+    )
+    if not existing_result.data:
+        return None
+    return _existing_workout_response(supabase, existing_result.data[0], workout)
 
 
 def build_workout_summary_response(
@@ -247,10 +293,23 @@ def log_workout(
 
         validate_workout_exercises(workout)
 
+        idempotency_column_available = True
         if workout.client_request_id:
-            existing = find_idempotent_workout(
-                supabase, current_user.id, workout.client_request_id, workout
-            )
+            try:
+                existing = find_idempotent_workout(
+                    supabase, current_user.id, workout.client_request_id, workout
+                )
+            except Exception as exc:
+                if not _missing_client_request_id_column(exc):
+                    raise
+                idempotency_column_available = False
+                logger.warning(
+                    "Workout idempotency migration 011 is missing; using compatibility lookup",
+                    extra={"user_id": current_user.id},
+                )
+                existing = find_legacy_idempotent_workout(
+                    supabase, current_user.id, workout
+                )
             if existing:
                 return existing
 
@@ -263,7 +322,7 @@ def log_workout(
             "session_name": workout.session_name,
             "completed_at": completed_at.isoformat(),
         }
-        if workout.client_request_id:
+        if workout.client_request_id and idempotency_column_available:
             workout_data["client_request_id"] = workout.client_request_id
 
         # Validate session_id FK before inserting — the session may have been
@@ -294,9 +353,15 @@ def log_workout(
             workout_result = supabase.table("workout_logs").insert(workout_data).execute()
         except Exception:
             # A concurrent retry may have won the unique-key race.
-            if workout.client_request_id:
+            if workout.client_request_id and idempotency_column_available:
                 existing = find_idempotent_workout(
                     supabase, current_user.id, workout.client_request_id, workout
+                )
+                if existing:
+                    return existing
+            elif workout.client_request_id:
+                existing = find_legacy_idempotent_workout(
+                    supabase, current_user.id, workout
                 )
                 if existing:
                     return existing

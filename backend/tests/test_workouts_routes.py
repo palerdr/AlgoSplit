@@ -1,6 +1,70 @@
 import api.routes.workouts as workouts_routes
 
 
+class _UndefinedClientRequestIdColumn(Exception):
+    code = "42703"
+    message = 'column workout_logs.client_request_id does not exist'
+
+    def __init__(self):
+        super().__init__(self.message)
+
+
+class _LegacyWorkoutLogsQuery:
+    """Make the fake client behave like a pre-client_request_id schema."""
+
+    def __init__(self, query, failed_operations):
+        self._query = query
+        self._failed_operations = failed_operations
+        self._operation = "select"
+        self._references_missing_column = False
+
+    def select(self, fields="*", count=None):
+        self._operation = "select"
+        self._references_missing_column = "client_request_id" in fields
+        self._query.select(fields, count=count)
+        return self
+
+    def insert(self, rows):
+        self._operation = "insert"
+        insert_rows = [rows] if isinstance(rows, dict) else rows
+        self._references_missing_column = any(
+            "client_request_id" in row for row in insert_rows
+        )
+        self._query.insert(rows)
+        return self
+
+    def eq(self, column, value):
+        if column == "client_request_id":
+            self._references_missing_column = True
+        self._query.eq(column, value)
+        return self
+
+    def limit(self, value):
+        self._query.limit(value)
+        return self
+
+    def execute(self):
+        if self._references_missing_column:
+            self._failed_operations.append(self._operation)
+            raise _UndefinedClientRequestIdColumn()
+        return self._query.execute()
+
+
+class _LegacyWorkoutLogsClient:
+    def __init__(self, delegate):
+        self._delegate = delegate
+        self.failed_operations = []
+
+    def table(self, table_name):
+        query = self._delegate.table(table_name)
+        if table_name == "workout_logs":
+            return _LegacyWorkoutLogsQuery(query, self.failed_operations)
+        return query
+
+    def __getattr__(self, name):
+        return getattr(self._delegate, name)
+
+
 def test_get_workout_history_summaries_returns_compact_rows(client, fake_supabase, auth_user, monkeypatch):
     monkeypatch.setattr(
         workouts_routes,
@@ -174,6 +238,46 @@ def test_log_workout_retry_is_idempotent(client, fake_supabase, monkeypatch):
     assert retried.status_code == 201
     assert retried.json()["id"] == first.json()["id"]
     assert len(fake_supabase.tables["workout_logs"]) == 1
+    assert fake_supabase.tables["workout_logs"][0]["client_request_id"] == "workout-123"
+    assert len(fake_supabase.tables["workout_exercises"]) == 1
+
+
+def test_log_workout_succeeds_when_schema_lacks_client_request_id(
+    client, fake_supabase, monkeypatch
+):
+    legacy_supabase = _LegacyWorkoutLogsClient(fake_supabase)
+    monkeypatch.setattr(
+        workouts_routes,
+        "get_supabase_client_with_token",
+        lambda _token: legacy_supabase,
+    )
+
+    payload = {
+        "client_request_id": "legacy-schema-123",
+        "session_name": "Push Day",
+        "completed_at": "2026-07-15T12:00:00Z",
+        "exercises": [
+            {
+                "exercise_name": "Bench Press",
+                "sets_completed": 1,
+                "reps": [8],
+                "weight": [185],
+                "rir": [2],
+            }
+        ],
+    }
+
+    response = client.post("/api/workouts", json=payload)
+    retried = client.post("/api/workouts", json=payload)
+
+    assert response.status_code == 201
+    assert retried.status_code == 201
+    assert retried.json()["id"] == response.json()["id"]
+    assert response.json()["session_name"] == "Push Day"
+    assert response.json()["exercises"][0]["exercise_name"] == "Bench Press"
+    assert legacy_supabase.failed_operations == ["select", "select"]
+    assert len(fake_supabase.tables["workout_logs"]) == 1
+    assert "client_request_id" not in fake_supabase.tables["workout_logs"][0]
     assert len(fake_supabase.tables["workout_exercises"]) == 1
 
 
