@@ -4,7 +4,7 @@
     "slug": "algosplit",
     "version": "1.0.1",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/algosplit-ios-icon.png",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0d0d0d",
     "newArchEnabled": true,
@@ -101,7 +101,20 @@
       "expo-secure-store",
       "expo-asset",
       "expo-web-browser",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#173E30",
+          "image": "./assets/startup-splash.png",
+          "resizeMode": "cover",
+          "enableFullScreenImage_legacy": true,
+          "dark": {
+            "backgroundColor": "#173E30",
+            "image": "./assets/startup-splash.png"
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {

@@ -479,21 +479,15 @@ export default function WorkoutEditor(props: WorkoutEditorProps) {
                 <View
                   accessible
                   accessibilityRole="text"
-                  accessibilityLabel={`Workout day, Day ${draft.dayNumber}. Read only.`}
+                  accessibilityLabel={`Day ${draft.dayNumber}. Read only.`}
                   style={styles.dayReadOnly}
                 >
-                  <Text style={styles.dayReadOnlyLabel}>Workout day</Text>
                   <Text style={styles.dayReadOnlyValue}>Day {draft.dayNumber}</Text>
                 </View>
               )}
             </View>
 
             <Text style={styles.sectionLabel}>Exercises</Text>
-            {draft.exercises.length === 0 && (
-              <Text style={styles.catalogHint}>
-                No exercises yet. Every workout needs at least one.
-              </Text>
-            )}
           </>
         }
         ListFooterComponent={
@@ -633,14 +627,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     paddingHorizontal: 4,
   },
-  dayReadOnlyLabel: {
-    color: theme.textDim,
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  dayReadOnlyValue: { color: theme.text, fontSize: 16, fontWeight: '700', marginTop: 3 },
+  dayReadOnlyValue: { color: theme.text, fontSize: 16, fontWeight: '700' },
   input: { color: theme.text, fontSize: 15, paddingVertical: 14 },
   sectionLabel: {
     color: theme.textDim,
@@ -784,6 +771,5 @@ const styles = StyleSheet.create({
   catalogRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   catalogAdded: { color: theme.accent, fontSize: 12, fontWeight: '700' },
   catalogAdd: { color: theme.accent, fontSize: 20, fontWeight: '600' },
-  catalogHint: { color: theme.textDim, fontSize: 12, lineHeight: 17, paddingVertical: 12 },
   listContent: { paddingBottom: 40 },
 });

@@ -2,11 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Linking, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { AppStateProvider } from './src/state/AppState';
+import { AppStateProvider, useAppState } from './src/state/AppState';
 import { AccountStateProvider } from './src/state/AccountState';
 import { useAccountState } from './src/state/AccountState';
 import { theme } from './src/theme';
-import HomeScreen from './src/screens/HomeScreen';
+import HomeScreen, { WorkoutLaunchRequest } from './src/screens/HomeScreen';
 import SessionScreen from './src/screens/SessionScreen';
 import DetailsScreen from './src/screens/DetailsScreen';
 import WorkoutsScreen from './src/screens/WorkoutsScreen';
@@ -14,6 +14,7 @@ import AuthScreen from './src/screens/AuthScreen';
 import AccountScreen from './src/screens/AccountScreen';
 import PrivacyScreen from './src/screens/PrivacyScreen';
 import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
+import WorkoutLaunchSplash from './src/ui/WorkoutLaunchSplash';
 import { recoveryTokenFromUrl } from './src/auth/recoveryLink';
 
 // Deliberately barebones navigation: one state value, no navigator dependency.
@@ -32,8 +33,14 @@ type Screen =
   | 'account'
   | 'privacy';
 
+interface RootWorkoutLaunch {
+  key: number;
+  request: WorkoutLaunchRequest;
+}
+
 function Root() {
   const account = useAccountState();
+  const appState = useAppState();
   const [shown, setShown] = useState<Screen>('home');
   // Finishing a workout lands on Home in celebration mode: the same body
   // model spins with the session's stimulus, then the normal UI settles in.
@@ -48,6 +55,10 @@ function Root() {
   const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
   const pendingRef = useRef<Screen | null>(null);
   const anim = useRef(new Animated.Value(1)).current;
+  const [workoutLaunch, setWorkoutLaunch] = useState<RootWorkoutLaunch | null>(null);
+  const workoutLaunchRef = useRef<RootWorkoutLaunch | null>(null);
+  const workoutLaunchKeyRef = useRef(0);
+  const workoutLaunchCoveredRef = useRef(false);
 
   const go = (next: Screen) => {
     if (next === shown) return;
@@ -68,6 +79,47 @@ function Root() {
     });
   };
 
+  const startWorkoutTransition = (request: WorkoutLaunchRequest) => {
+    if (workoutLaunchRef.current) return false;
+
+    // Workout launches use the water wipe exclusively. Cancel any pending
+    // sibling fade so the pool is the only transition covering Home.
+    pendingRef.current = null;
+    anim.stopAnimation();
+    anim.setValue(1);
+    const launch = { key: ++workoutLaunchKeyRef.current, request };
+    workoutLaunchCoveredRef.current = false;
+    workoutLaunchRef.current = launch;
+    setWorkoutLaunch(launch);
+    return true;
+  };
+
+  const coverWorkoutTransition = (key: number) => {
+    const launch = workoutLaunchRef.current;
+    if (!launch || launch.key !== key || workoutLaunchCoveredRef.current) return;
+    workoutLaunchCoveredRef.current = true;
+
+    // The opaque pool is now covering every pixel. Commit the session and
+    // swap routes directly; WorkoutLaunchSplash remains mounted at Root while
+    // Session paints, then drains to reveal it.
+    if (launch.request.kind === 'planned') {
+      appState.startPlannedSession(launch.request.plan);
+    } else {
+      appState.startFreeSession();
+    }
+    pendingRef.current = null;
+    anim.stopAnimation();
+    anim.setValue(1);
+    setShown('session');
+  };
+
+  const finishWorkoutTransition = (key: number) => {
+    if (workoutLaunchRef.current?.key !== key) return;
+    workoutLaunchRef.current = null;
+    workoutLaunchCoveredRef.current = false;
+    setWorkoutLaunch(null);
+  };
+
   useEffect(() => {
     Animated.timing(anim, {
       toValue: 1,
@@ -80,6 +132,9 @@ function Root() {
   useEffect(() => {
     if (account.status !== 'authenticated') {
       pendingRef.current = null;
+      workoutLaunchRef.current = null;
+      workoutLaunchCoveredRef.current = false;
+      setWorkoutLaunch(null);
       setShown('home');
       setCelebratePending(false);
       setActiveSplitLanding(null);
@@ -87,6 +142,9 @@ function Root() {
     }
     if (account.authReturnScreen) {
       pendingRef.current = null;
+      workoutLaunchRef.current = null;
+      workoutLaunchCoveredRef.current = false;
+      setWorkoutLaunch(null);
       setShown(account.authReturnScreen);
       account.clearAuthReturnScreen();
     }
@@ -123,7 +181,7 @@ function Root() {
           <HomeScreen
             celebrate={celebratePending}
             onCelebrateHandled={() => setCelebratePending(false)}
-            onStartSession={() => go('session')}
+            onStartSession={startWorkoutTransition}
             onDetails={() => go('details')}
             onWorkouts={() => go('workouts')}
             onCreateSplit={() => go('workouts-new-split')}
@@ -180,6 +238,14 @@ function Root() {
           },
         ]}
       />
+      {workoutLaunch && (
+        <WorkoutLaunchSplash
+          key={workoutLaunch.key}
+          workoutName={workoutLaunch.request.workoutName}
+          onCovered={() => coverWorkoutTransition(workoutLaunch.key)}
+          onFinished={() => finishWorkoutTransition(workoutLaunch.key)}
+        />
+      )}
     </View>
   );
 }

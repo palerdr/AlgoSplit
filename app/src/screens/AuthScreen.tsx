@@ -22,6 +22,7 @@ import {
   socialProviderVisible,
 } from '../auth/socialAuth';
 import SocialProviderIcon from '../ui/SocialProviderIcon';
+import StartupSplash from '../ui/StartupSplash';
 
 export default function AuthScreen() {
   const account = useAccountState();
@@ -94,12 +95,7 @@ export default function AuthScreen() {
   if (showPrivacy) return <PrivacyScreen onBack={() => setShowPrivacy(false)} />;
 
   if (account.status === 'checking') {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator color={theme.accent} />
-        <Text style={styles.checking}>Connecting to your account…</Text>
-      </View>
-    );
+    return <StartupSplash />;
   }
 
   if (account.status === 'unconfigured') {
@@ -312,11 +308,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
-  },
-  checking: {
-    color: theme.textDim,
-    fontSize: 13,
-    marginTop: 14,
   },
   // FadeIn needs a concrete width: inside the centered container it would
   // otherwise auto-size, making the card's width:'100%' resolve to the longest

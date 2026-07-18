@@ -732,14 +732,17 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
             }}
           >
             <Pressable accessibilityLabel="Notes" onPress={openNotes} disabled={notesOpen}>
-              <Glass style={styles.notesGlass} interactive>
+              {/* Keep the resting notes surface quiet. Native LiquidGlassView
+                  draws its own bright perimeter even without a React Native
+                  border, so use a borderless blur until the editor opens. */}
+              <BlurView intensity={18} tint="dark" style={styles.notesGlass}>
                 <Text
                   numberOfLines={3}
                   style={current.notes.trim() ? styles.notesPreview : styles.notesPlaceholder}
                 >
                   {current.notes.trim() || 'Notes'}
                 </Text>
-              </Glass>
+              </BlurView>
             </Pressable>
           </Animated.View>
 
@@ -1096,9 +1099,11 @@ const styles = StyleSheet.create({
   },
   notesGlass: {
     borderRadius: 24,
+    overflow: 'hidden',
     minHeight: 84,
     paddingHorizontal: 16,
     paddingVertical: 14,
+    backgroundColor: 'rgba(255,255,255,0.025)',
   },
   notesPreview: {
     color: theme.text,

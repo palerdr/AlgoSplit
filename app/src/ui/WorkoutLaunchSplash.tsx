@@ -1,38 +1,109 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   Animated,
   Easing,
   StyleSheet,
-  Text,
   View,
   useWindowDimensions,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import Svg, { Path } from 'react-native-svg';
 import { theme } from '../theme';
 
 interface WorkoutLaunchSplashProps {
   workoutName: string;
+  /** Called only once the opaque pool fully covers Home. */
+  onCovered: () => void;
+  /** Called after the pool drains and Session has been revealed. */
   onFinished: () => void;
 }
 
+// Keep this surface identical to RestTimer. The opaque body is the exact
+// visual result of rgba(10,94,39,0.55) composited over theme.bg (#0d0d0d), so
+// Home cannot flash through while Root swaps in Session beneath the pool.
+const POOL_COLOR = '#0B3A1B';
+const WAVE_H = 22;
+const WAVE_PATH =
+  'M0,11 Q25,2 50,11 T100,11 T150,11 T200,11 T250,11 T300,11 T350,11 T400,11 L400,22 L0,22 Z';
+
+function WaveLayer({
+  width,
+  duration,
+  opacity,
+  offset,
+  motionEnabled,
+}: {
+  width: number;
+  duration: number;
+  opacity: number;
+  offset: number;
+  motionEnabled: boolean;
+}) {
+  const x = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    x.setValue(0);
+    if (!motionEnabled) return;
+
+    const loop = Animated.loop(
+      Animated.timing(x, {
+        toValue: 1,
+        duration,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [duration, motionEnabled, x]);
+
+  const tile = width * 2;
+  return (
+    <Animated.View
+      style={{
+        position: 'absolute',
+        top: 0,
+        left: -offset,
+        width: tile * 2,
+        height: WAVE_H,
+        flexDirection: 'row',
+        opacity,
+        transform: [
+          { translateX: x.interpolate({ inputRange: [0, 1], outputRange: [0, -tile] }) },
+        ],
+      }}
+    >
+      <Svg width={tile} height={WAVE_H} viewBox="0 0 400 22" preserveAspectRatio="none">
+        <Path d={WAVE_PATH} fill={theme.accentDeep} />
+      </Svg>
+      <Svg width={tile} height={WAVE_H} viewBox="0 0 400 22" preserveAspectRatio="none">
+        <Path d={WAVE_PATH} fill={theme.accentDeep} />
+      </Svg>
+    </Animated.View>
+  );
+}
+
 /**
- * A short, energetic handoff between Home and the live session. It is a plain
- * sibling overlay (never a Glass ancestor), so its opacity and geometry are
- * safe to animate. Session state is committed only after onFinished fires.
+ * Root-owned water wipe for the Home -> Session handoff. The pool first rises
+ * over Home. At full, Root commits the workout and replaces Home with Session;
+ * two paint frames later this same overlay drains to reveal the mounted page.
  */
 export default function WorkoutLaunchSplash({
   workoutName,
+  onCovered,
   onFinished,
 }: WorkoutLaunchSplashProps) {
-  const { width, height } = useWindowDimensions();
-  const opacity = useRef(new Animated.Value(0)).current;
-  const sweep = useRef(new Animated.Value(0)).current;
-  const lockup = useRef(new Animated.Value(0)).current;
-  const progress = useRef(new Animated.Value(0)).current;
+  const { width } = useWindowDimensions();
+  const fill = useRef(new Animated.Value(0)).current;
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const firstFrameRef = useRef<number | null>(null);
+  const secondFrameRef = useRef<number | null>(null);
+  const coveredRef = useRef(false);
   const finishedRef = useRef(false);
+  const onCoveredRef = useRef(onCovered);
   const onFinishedRef = useRef(onFinished);
+  const [waveMotionEnabled, setWaveMotionEnabled] = useState(false);
+  onCoveredRef.current = onCovered;
   onFinishedRef.current = onFinished;
 
   useEffect(() => {
@@ -44,187 +115,103 @@ export default function WorkoutLaunchSplash({
       onFinishedRef.current();
     };
 
-    const run = (reduceMotion: boolean) => {
+    const drainAfterSessionPaint = (reduceMotion: boolean) => {
+      firstFrameRef.current = requestAnimationFrame(() => {
+        firstFrameRef.current = null;
+        secondFrameRef.current = requestAnimationFrame(() => {
+          secondFrameRef.current = null;
+          if (!alive) return;
+
+          const drain = Animated.timing(fill, {
+            toValue: 0,
+            duration: reduceMotion ? 80 : 480,
+            easing: reduceMotion ? Easing.linear : Easing.inOut(Easing.cubic),
+            useNativeDriver: false,
+          });
+          animationRef.current = drain;
+          drain.start(({ finished }) => {
+            if (animationRef.current === drain) animationRef.current = null;
+            if (finished) finish();
+          });
+        });
+      });
+    };
+
+    const cover = (reduceMotion: boolean) => {
       if (!alive) return;
-      opacity.setValue(reduceMotion ? 1 : 0);
-      sweep.setValue(reduceMotion ? 0.55 : 0);
-      lockup.setValue(reduceMotion ? 1 : 0);
-      progress.setValue(reduceMotion ? 1 : 0);
+      setWaveMotionEnabled(!reduceMotion);
+      fill.setValue(0);
 
-      const animation = reduceMotion
-        ? Animated.delay(240)
-        : Animated.parallel([
-            Animated.sequence([
-              Animated.timing(opacity, {
-                toValue: 1,
-                duration: 90,
-                easing: Easing.out(Easing.quad),
-                useNativeDriver: true,
-              }),
-              Animated.delay(830),
-            ]),
-            Animated.timing(sweep, {
-              toValue: 1,
-              duration: 790,
-              easing: Easing.inOut(Easing.cubic),
-              useNativeDriver: true,
-            }),
-            Animated.sequence([
-              Animated.delay(70),
-              Animated.spring(lockup, {
-                toValue: 1,
-                stiffness: 190,
-                damping: 18,
-                mass: 0.75,
-                useNativeDriver: true,
-              }),
-            ]),
-            Animated.sequence([
-              Animated.delay(180),
-              Animated.timing(progress, {
-                toValue: 1,
-                duration: 560,
-                easing: Easing.out(Easing.cubic),
-                useNativeDriver: true,
-              }),
-            ]),
-          ]);
-
-      animationRef.current = animation;
-      animation.start(({ finished }) => {
-        if (animationRef.current === animation) animationRef.current = null;
-        if (finished) finish();
+      const rise = Animated.timing(fill, {
+        toValue: 1,
+        duration: reduceMotion ? 80 : 460,
+        easing: reduceMotion ? Easing.linear : Easing.inOut(Easing.cubic),
+        useNativeDriver: false,
+      });
+      animationRef.current = rise;
+      rise.start(({ finished }) => {
+        if (animationRef.current === rise) animationRef.current = null;
+        if (!finished || !alive || coveredRef.current) return;
+        coveredRef.current = true;
+        onCoveredRef.current();
+        drainAfterSessionPaint(reduceMotion);
       });
     };
 
     AccessibilityInfo.isReduceMotionEnabled()
-      .then(run)
-      .catch(() => run(false));
+      .then(cover)
+      .catch(() => cover(false));
 
     return () => {
       alive = false;
       animationRef.current?.stop();
       animationRef.current = null;
+      if (firstFrameRef.current !== null) cancelAnimationFrame(firstFrameRef.current);
+      if (secondFrameRef.current !== null) cancelAnimationFrame(secondFrameRef.current);
     };
-  }, [lockup, opacity, progress, sweep]);
-
-  const sweepTravel = Math.max(width, 420) * 1.85;
+  }, [fill]);
 
   return (
-    <Animated.View
+    <View
       accessible
       accessibilityRole="progressbar"
       accessibilityLabel={`Starting ${workoutName}`}
-      accessibilityValue={{ text: 'Preparing workout' }}
+      accessibilityValue={{ text: 'Opening workout' }}
       accessibilityLiveRegion="assertive"
       accessibilityViewIsModal
       importantForAccessibility="yes"
-      style={[styles.layer, { opacity }]}
+      style={styles.layer}
     >
-      <LinearGradient
-        colors={['#07150D', theme.accentDeep, '#102418', theme.bg]}
-        locations={[0, 0.32, 0.68, 1]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
-      />
-
       <Animated.View
         pointerEvents="none"
         style={[
-          styles.sweepBand,
+          styles.pool,
           {
-            width: Math.max(width * 0.58, 240),
-            height: height * 1.55,
-            transform: [
-              {
-                translateX: sweep.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [-sweepTravel, sweepTravel],
-                }),
-              },
-              { rotate: '-13deg' },
-            ],
+            height: fill.interpolate({
+              inputRange: [0, 1],
+              outputRange: ['0%', '100%'],
+            }),
           },
         ]}
       >
-        <LinearGradient
-          colors={['rgba(65,196,110,0)', 'rgba(125,255,166,0.72)', 'rgba(65,196,110,0)']}
-          locations={[0, 0.5, 1]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={StyleSheet.absoluteFillObject}
-        />
-      </Animated.View>
-
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          styles.edgeLine,
-          {
-            transform: [
-              {
-                translateX: sweep.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [-width * 0.85, width * 0.9],
-                }),
-              },
-              { rotate: '-13deg' },
-            ],
-          },
-        ]}
-      />
-
-      <Animated.View
-        style={[
-          styles.lockup,
-          {
-            opacity: lockup,
-            transform: [
-              {
-                translateY: lockup.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [18, 0],
-                }),
-              },
-              {
-                scale: lockup.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0.88, 1],
-                }),
-              },
-            ],
-          },
-        ]}
-      >
-        <View style={styles.wordmarkRow}>
-          <Text style={styles.wordmark}>ALGO</Text>
-          <View style={styles.wordmarkSlash} />
-          <Text style={[styles.wordmark, styles.wordmarkLight]}>SPLIT</Text>
-        </View>
-        <Text style={styles.kicker}>SESSION READY</Text>
-        <Text style={styles.workoutName} numberOfLines={2}>
-          {workoutName}
-        </Text>
-        <View style={styles.progressTrack}>
-          <Animated.View
-            style={[
-              styles.progressFill,
-              {
-                transform: [
-                  {
-                    translateX: progress.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [-176, 0],
-                    }),
-                  },
-                ],
-              },
-            ]}
+        <View style={styles.waveBand} pointerEvents="none">
+          <WaveLayer
+            width={width}
+            duration={5600}
+            opacity={0.35}
+            offset={width * 0.65}
+            motionEnabled={waveMotionEnabled}
+          />
+          <WaveLayer
+            width={width}
+            duration={3400}
+            opacity={0.55}
+            offset={0}
+            motionEnabled={waveMotionEnabled}
           />
         </View>
       </Animated.View>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -233,78 +220,19 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 500,
     elevation: 500,
-    alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     overflow: 'hidden',
-    backgroundColor: theme.bg,
   },
-  sweepBand: {
+  pool: {
+    width: '100%',
+    backgroundColor: POOL_COLOR,
+  },
+  waveBand: {
     position: 'absolute',
-    top: '-28%',
-  },
-  edgeLine: {
-    position: 'absolute',
-    top: '-20%',
-    width: 3,
-    height: '145%',
-    backgroundColor: 'rgba(213,255,225,0.82)',
-    shadowColor: theme.accent,
-    shadowOpacity: 0.8,
-    shadowRadius: 14,
-  },
-  lockup: {
-    width: '82%',
-    maxWidth: 420,
-    alignItems: 'center',
-  },
-  wordmarkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-  },
-  wordmark: {
-    color: theme.text,
-    fontSize: 29,
-    fontWeight: '900',
-    letterSpacing: 2.1,
-  },
-  wordmarkLight: {
-    fontWeight: '500',
-  },
-  wordmarkSlash: {
-    width: 4,
-    height: 32,
-    borderRadius: 2,
-    backgroundColor: '#9CFFB9',
-    transform: [{ rotate: '13deg' }],
-  },
-  kicker: {
-    color: '#A7F5BD',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 2.4,
-    marginTop: 24,
-  },
-  workoutName: {
-    color: theme.text,
-    fontSize: 20,
-    lineHeight: 26,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  progressTrack: {
-    width: 176,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    top: -WAVE_H,
+    left: 0,
+    right: 0,
+    height: WAVE_H,
     overflow: 'hidden',
-    marginTop: 28,
-  },
-  progressFill: {
-    width: 176,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: '#B8FFC9',
   },
 });

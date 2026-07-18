@@ -352,8 +352,19 @@ export default function DetailsScreen({ onBack }: DetailsScreenProps) {
         </FadeIn>
 
         <FadeIn delay={45} style={styles.statTileWrap}>
-          <Glass style={[styles.statTile, styles.volumeTile]}>
-            <View style={styles.volumeCopy}>
+          <Glass
+            style={[
+              styles.statTile,
+              styles.volumeTile,
+              weekVolume === 0 && !weekAnimalTier && styles.volumeTileEmpty,
+            ]}
+          >
+            <View
+              style={[
+                styles.volumeCopy,
+                weekVolume === 0 && !weekAnimalTier && styles.volumeCopyEmpty,
+              ]}
+            >
               <Text
                 adjustsFontSizeToFit
                 minimumFontScale={0.65}
@@ -602,10 +613,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
+  volumeTileEmpty: {
+    justifyContent: 'center',
+  },
   volumeCopy: {
     flex: 1,
     minWidth: 0,
     alignItems: 'flex-start',
+  },
+  volumeCopyEmpty: {
+    alignItems: 'center',
   },
   statValue: {
     color: theme.text,

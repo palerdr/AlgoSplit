@@ -1,5 +1,5 @@
 import React, { ReactNode, useContext } from 'react';
-import { StyleProp, ViewStyle } from 'react-native';
+import { Animated, StyleProp, StyleSheet, ViewStyle } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LiquidGlassView } from './GlassRuntime';
 import { PopupGlassTransitionContext } from './PopupGlassTransition';
@@ -16,9 +16,21 @@ interface GlassProps {
 export default function Glass({ style, children, tintColor, interactive }: GlassProps) {
   const popupTransition = useContext(PopupGlassTransitionContext);
   if (LiquidGlassView) {
+    const resolvedStyle = StyleSheet.flatten(style);
+    const popupBorder =
+      popupTransition && resolvedStyle?.borderWidth
+        ? ({
+            borderColor: resolvedStyle.borderColor,
+            borderCurve: resolvedStyle.borderCurve,
+            borderRadius: resolvedStyle.borderRadius,
+            borderStyle: resolvedStyle.borderStyle,
+            borderWidth: resolvedStyle.borderWidth,
+          } satisfies ViewStyle)
+        : null;
+
     return (
       <LiquidGlassView
-        style={style}
+        style={[style, popupBorder && styles.hiddenPopupBorder]}
         glassEffectStyle={
           popupTransition
             ? {
@@ -32,6 +44,16 @@ export default function Glass({ style, children, tintColor, interactive }: Glass
         isInteractive={interactive}
       >
         {children}
+        {popupBorder && popupTransition && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.popupBorder,
+              popupBorder,
+              { opacity: popupTransition.progress },
+            ]}
+          />
+        )}
       </LiquidGlassView>
     );
   }
@@ -41,3 +63,12 @@ export default function Glass({ style, children, tintColor, interactive }: Glass
     </BlurView>
   );
 }
+
+const styles = StyleSheet.create({
+  hiddenPopupBorder: {
+    borderColor: 'transparent',
+  },
+  popupBorder: {
+    ...StyleSheet.absoluteFillObject,
+  },
+});

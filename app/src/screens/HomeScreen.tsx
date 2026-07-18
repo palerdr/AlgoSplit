@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
-  ActivityIndicator,
   Animated,
   Easing,
   PanResponder,
@@ -20,8 +19,8 @@ import FireIcon from '../ui/FireIcon';
 import Glass from '../ui/Glass';
 import PopupLayer from '../ui/PopupLayer';
 import PopupContent from '../ui/PopupContent';
+import StatusHud from '../ui/StatusHud';
 import Tooltip from '../ui/Tooltip';
-import WorkoutLaunchSplash from '../ui/WorkoutLaunchSplash';
 import { levelsFromNet, stimulusScore } from '../analysis/stimulus';
 import { useAppState } from '../state/AppState';
 import { useAccountState } from '../state/AccountState';
@@ -33,8 +32,6 @@ import {
 } from '../workout/splitSessions';
 import {
   mergeSplitLogs,
-  nextSplitPlan,
-  splitDoneToday,
   splitWorkoutStreak,
 } from '../workout/splitStreak';
 import { theme } from '../theme';
@@ -43,7 +40,7 @@ interface HomeScreenProps {
   /** One-shot: true only on the arrival right after finishing a workout */
   celebrate: boolean;
   onCelebrateHandled: () => void;
-  onStartSession: () => void;
+  onStartSession: (request: WorkoutLaunchRequest) => boolean;
   onDetails: () => void;
   onWorkouts: () => void;
   onCreateSplit: () => void;
@@ -52,9 +49,9 @@ interface HomeScreenProps {
   onActiveSplitLandingHandled: () => void;
 }
 
-type PendingWorkoutLaunch =
-  | { key: number; kind: 'planned'; plan: AccountWorkoutPlan; name: string }
-  | { key: number; kind: 'freestyle'; name: string };
+export type WorkoutLaunchRequest =
+  | { kind: 'planned'; plan: AccountWorkoutPlan; workoutName: string }
+  | { kind: 'freestyle'; workoutName: string };
 
 // Sheet progress (0 pill → 1 open sheet) past which releasing opens it.
 const ARM_AT = 0.42;
@@ -83,7 +80,7 @@ function NextChevron() {
       style={styles.nextChevronWrap}
     >
       {SymbolView ? (
-        <SymbolView name="chevron.right" size={21} tintColor={theme.textDim} />
+        <SymbolView name="chevron.right" size={24} tintColor={theme.textDim} />
       ) : (
         <Text style={styles.nextChevronFallback}>›</Text>
       )}
@@ -181,8 +178,6 @@ export default function HomeScreen({
 }: HomeScreenProps) {
   const {
     recentStimulus,
-    startPlannedSession,
-    startFreeSession,
     lastCompleted,
     history,
     failedSyncCount,
@@ -199,7 +194,6 @@ export default function HomeScreen({
   );
   const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
   const [splitPickerOpen, setSplitPickerOpen] = useState(false);
-  const [forceStartPlan, setForceStartPlan] = useState<AccountWorkoutPlan | null>(null);
   const selectedWorkoutGroup =
     workoutGroups.find((group) => group.id === selectedSplitId) ?? null;
   const { width, height } = useWindowDimensions();
@@ -228,16 +222,6 @@ export default function HomeScreen({
   );
   const activeStreak = React.useMemo(
     () => (activeSplit ? splitWorkoutStreak(activeSplit, splitLogs, Date.now()) : 0),
-    [activeSplit, splitLogs]
-  );
-  const activeNextPlan = React.useMemo(
-    () => (activeSplit ? nextSplitPlan(activeSplit, splitLogs, Date.now()) : null),
-    [activeSplit, splitLogs]
-  );
-  // Locked to the calendar day: after today's split workout, quick start rests
-  // until tomorrow (the day list stays available for intentional doubles).
-  const activeDoneToday = React.useMemo(
-    () => (activeSplit ? splitDoneToday(activeSplit, splitLogs, Date.now()) : false),
     [activeSplit, splitLogs]
   );
   const activeZoneLanding = useRef(new Animated.Value(1)).current;
@@ -514,42 +498,23 @@ export default function HomeScreen({
     })
   ).current;
 
-  const [pendingLaunch, setPendingLaunch] = useState<PendingWorkoutLaunch | null>(null);
-  const pendingLaunchRef = useRef<PendingWorkoutLaunch | null>(null);
-  const launchKeyRef = useRef(0);
+  const launchPendingRef = useRef(false);
 
-  const queueLaunch = (
-    launch:
-      | { kind: 'planned'; plan: AccountWorkoutPlan; name: string }
-      | { kind: 'freestyle'; name: string }
-  ) => {
-    // The full-screen splash blocks follow-up taps, while the ref closes the
-    // tiny window before React commits that overlay.
-    if (pendingLaunchRef.current) return;
+  const queueLaunch = (launch: WorkoutLaunchRequest) => {
+    // Root's full-screen water wipe blocks follow-up taps, while this ref
+    // closes the tiny window before React commits that overlay.
+    if (launchPendingRef.current) return;
     thump();
-    const pending = { ...launch, key: ++launchKeyRef.current } as PendingWorkoutLaunch;
-    pendingLaunchRef.current = pending;
-    setPendingLaunch(pending);
+    launchPendingRef.current = true;
+    if (!onStartSession(launch)) launchPendingRef.current = false;
   };
 
   const pick = (plan: AccountWorkoutPlan) => {
-    queueLaunch({ kind: 'planned', plan, name: plan.name });
+    queueLaunch({ kind: 'planned', plan, workoutName: plan.name });
   };
 
   const pickFreestyle = () => {
-    queueLaunch({ kind: 'freestyle', name: 'Freeball' });
-  };
-
-  const finishPendingLaunch = () => {
-    const launch = pendingLaunchRef.current;
-    if (!launch) return;
-    pendingLaunchRef.current = null;
-    if (launch.kind === 'planned') startPlannedSession(launch.plan);
-    else startFreeSession();
-    // Commit the session and navigation in the same callback. The splash stays
-    // mounted over Home until the route swap, avoiding an exposed intermediate
-    // state after its one-second sequence.
-    onStartSession();
+    queueLaunch({ kind: 'freestyle', workoutName: 'Freeball' });
   };
 
   const clamp = { extrapolate: 'clamp' as const };
@@ -704,14 +669,27 @@ export default function HomeScreen({
         )}
       </Animated.View>
 
-      {accountStimulusPending && (
-        <View pointerEvents="none" style={styles.stimulusLoadingWrap}>
-          <Glass style={styles.stimulusLoadingPill}>
-            <ActivityIndicator size="small" color={theme.accent} />
-            <Text style={styles.stimulusLoadingText}>Loading account stimulus…</Text>
-          </Glass>
-        </View>
-      )}
+      {failedSyncCount > 0 ? (
+        <StatusHud
+          kind="error"
+          label={`${failedSyncCount} upload${failedSyncCount === 1 ? '' : 's'} failed`}
+          onPress={() => {
+            tick();
+            retryFailedWorkouts();
+          }}
+        />
+      ) : account.recentStimulus.error ? (
+        <StatusHud
+          kind="error"
+          label="Stimulus unavailable"
+          onPress={() => {
+            tick();
+            account.refreshStimulus();
+          }}
+        />
+      ) : accountStimulusPending ? (
+        <StatusHud kind="loading" label="Syncing stimulus" />
+      ) : null}
 
       <Animated.View
         style={[
@@ -740,48 +718,6 @@ export default function HomeScreen({
           </Glass>
         </Pressable>
       </Animated.View>
-
-      {account.recentStimulus.error && (
-        <Animated.View
-          style={[
-            styles.stimulusErrorWrap,
-            {
-              transform: [
-                { translateY: uiAnim.interpolate({ inputRange: [0, 1], outputRange: [-130, 0] }) },
-              ],
-            },
-          ]}
-        >
-          <Pressable onPress={() => account.refreshStimulus()}>
-            <Glass style={styles.syncBanner} interactive>
-              <Text style={[styles.syncText, styles.syncError]}>Stimulus could not load · Retry</Text>
-            </Glass>
-          </Pressable>
-        </Animated.View>
-      )}
-
-      {/* Uploads stay silent unless something actually failed — the dial and
-          body already reflect the workout locally. */}
-      {failedSyncCount > 0 && (
-        <Animated.View
-          style={[
-            styles.syncBannerWrap,
-            {
-              transform: [
-                { translateY: uiAnim.interpolate({ inputRange: [0, 1], outputRange: [-130, 0] }) },
-              ],
-            },
-          ]}
-        >
-          <Pressable onPress={retryFailedWorkouts}>
-            <Glass style={styles.syncBanner} interactive>
-              <Text style={[styles.syncText, styles.syncError]}>
-                {`${failedSyncCount} workout upload failed · Retry`}
-              </Text>
-            </Glass>
-          </Pressable>
-        </Animated.View>
-      )}
 
       {/* Scrim behind the sheet; tap to dismiss */}
       <Animated.View
@@ -846,7 +782,9 @@ export default function HomeScreen({
             {/* Handle — pill face when closed, sheet header when open */}
             <View style={styles.handleZone} {...(sheetLive ? sheetPan.panHandlers : {})}>
               <View style={styles.grabber} />
-              <Text style={styles.startText}>Start Workout</Text>
+              <Text style={styles.startText} numberOfLines={1}>
+                {selectedWorkoutGroup?.name ?? 'Start Workout'}
+              </Text>
             </View>
 
             {/* Workout list, revealed as the glass stretches */}
@@ -884,15 +822,22 @@ export default function HomeScreen({
                 <View>
                   <View style={styles.nestedHeader}>
                     <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Back to splits"
                       onPress={() => {
                         tick();
                         setSelectedSplitId(null);
                       }}
                       hitSlop={8}
+                      style={styles.nestedBackButton}
                     >
-                      <Text style={styles.nestedBack}>‹ Splits</Text>
+                      {SymbolView ? (
+                        <SymbolView name="chevron.left" size={14} tintColor={theme.textDim} />
+                      ) : (
+                        <Text style={styles.nestedBackArrow}>‹</Text>
+                      )}
+                      <Text style={styles.nestedBack}>Back</Text>
                     </Pressable>
-                    <Text style={styles.nestedTitle}>{selectedWorkoutGroup.name}</Text>
                   </View>
                   {selectedWorkoutGroup.sessions.length === 0 ? (
                     <Text style={styles.planStatus}>This split has no workout days yet.</Text>
@@ -902,7 +847,12 @@ export default function HomeScreen({
                         <View style={[styles.sheetCard, pressed && styles.cardPressed]}>
                           <View style={styles.planTitleRow}>
                             <Text style={styles.dayLabel}>Day {plan.dayNumber}</Text>
-                            <Text style={styles.cardTitle}>{plan.name}</Text>
+                            <Text
+                              style={[styles.cardTitle, styles.selectedDayTitle]}
+                              numberOfLines={1}
+                            >
+                              {plan.name}
+                            </Text>
                           </View>
                           <Text style={styles.cardSub}>
                             {plan.exercises.length} {plan.exercises.length === 1 ? 'exercise' : 'exercises'}
@@ -914,7 +864,7 @@ export default function HomeScreen({
                 </View>
               ) : (
                 <View>
-                  {/* Splits — the default section, no title needed */}
+                  <Text style={styles.sheetSectionLabel}>Splits</Text>
                   {account.splits.loading && !account.splits.loaded ? (
                     <Text style={styles.planStatus}>Loading your saved splits…</Text>
                   ) : account.splits.error ? (
@@ -930,99 +880,36 @@ export default function HomeScreen({
                   ) : (
                     orderedGroups.map((group) => {
                       const isActive = group.id === activeSplit?.id;
-                      const openSplitDays = () => {
-                        tick();
-                        setSelectedSplitId(group.id);
-                      };
-                      const openActiveWorkout = () => {
-                        if (!activeNextPlan) {
-                          openSplitDays();
-                          return;
-                        }
-                        if (activeDoneToday) {
-                          tick();
-                          setForceStartPlan(activeNextPlan);
-                          return;
-                        }
-                        pick(activeNextPlan);
-                      };
-                      const activeCardStyle =
-                        isActive && !activeDoneToday
-                          ? styles.sheetSplitCardActive
-                          : isActive && activeDoneToday
-                            ? styles.sheetSplitCardDone
-                            : null;
+                      const dayCount = group.cycleLength ?? 7;
                       return (
-                        <View key={group.id} style={styles.splitButtonPair}>
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={`Open ${group.name} workout days`}
-                            onPress={openSplitDays}
-                            style={styles.splitChoicePress}
-                          >
-                            {({ pressed }) => (
-                              <View
-                                style={[
-                                  styles.sheetSplitCard,
-                                  activeCardStyle,
-                                  pressed && styles.cardPressed,
-                                ]}
-                              >
-                                <View style={styles.splitChoiceCopy}>
-                                  <Text style={styles.splitChoiceKicker}>Split</Text>
-                                  <Text style={styles.splitChoiceTitle} numberOfLines={2}>
-                                    {group.name}
-                                  </Text>
-                                </View>
-                                <NextChevron />
-                              </View>
-                            )}
-                          </Pressable>
-
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={
-                              isActive && activeNextPlan
-                                ? activeDoneToday
-                                  ? `Start ${activeNextPlan.name} again`
-                                  : `Start today's workout, ${activeNextPlan.name}`
-                                : `Open ${group.name}, ${group.sessions.length} workouts`
-                            }
-                            onPress={isActive ? openActiveWorkout : openSplitDays}
-                            style={styles.splitChoicePress}
-                          >
-                            {({ pressed }) => (
-                              <View
-                                style={[
-                                  styles.sheetSplitCard,
-                                  activeCardStyle,
-                                  pressed && styles.cardPressed,
-                                ]}
-                              >
-                                {isActive ? (
-                                  <View style={styles.splitChoiceCopy}>
-                                    <Text style={styles.splitChoiceKicker}>
-                                      {activeDoneToday ? 'Done today' : "Today's workout"}
-                                    </Text>
-                                    <Text style={styles.splitChoiceTitle} numberOfLines={2}>
-                                      {activeNextPlan?.name ?? 'Choose workout'}
-                                    </Text>
-                                  </View>
-                                ) : (
-                                  <View style={styles.splitChoiceCopy}>
-                                    <Text style={styles.splitWorkoutCount}>
-                                      {group.sessions.length}
-                                    </Text>
-                                    <Text style={styles.splitChoiceKicker}>
-                                      {group.sessions.length === 1 ? 'Workout' : 'Workouts'}
-                                    </Text>
-                                  </View>
-                                )}
-                                {(!isActive || !activeNextPlan) && <NextChevron />}
-                              </View>
-                            )}
-                          </Pressable>
-                        </View>
+                        <Pressable
+                          key={group.id}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Open ${group.name}, ${dayCount} day cycle`}
+                          onPress={() => {
+                            tick();
+                            setSelectedSplitId(group.id);
+                          }}
+                        >
+                          {({ pressed }) => (
+                            <View
+                              style={[
+                                styles.sheetCard,
+                                styles.splitRowCard,
+                                isActive && styles.sheetSplitCardActive,
+                                pressed && styles.cardPressed,
+                              ]}
+                            >
+                              <Text style={styles.splitRowName} numberOfLines={1}>
+                                {group.name}
+                              </Text>
+                              <Text style={styles.splitDayCount}>
+                                {dayCount} day cycle
+                              </Text>
+                              <NextChevron />
+                            </View>
+                          )}
+                        </Pressable>
                       );
                     })
                   )}
@@ -1123,7 +1010,11 @@ export default function HomeScreen({
               </Pressable>
             </View>
             <Text style={styles.pickerHint}>
-              Lives on your home screen with a streak and one-tap start.
+              {activeSplit
+                ? `You’ve maintained this split for ${activeStreak} ${
+                    activeStreak === 1 ? 'day' : 'days'
+                  }.`
+                : 'Lives on your home screen with a streak and one-tap start.'}
             </Text>
             <ScrollView
               style={styles.pickerList}
@@ -1175,57 +1066,6 @@ export default function HomeScreen({
         </Glass>
       </PopupLayer>
 
-      {/* Force-start confirm */}
-      <PopupLayer
-        visible={forceStartPlan !== null}
-        onDismiss={() => setForceStartPlan(null)}
-        accessibilityLabel="Workout already completed today"
-        maxWidth={380}
-        cardRadius={24}
-      >
-        <Glass style={styles.pickerCard}>
-          <PopupContent>
-            <Text style={styles.pickerTitle}>Already done for today</Text>
-            <Text style={styles.pickerHint}>
-              You’ve completed {activeSplit?.name ?? 'this split'}’s assigned workout for today.
-            </Text>
-          </PopupContent>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Start it anyway"
-            onPress={() => {
-              const plan = forceStartPlan;
-              setForceStartPlan(null);
-              if (plan) pick(plan);
-            }}
-          >
-            <Glass style={styles.forceStartButton} interactive>
-              <PopupContent>
-                <Text style={styles.forceStartButtonText}>Start it anyway</Text>
-              </PopupContent>
-            </Glass>
-          </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => {
-              tick();
-              setForceStartPlan(null);
-            }}
-          >
-            <PopupContent>
-              <Text style={styles.forceStartCancel}>Not now</Text>
-            </PopupContent>
-          </Pressable>
-        </Glass>
-      </PopupLayer>
-
-      {pendingLaunch && (
-        <WorkoutLaunchSplash
-          key={pendingLaunch.key}
-          workoutName={pendingLaunch.name}
-          onFinished={finishPendingLaunch}
-        />
-      )}
     </View>
   );
 }
@@ -1242,53 +1082,6 @@ const styles = StyleSheet.create({
     right: 20,
     flexDirection: 'row',
     justifyContent: 'space-between',
-  },
-  syncBannerWrap: {
-    position: 'absolute',
-    top: 116,
-    left: 24,
-    right: 24,
-    alignItems: 'center',
-  },
-  stimulusErrorWrap: {
-    position: 'absolute',
-    top: 116,
-    left: 24,
-    right: 24,
-    alignItems: 'center',
-  },
-  stimulusLoadingWrap: {
-    position: 'absolute',
-    top: 124,
-    left: 24,
-    right: 24,
-    alignItems: 'center',
-  },
-  stimulusLoadingPill: {
-    borderRadius: 18,
-    paddingVertical: 9,
-    paddingHorizontal: 15,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stimulusLoadingText: {
-    color: theme.textDim,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  syncBanner: {
-    borderRadius: 18,
-    paddingVertical: 9,
-    paddingHorizontal: 15,
-  },
-  syncText: {
-    color: theme.textDim,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  syncError: {
-    color: '#E27878',
   },
   smallButton: {
     borderRadius: 22,
@@ -1455,24 +1248,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingTop: 14,
   },
-  forceStartButton: {
-    borderRadius: 16,
-    paddingVertical: 13,
-    alignItems: 'center',
-    marginTop: 6,
-  },
-  forceStartButtonText: {
-    color: theme.accent,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  forceStartCancel: {
-    color: theme.textDim,
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-    paddingTop: 14,
-  },
   activeTag: {
     color: theme.accent,
     fontSize: 9,
@@ -1532,6 +1307,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     letterSpacing: 0.5,
+    maxWidth: '86%',
   },
   cards: {
     flex: 1,
@@ -1549,72 +1325,38 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.22)',
   },
-  splitButtonPair: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: 8,
-    marginBottom: 10,
-  },
-  splitChoicePress: {
-    flex: 1,
-  },
-  sheetSplitCard: {
-    flex: 1,
-    minHeight: 76,
-    borderRadius: 20,
-    paddingVertical: 12,
-    paddingHorizontal: 13,
-    backgroundColor: 'rgba(255,255,255,0.09)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.22)',
+  splitRowCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 7,
+    gap: 12,
+    minHeight: 72,
   },
   sheetSplitCardActive: {
     borderColor: 'rgba(65,196,110,0.52)',
     backgroundColor: 'rgba(65,196,110,0.11)',
   },
-  // Once today's assignment is logged, both halves return to a neutral card.
-  sheetSplitCardDone: {
-    opacity: 0.58,
-  },
-  splitChoiceCopy: {
+  splitRowName: {
     flex: 1,
     minWidth: 0,
-    justifyContent: 'center',
+    color: theme.text,
+    fontSize: 17,
+    fontWeight: '600',
   },
-  splitChoiceKicker: {
+  splitDayCount: {
     color: theme.textDim,
-    fontSize: 9,
-    lineHeight: 12,
-    fontWeight: '700',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-  },
-  splitChoiceTitle: {
-    color: theme.text,
-    fontSize: 15,
-    lineHeight: 19,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  splitWorkoutCount: {
-    color: theme.text,
-    fontSize: 23,
-    lineHeight: 25,
-    fontWeight: '800',
+    fontSize: 12.5,
+    lineHeight: 17,
+    fontWeight: '600',
     fontVariant: ['tabular-nums'],
   },
   nextChevronFallback: {
     color: theme.textDim,
-    fontSize: 29,
-    lineHeight: 30,
+    fontSize: 32,
+    lineHeight: 32,
     fontWeight: '300',
   },
   nextChevronWrap: {
-    width: 22,
+    width: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1633,32 +1375,41 @@ const styles = StyleSheet.create({
   },
   planTitleRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
   },
   nestedHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     paddingHorizontal: 4,
     paddingBottom: 12,
   },
-  nestedBack: {
-    color: theme.accent,
-    fontSize: 12,
-    fontWeight: '700',
+  nestedBackButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
-  nestedTitle: {
-    color: theme.text,
-    fontSize: 13,
-    fontWeight: '700',
-    flexShrink: 1,
+  nestedBack: {
+    color: theme.textDim,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  nestedBackArrow: {
+    color: theme.textDim,
+    fontSize: 22,
+    lineHeight: 22,
+    fontWeight: '300',
   },
   dayLabel: {
-    color: theme.accent,
+    color: theme.textDim,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '700',
+  },
+  selectedDayTitle: {
+    flex: 1,
+    marginBottom: 0,
+    textAlign: 'right',
   },
   freeCard: {
     opacity: 0.85,

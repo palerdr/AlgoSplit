@@ -601,7 +601,6 @@ export default function WorkoutsScreen({
           contentContainerStyle={styles.detailDayListContent}
         />
         <View style={styles.activeControlSection}>
-          <Text style={styles.activeControlEyebrow}>ACTIVE SPLIT</Text>
           {selectedIsActive ? (
             <Glass style={styles.activeStatus}>
               <Text style={styles.activeStatusCheck}>✓</Text>
@@ -1000,14 +999,6 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     paddingTop: 10,
     paddingBottom: 24,
-  },
-  activeControlEyebrow: {
-    color: theme.textDim,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1,
-    marginBottom: 9,
-    marginLeft: 4,
   },
   activeSlider: {
     height: ACTIVE_TRACK_HEIGHT,
