@@ -498,15 +498,11 @@ export default function HomeScreen({
     })
   ).current;
 
-  const launchPendingRef = useRef(false);
-
   const queueLaunch = (launch: WorkoutLaunchRequest) => {
-    // Root's full-screen water wipe blocks follow-up taps, while this ref
-    // closes the tiny window before React commits that overlay.
-    if (launchPendingRef.current) return;
     thump();
-    launchPendingRef.current = true;
-    if (!onStartSession(launch)) launchPendingRef.current = false;
+    // Root owns the synchronous duplicate-tap guard. Keeping a second latch on
+    // Home would strand this screen after someone cancels the order review.
+    onStartSession(launch);
   };
 
   const pick = (plan: AccountWorkoutPlan) => {

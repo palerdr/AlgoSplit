@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { ReactNode, useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
   Animated,
@@ -12,10 +12,13 @@ import { theme } from '../theme';
 
 interface WorkoutLaunchSplashProps {
   workoutName: string;
+  phase: 'covering' | 'reviewing' | 'revealing' | 'canceling';
   /** Called only once the opaque pool fully covers Home. */
   onCovered: () => void;
   /** Called after the pool drains and Session has been revealed. */
   onFinished: () => void;
+  /** Interactive order review, mounted only after the water has settled. */
+  children?: ReactNode;
 }
 
 // Keep this surface identical to RestTimer. The opaque body is the exact
@@ -85,13 +88,16 @@ function WaveLayer({
 
 /**
  * Root-owned water wipe for the Home -> Session handoff. The pool first rises
- * over Home. At full, Root commits the workout and replaces Home with Session;
- * two paint frames later this same overlay drains to reveal the mounted page.
+ * over Home and can hold at full height for the workout-order review. Root
+ * commits the workout only after confirmation; two paint frames after Session
+ * mounts, this same overlay drains to reveal it.
  */
 export default function WorkoutLaunchSplash({
   workoutName,
+  phase,
   onCovered,
   onFinished,
+  children,
 }: WorkoutLaunchSplashProps) {
   const { width } = useWindowDimensions();
   const fill = useRef(new Animated.Value(0)).current;
@@ -99,9 +105,13 @@ export default function WorkoutLaunchSplash({
   const firstFrameRef = useRef<number | null>(null);
   const secondFrameRef = useRef<number | null>(null);
   const coveredRef = useRef(false);
+  const drainStartedRef = useRef(false);
   const finishedRef = useRef(false);
+  const reduceMotionRef = useRef(false);
   const onCoveredRef = useRef(onCovered);
   const onFinishedRef = useRef(onFinished);
+  const [covered, setCovered] = useState(false);
+  const [reviewReady, setReviewReady] = useState(false);
   const [waveMotionEnabled, setWaveMotionEnabled] = useState(false);
   onCoveredRef.current = onCovered;
   onFinishedRef.current = onFinished;
@@ -109,36 +119,9 @@ export default function WorkoutLaunchSplash({
   useEffect(() => {
     let alive = true;
 
-    const finish = () => {
-      if (!alive || finishedRef.current) return;
-      finishedRef.current = true;
-      onFinishedRef.current();
-    };
-
-    const drainAfterSessionPaint = (reduceMotion: boolean) => {
-      firstFrameRef.current = requestAnimationFrame(() => {
-        firstFrameRef.current = null;
-        secondFrameRef.current = requestAnimationFrame(() => {
-          secondFrameRef.current = null;
-          if (!alive) return;
-
-          const drain = Animated.timing(fill, {
-            toValue: 0,
-            duration: reduceMotion ? 80 : 480,
-            easing: reduceMotion ? Easing.linear : Easing.inOut(Easing.cubic),
-            useNativeDriver: false,
-          });
-          animationRef.current = drain;
-          drain.start(({ finished }) => {
-            if (animationRef.current === drain) animationRef.current = null;
-            if (finished) finish();
-          });
-        });
-      });
-    };
-
     const cover = (reduceMotion: boolean) => {
       if (!alive) return;
+      reduceMotionRef.current = reduceMotion;
       setWaveMotionEnabled(!reduceMotion);
       fill.setValue(0);
 
@@ -153,8 +136,8 @@ export default function WorkoutLaunchSplash({
         if (animationRef.current === rise) animationRef.current = null;
         if (!finished || !alive || coveredRef.current) return;
         coveredRef.current = true;
+        setCovered(true);
         onCoveredRef.current();
-        drainAfterSessionPaint(reduceMotion);
       });
     };
 
@@ -171,12 +154,70 @@ export default function WorkoutLaunchSplash({
     };
   }, [fill]);
 
+  // Give the just-settled waterline a tiny visual beat before mounting native
+  // glass. The glass itself never sits under an opacity animation.
+  useEffect(() => {
+    if (!covered || phase !== 'reviewing') {
+      setReviewReady(false);
+      return;
+    }
+    const timer = setTimeout(() => setReviewReady(true), 150);
+    return () => clearTimeout(timer);
+  }, [covered, phase]);
+
+  // Confirmation mounts Session behind the fully opaque pool. Wait for two
+  // paints, then drain. Cancel uses the same water motion back to Home without
+  // ever creating a session.
+  useEffect(() => {
+    if (
+      !covered ||
+      drainStartedRef.current ||
+      (phase !== 'revealing' && phase !== 'canceling')
+    ) return;
+
+    drainStartedRef.current = true;
+    firstFrameRef.current = requestAnimationFrame(() => {
+      firstFrameRef.current = null;
+      secondFrameRef.current = requestAnimationFrame(() => {
+        secondFrameRef.current = null;
+        const reduceMotion = reduceMotionRef.current;
+        const drain = Animated.timing(fill, {
+          toValue: 0,
+          duration: reduceMotion ? 80 : 480,
+          easing: reduceMotion ? Easing.linear : Easing.inOut(Easing.cubic),
+          useNativeDriver: false,
+        });
+        animationRef.current = drain;
+        drain.start(({ finished }) => {
+          if (animationRef.current === drain) animationRef.current = null;
+          if (!finished || finishedRef.current) return;
+          finishedRef.current = true;
+          onFinishedRef.current();
+        });
+      });
+    });
+  }, [covered, fill, phase]);
+
+  const reviewing = phase === 'reviewing' && reviewReady;
+  const progressLabel =
+    phase === 'canceling'
+      ? 'Closing workout order'
+      : phase === 'reviewing'
+        ? `Preparing ${workoutName} order`
+        : `Starting ${workoutName}`;
+  const progressValue =
+    phase === 'canceling'
+      ? 'Returning to workouts'
+      : phase === 'reviewing'
+        ? 'Opening order review'
+        : 'Opening workout';
+
   return (
     <View
-      accessible
-      accessibilityRole="progressbar"
-      accessibilityLabel={`Starting ${workoutName}`}
-      accessibilityValue={{ text: 'Opening workout' }}
+      accessible={!reviewing}
+      accessibilityRole={!reviewing ? 'progressbar' : undefined}
+      accessibilityLabel={!reviewing ? progressLabel : undefined}
+      accessibilityValue={!reviewing ? { text: progressValue } : undefined}
       accessibilityLiveRegion="assertive"
       accessibilityViewIsModal
       importantForAccessibility="yes"
@@ -211,6 +252,11 @@ export default function WorkoutLaunchSplash({
           />
         </View>
       </Animated.View>
+      {reviewing && (
+        <View style={styles.reviewLayer} pointerEvents="box-none">
+          {children}
+        </View>
+      )}
     </View>
   );
 }
@@ -226,6 +272,10 @@ const styles = StyleSheet.create({
   pool: {
     width: '100%',
     backgroundColor: POOL_COLOR,
+  },
+  reviewLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
   },
   waveBand: {
     position: 'absolute',

@@ -27,6 +27,18 @@ import {
   moveSessionExerciseIndex,
   nextIncompleteExerciseIndex,
 } from '../workout/sessionNavigation';
+import {
+  completeSessionWarmupById,
+  jumpToSessionExerciseById,
+  preparePlannedSessionExercises,
+  reorderSessionExercisesById,
+  sessionWarmupPending,
+  sessionExerciseIndexById,
+  setSessionWarmupEnabledById,
+  type PlannedSessionPreparation,
+} from '../workout/sessionState';
+
+export type { PlannedSessionPreparation } from '../workout/sessionState';
 
 // Rest duration between sets. Fixed at 3 minutes for now — will be tuned /
 // made adaptive later.
@@ -40,8 +52,15 @@ export interface SetRecord {
 }
 
 export interface SessionExercise {
+  /** Stable for this live session even while the exercise order changes. */
+  sessionExerciseId: string;
   exercise: Exercise;
   targetSets: number;
+  /** One optional, session-only warmup that never contributes to work metrics. */
+  warmupEnabled: boolean;
+  warmupCompleted: boolean;
+  /** True when a direct live-order jump intentionally opens working sets. */
+  warmupBypassed: boolean;
   completedSets: SetRecord[];
   /** Exercise cue carried into the next session for this exercise. */
   notes: string;
@@ -59,9 +78,15 @@ export interface ActiveSession {
   sessionId?: string;
 }
 
+export type SetCompletionKind = 'working' | 'warmup';
+
 export interface SetCompletionSource {
   exerciseIndex: number;
   exerciseId: string;
+  /** Preferred over exerciseIndex; remains valid after a session reorder. */
+  sessionExerciseId?: string;
+  /** Omitted by older callers and treated as a normal working set. */
+  kind?: SetCompletionKind;
 }
 
 export type WorkoutSyncStatus = 'pending' | 'failed' | 'synced';
@@ -103,20 +128,37 @@ interface AppState {
   addTemplate: (name: string, exercises: TemplateExercise[]) => void;
   updateTemplate: (id: string, name: string, exercises: TemplateExercise[]) => void;
   startTemplateSession: (template: WorkoutTemplate) => void;
-  startPlannedSession: (plan: AccountWorkoutPlan) => void;
+  startPlannedSession: (
+    plan: AccountWorkoutPlan,
+    preparation?: PlannedSessionPreparation
+  ) => void;
   startFreeSession: () => void;
   addExercise: (exercise: Exercise, sets?: number) => void;
   /** Swap the exercise at an index mid-session (marks the workout edited) */
   editExercise: (index: number, exercise: Exercise) => void;
   /** Move the live session's viewport without logging or editing workout data. */
   navigateSessionExercise: (direction: -1 | 1) => void;
+  /** Jump directly to one stable row in the live session. */
+  jumpToSessionExercise: (
+    sessionExerciseId: string,
+    options?: { bypassWarmup?: boolean }
+  ) => void;
+  /** Apply an exact stable-ID permutation while keeping the same row in view. */
+  reorderSessionExercises: (orderedSessionExerciseIds: readonly string[]) => void;
+  /** Warmup choice is editable only until that exercise records any set. */
+  setSessionExerciseWarmupEnabled: (
+    sessionExerciseId: string,
+    enabled: boolean
+  ) => void;
   /** Intentionally extend a completed exercise by one set. */
   addSetToExercise: (index: number) => void;
   updateExerciseNotes: (exerciseId: string, notes: string) => void;
   /** Records one set against its originating exercise and advances safely. */
   completeSet: (record: SetRecord, source?: SetCompletionSource) => void;
-  /** Finish the session; pass the final set's record to include it atomically. */
-  finishSession: (finalRecord?: SetRecord) => void;
+  /** Marks the optional warmup done without recording load, reps, or RIR. */
+  completeWarmupSet: (source?: SetCompletionSource) => void;
+  /** Finish using only working sets that were already committed safely. */
+  finishSession: () => boolean;
   discardSession: () => void;
 }
 
@@ -161,6 +203,21 @@ function computeRecentStimulus(history: CompletedWorkout[]): Record<string, numb
 
 function daysAgoISO(days: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString();
+}
+
+function liveSessionExerciseId(startedAt: number, ordinal: number): string {
+  return `session-${startedAt}-exercise-${ordinal}`;
+}
+
+/** Stable identity wins; the positional fallback keeps older callers working. */
+function setCompletionExerciseIndex(
+  session: ActiveSession,
+  source?: SetCompletionSource
+): number {
+  if (source?.sessionExerciseId) {
+    return sessionExerciseIndexById(session.exercises, source.sessionExerciseId);
+  }
+  return source?.exerciseIndex ?? session.currentIndex;
 }
 
 // Artificial history: four weeks of Push/Pull/Legs every other day, with
@@ -224,7 +281,25 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     ? accountStorageKey(authenticatedUserId)
     : demoStorageKey();
   const [history, setHistory] = useState<CompletedWorkout[]>(SEED_HISTORY);
-  const [session, setSession] = useState<ActiveSession | null>(null);
+  const [session, setSessionState] = useState<ActiveSession | null>(null);
+  // React may batch two context actions from one interaction. Resolve every
+  // session transaction against this synchronously updated snapshot so a
+  // just-checked warmup cannot be overwritten by a working-set completion or
+  // skipped by Finish before React renders the intermediate state.
+  const sessionRef = React.useRef<ActiveSession | null>(session);
+  sessionRef.current = session;
+  const setSession = (
+    update:
+      | ActiveSession
+      | null
+      | ((previous: ActiveSession | null) => ActiveSession | null)
+  ) => {
+    const previous = sessionRef.current;
+    const next = typeof update === 'function' ? update(previous) : update;
+    if (next === previous) return;
+    sessionRef.current = next;
+    setSessionState(next);
+  };
   const [lastCompleted, setLastCompleted] = useState<CompletedWorkout | null>(null);
   const [lastUsed, setLastUsed] = useState<Record<string, SetRecord>>({});
   const [exerciseNotes, setExerciseNotes] = useState<Record<string, string>>({});
@@ -234,6 +309,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const hydratedKeyRef = React.useRef<string | null>(null);
   const activeStorageKeyRef = React.useRef(storageKey);
   const syncInFlightRef = React.useRef<Set<string>>(new Set());
+  const nextSessionExerciseOrdinalRef = React.useRef(0);
   activeStorageKeyRef.current = storageKey;
 
   useEffect(() => {
@@ -407,42 +483,57 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     },
 
     startTemplateSession: (template) => {
+      const startedAt = Date.now();
       const exercises: SessionExercise[] = template.exercises
-        .map((te): SessionExercise | null => {
+        .map((te, sourceIndex): SessionExercise | null => {
           const exercise = getExercise(te.exerciseId);
           return exercise
             ? {
+                sessionExerciseId: liveSessionExerciseId(startedAt, sourceIndex),
                 exercise,
                 targetSets: te.sets,
+                warmupEnabled: false,
+                warmupCompleted: false,
+                warmupBypassed: false,
                 completedSets: [],
                 notes: exerciseNotes[exercise.id] ?? '',
               }
             : null;
         })
         .filter((se): se is SessionExercise => se !== null);
+      nextSessionExerciseOrdinalRef.current = template.exercises.length;
       setSession({
         name: template.name,
         planned: true,
         exercises,
         currentIndex: 0,
-        startedAt: Date.now(),
+        startedAt,
         edited: false,
       });
     },
 
-    startPlannedSession: (plan) => {
-      const exercises: SessionExercise[] = plan.exercises.map(({ exercise, sets }) => ({
+    startPlannedSession: (plan, preparation) => {
+      const startedAt = Date.now();
+      const exercises: SessionExercise[] = preparePlannedSessionExercises(
+        plan.exercises,
+        preparation
+      ).map(({ sourceIndex, value: { exercise, sets }, warmupEnabled }) => ({
+        sessionExerciseId: liveSessionExerciseId(startedAt, sourceIndex),
         exercise,
         targetSets: sets,
+        warmupEnabled,
+        warmupCompleted: false,
+        warmupBypassed: false,
         completedSets: [],
         notes: exerciseNotes[exercise.id] ?? '',
       }));
+      nextSessionExerciseOrdinalRef.current = plan.exercises.length;
       setSession({
         name: plan.name,
         planned: true,
         exercises,
         currentIndex: 0,
-        startedAt: Date.now(),
+        startedAt,
         edited: false,
         splitId: plan.splitId,
         sessionId: plan.sessionId,
@@ -450,17 +541,20 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     },
 
     startFreeSession: () => {
+      const startedAt = Date.now();
+      nextSessionExerciseOrdinalRef.current = 0;
       setSession({
         name: 'Freeball',
         planned: false,
         exercises: [],
         currentIndex: 0,
-        startedAt: Date.now(),
+        startedAt,
         edited: false,
       });
     },
 
     addExercise: (exercise, sets = 3) => {
+      const ordinal = nextSessionExerciseOrdinalRef.current++;
       setSession((prev) => {
         if (!prev) return prev;
         return {
@@ -470,8 +564,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           exercises: [
             ...prev.exercises,
             {
+              sessionExerciseId: liveSessionExerciseId(prev.startedAt, ordinal),
               exercise,
               targetSets: sets,
+              warmupEnabled: false,
+              warmupCompleted: false,
+              warmupBypassed: false,
               completedSets: [],
               notes: exerciseNotes[exercise.id] ?? '',
             },
@@ -481,6 +579,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     },
 
     editExercise: (index, exercise) => {
+      const replacementOrdinal = nextSessionExerciseOrdinalRef.current++;
       setSession((prev) => {
         if (!prev) return prev;
         const target = prev.exercises[index];
@@ -493,7 +592,13 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
             edited,
             exercises: prev.exercises.map((se, i) =>
               i === index
-                ? { ...se, exercise, notes: exerciseNotes[exercise.id] ?? '' }
+                ? {
+                    ...se,
+                    exercise,
+                    warmupCompleted: false,
+                    warmupBypassed: false,
+                    notes: exerciseNotes[exercise.id] ?? '',
+                  }
                 : se
             ),
           };
@@ -504,8 +609,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         const remaining = Math.max(1, target.targetSets - target.completedSets.length);
         const frozen = { ...target, targetSets: target.completedSets.length };
         const fresh = {
+          sessionExerciseId: liveSessionExerciseId(prev.startedAt, replacementOrdinal),
           exercise,
           targetSets: remaining,
+          warmupEnabled: false,
+          warmupCompleted: false,
+          warmupBypassed: false,
           completedSets: [],
           notes: exerciseNotes[exercise.id] ?? '',
         };
@@ -533,6 +642,53 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           direction
         );
         return currentIndex === prev.currentIndex ? prev : { ...prev, currentIndex };
+      });
+    },
+
+    jumpToSessionExercise: (sessionExerciseId, options) => {
+      setSession((prev) => {
+        if (!prev) return prev;
+        const jump = jumpToSessionExerciseById(
+          prev.exercises,
+          prev.currentIndex,
+          sessionExerciseId,
+          options
+        );
+        return jump.changed
+          ? { ...prev, exercises: jump.exercises, currentIndex: jump.currentIndex }
+          : prev;
+      });
+    },
+
+    reorderSessionExercises: (orderedSessionExerciseIds) => {
+      setSession((prev) => {
+        if (!prev) return prev;
+        const reordered = reorderSessionExercisesById(
+          prev.exercises,
+          prev.currentIndex,
+          orderedSessionExerciseIds
+        );
+        if (!reordered.changed) return prev;
+        return {
+          ...prev,
+          exercises: reordered.exercises,
+          currentIndex: reordered.currentIndex,
+          edited: prev.edited || prev.planned,
+        };
+      });
+    },
+
+    setSessionExerciseWarmupEnabled: (sessionExerciseId, enabled) => {
+      setSession((prev) => {
+        if (!prev) return prev;
+        const exercises = setSessionWarmupEnabledById(
+          prev.exercises,
+          sessionExerciseId,
+          enabled
+        );
+        return exercises.every((exercise, index) => exercise === prev.exercises[index])
+          ? prev
+          : { ...prev, exercises };
       });
     },
 
@@ -570,63 +726,78 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     },
 
     completeSet: (record, source) => {
-      if (!session) return;
-      const exerciseIndex = source?.exerciseIndex ?? session.currentIndex;
-      const currentBefore = session.exercises[exerciseIndex];
+      const activeSession = sessionRef.current;
+      if (!activeSession || source?.kind === 'warmup') return;
+      const exerciseIndex = setCompletionExerciseIndex(activeSession, source);
+      const target = activeSession.exercises[exerciseIndex];
       if (
-        !currentBefore ||
-        (source && currentBefore.exercise.id !== source.exerciseId) ||
-        currentBefore.completedSets.length >= currentBefore.targetSets
+        !target ||
+        (source && target.exercise.id !== source.exerciseId) ||
+        !Number.isInteger(target.targetSets) ||
+        target.targetSets < 1 ||
+        sessionWarmupPending(target) ||
+        target.completedSets.length >= target.targetSets
       ) return;
-      setLastUsed((prev) => ({ ...prev, [currentBefore.exercise.id]: record }));
 
-      // Functional update: safe even if another update lands in the same batch.
+      // Build the accepted transaction once, then batch the session and shadow
+      // updates from that exact snapshot. A rejected set can no longer mutate
+      // lastUsed independently of completedSets.
+      const exercises = activeSession.exercises.map((exercise, index) =>
+        index === exerciseIndex
+          ? { ...exercise, completedSets: [...exercise.completedSets, record] }
+          : exercise
+      );
+      const completed = exercises[exerciseIndex];
+      const exerciseDone = completed.completedSets.length >= completed.targetSets;
+      const currentIndex =
+        activeSession.currentIndex === exerciseIndex && exerciseDone
+          ? nextIncompleteExerciseIndex(exercises, exerciseIndex)
+          : activeSession.currentIndex;
+      setSession({ ...activeSession, exercises, currentIndex });
+      setLastUsed((previous) => ({ ...previous, [target.exercise.id]: record }));
+    },
+
+    completeWarmupSet: (source) => {
+      const activeSession = sessionRef.current;
+      if (!activeSession || source?.kind === 'working') return;
+      const exerciseIndex = setCompletionExerciseIndex(activeSession, source);
+      const currentBefore = activeSession.exercises[exerciseIndex];
+      if (!currentBefore || (source && currentBefore.exercise.id !== source.exerciseId)) return;
+
+      // Deliberately no SetRecord and no setLastUsed update. Warmup weight is
+      // outside the product model and cannot leak into volume or set shadows.
       setSession((prev) => {
         if (!prev) return prev;
-        const target = prev.exercises[exerciseIndex];
-        if (
-          !target ||
-          (source && target.exercise.id !== source.exerciseId) ||
-          target.completedSets.length >= target.targetSets
-        ) return prev;
-        const exercises = prev.exercises.map((se, i) =>
-          i === exerciseIndex ? { ...se, completedSets: [...se.completedSets, record] } : se
+        const resolvedIndex = setCompletionExerciseIndex(prev, source);
+        const target = prev.exercises[resolvedIndex];
+        if (!target || (source && target.exercise.id !== source.exerciseId)) return prev;
+        const exercises = completeSessionWarmupById(
+          prev.exercises,
+          target.sessionExerciseId
         );
-        const current = exercises[exerciseIndex];
-        const exerciseDone = current && current.completedSets.length >= current.targetSets;
-        const currentIndex =
-          prev.currentIndex === exerciseIndex && exerciseDone
-            ? nextIncompleteExerciseIndex(exercises, exerciseIndex)
-            : prev.currentIndex;
-        return {
-          ...prev,
-          exercises,
-          currentIndex,
-        };
+        return exercises.every((exercise, index) => exercise === prev.exercises[index])
+          ? prev
+          : { ...prev, exercises };
       });
     },
 
-    finishSession: (finalRecord) => {
+    finishSession: () => {
       // Side effects live OUTSIDE any state updater (StrictMode double-invokes
-      // updaters). The optional finalRecord folds the last set in atomically
-      // instead of relying on a completeSet queued in the same batch.
-      const prev = session;
-      if (!prev) return;
-      if (finishedSessionRef.current === prev.startedAt) return; // already finished
-      finishedSessionRef.current = prev.startedAt;
-      let exercises = prev.exercises;
-      if (finalRecord) {
-        exercises = exercises.map((se, i) =>
-          i === prev.currentIndex
-            ? { ...se, completedSets: [...se.completedSets, finalRecord] }
-            : se
-        );
-        const current = prev.exercises[prev.currentIndex];
-        if (current) {
-          setLastUsed((lu) => ({ ...lu, [current.exercise.id]: finalRecord }));
-        }
-      }
+      // updaters). Every working set is committed before Finish becomes usable;
+      // keeping this action record-free prevents it bypassing warmup guards.
+      const prev = sessionRef.current;
+      if (!prev) return false;
+      if (finishedSessionRef.current === prev.startedAt) return false; // already finished
+      // A checked warmup is a real required step. The live order menu is the
+      // one explicit override; otherwise Finish cannot silently abandon it.
+      if (prev.exercises.some(sessionWarmupPending)) return false;
+      const exercises = prev.exercises;
       const totalSets = exercises.reduce((n, se) => n + se.completedSets.length, 0);
+      // A warmup never creates a workout by itself. The UI normally exposes
+      // Discard instead of Finish here; keep the state API equally strict so
+      // an empty workout cannot enter history or fail backend validation.
+      if (totalSets === 0) return false;
+      finishedSessionRef.current = prev.startedAt;
       const volume = exercises.reduce(
         (n, se) => n + se.completedSets.reduce((m, s) => m + s.weight * s.reps, 0),
         0
@@ -655,6 +826,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setLastCompleted(done);
       setHistory((h) => [done, ...h]);
       setSession(null);
+      return true;
     },
 
     discardSession: () => setSession(null),

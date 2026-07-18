@@ -12,35 +12,17 @@ import Svg, { Path } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import { REST_SECONDS } from '../state/AppState';
 import { theme } from '../theme';
+import { createRestDrainTiming } from '../workout/restTiming';
 
 interface RestTimerProps {
   /** Name of the exercise coming up after the rest */
   nextUp: string | null;
+  /** Length of this rest interval. Defaults to the standard three minutes. */
+  durationSeconds?: number;
   /** Fires once the entrance fade reaches full opacity — safe to mutate the screen beneath */
   onShown?: () => void;
   onDone: () => void;
 }
-
-// Drain curve: a visible whoosh for the first few seconds only, then a
-// constant pace that closes out the remaining water in exactly the remaining
-// time — the level never runs more than a few percent ahead of true time.
-// Piecewise with a continuous slope (no kink where the phases meet). Kept as
-// a named fn so hold-to-skip can resume mid-curve.
-const TOTAL_MS = REST_SECONDS * 1000;
-const FAST_SECONDS = 4; // length of the opening whoosh
-const FAST_DROP = 0.06; // fraction of the pool it drains
-const TF = FAST_SECONDS / REST_SECONDS;
-const STEADY_SLOPE = (1 - FAST_DROP) / (1 - TF);
-const START_SLOPE = (2 * FAST_DROP) / TF - STEADY_SLOPE;
-
-const BASE_EASE = (t: number): number => {
-  const x = Math.min(1, Math.max(0, t));
-  if (x <= TF) {
-    // slope decays linearly from START_SLOPE to STEADY_SLOPE across the whoosh
-    return START_SLOPE * x - ((START_SLOPE - STEADY_SLOPE) * x * x) / (2 * TF);
-  }
-  return FAST_DROP + STEADY_SLOPE * (x - TF);
-};
 
 const WAVE_H = 22;
 // One tile of surface, stretched horizontally (preserveAspectRatio="none").
@@ -106,9 +88,23 @@ function WaveLayer({
  * water (and fades the numerals) — hold to the bottom to skip; let go early
  * and the water springs back to the true level, the actual timer untouched.
  */
-export default function RestTimer({ nextUp, onShown, onDone }: RestTimerProps) {
+export default function RestTimer({
+  nextUp,
+  durationSeconds = REST_SECONDS,
+  onShown,
+  onDone,
+}: RestTimerProps) {
   const { width } = useWindowDimensions();
-  const [secondsLeft, setSecondsLeft] = useState(REST_SECONDS);
+  // A rest timer is mount-scoped: freezing its timing prevents a parent
+  // re-render from restarting or reshaping an interval already in progress.
+  const [timing] = useState(() =>
+    createRestDrainTiming(
+      Number.isFinite(durationSeconds) && durationSeconds > 0
+        ? durationSeconds
+        : REST_SECONDS
+    )
+  );
+  const [secondsLeft, setSecondsLeft] = useState(timing.durationSeconds);
   const fill = useRef(new Animated.Value(1)).current; // 1 = full pool, 0 = drained
   const textOpacity = useRef(new Animated.Value(1)).current;
   // Fades in over the UNCHANGED set screen — the slider stays parked and the
@@ -126,7 +122,7 @@ export default function RestTimer({ nextUp, onShown, onDone }: RestTimerProps) {
 
   // Fraction of the rest that has really elapsed (0..1).
   const elapsedFraction = () =>
-    Math.min(1, (Date.now() - startedAtRef.current) / TOTAL_MS);
+    Math.min(1, (Date.now() - startedAtRef.current) / timing.totalMs);
 
   const finish = () => {
     if (committedRef.current) return;
@@ -142,11 +138,11 @@ export default function RestTimer({ nextUp, onShown, onDone }: RestTimerProps) {
   // Run the drain from time-fraction f along the original curve, so a resume
   // after a cancelled hold doesn't replay the fast opening drop.
   const startMainDrain = (f: number) => {
-    const remainingMs = Math.max(0, TOTAL_MS * (1 - f));
+    const remainingMs = Math.max(0, timing.totalMs * (1 - f));
     if (remainingMs <= 0) return;
-    const e0 = BASE_EASE(f);
+    const e0 = timing.easing(f);
     const span = 1 - e0 || 1;
-    const segment = (u: number) => (BASE_EASE(f + u * (1 - f)) - e0) / span;
+    const segment = (u: number) => (timing.easing(f + u * (1 - f)) - e0) / span;
     Animated.timing(fill, {
       toValue: 0,
       duration: remainingMs,
@@ -167,7 +163,8 @@ export default function RestTimer({ nextUp, onShown, onDone }: RestTimerProps) {
     startMainDrain(0);
 
     const tick = setInterval(() => {
-      const left = REST_SECONDS - Math.floor((Date.now() - startedAtRef.current) / 1000);
+      const left =
+        timing.durationSeconds - Math.floor((Date.now() - startedAtRef.current) / 1000);
       if (left <= 0) {
         clearInterval(tick);
         setSecondsLeft(0);
@@ -208,7 +205,7 @@ export default function RestTimer({ nextUp, onShown, onDone }: RestTimerProps) {
     fill.stopAnimation(() => {
       if (committedRef.current) return;
       // Spring back up to the true level; the real timer never moved.
-      const trueLevel = Math.max(0, 1 - BASE_EASE(elapsedFraction()));
+      const trueLevel = Math.max(0, 1 - timing.easing(elapsedFraction()));
       Animated.spring(fill, {
         toValue: trueLevel,
         stiffness: 150,

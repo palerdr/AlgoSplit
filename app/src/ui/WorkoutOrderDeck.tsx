@@ -1,0 +1,654 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  Pressable,
+  StyleProp,
+  StyleSheet,
+  Text,
+  View,
+  ViewStyle,
+  useWindowDimensions,
+} from 'react-native';
+import * as Haptics from 'expo-haptics';
+import DraggableFlatList, {
+  RenderItemParams,
+  ScaleDecorator,
+} from 'react-native-draggable-flatlist';
+import { theme } from '../theme';
+import Glass from './Glass';
+
+export type WorkoutOrderDeckVariant = 'preflight' | 'live';
+
+/** UI-only snapshot shared by preflight and the live workout order editor. */
+export interface WorkoutOrderDeckItem {
+  /** Stable identity for this occurrence, even when an exercise is repeated. */
+  key: string;
+  name: string;
+  targetSets: number;
+  completedSets: number;
+  warmupEnabled: boolean;
+  warmupLocked: boolean;
+  current: boolean;
+  draggable: boolean;
+}
+
+export interface WorkoutOrderDeckProps {
+  variant: WorkoutOrderDeckVariant;
+  items: readonly WorkoutOrderDeckItem[];
+  /** Receives the complete next order after a touch or accessibility move. */
+  onReorder: (
+    items: WorkoutOrderDeckItem[],
+    movement: { from: number; to: number }
+  ) => void;
+  onWarmupChange?: (key: string, enabled: boolean) => void;
+  onDragStateChange?: (dragging: boolean) => void;
+  /** Live-only: jump directly to the selected exercise. */
+  onJumpTo?: (key: string, index: number) => void;
+  onAddExercise?: () => void;
+  onCancel?: () => void;
+  onPrimaryAction: () => void;
+  title?: string;
+  subtitle?: string;
+  primaryLabel?: string;
+  disabled?: boolean;
+  primaryDisabled?: boolean;
+  style?: StyleProp<ViewStyle>;
+}
+
+const tick = () => Haptics.selectionAsync().catch(() => {});
+
+function normalizedCount(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+}
+
+function moveItem(
+  items: readonly WorkoutOrderDeckItem[],
+  from: number,
+  to: number
+): WorkoutOrderDeckItem[] {
+  if (
+    from === to ||
+    from < 0 ||
+    to < 0 ||
+    from >= items.length ||
+    to >= items.length
+  ) {
+    return [...items];
+  }
+  const next = [...items];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
+}
+
+export default function WorkoutOrderDeck({
+  variant,
+  items,
+  onReorder,
+  onWarmupChange,
+  onDragStateChange,
+  onJumpTo,
+  onAddExercise,
+  onCancel,
+  onPrimaryAction,
+  title = variant === 'preflight' ? 'Review Workout' : 'Workout order',
+  subtitle,
+  primaryLabel = variant === 'preflight' ? 'Start' : 'Done',
+  disabled = false,
+  primaryDisabled = false,
+  style,
+}: WorkoutOrderDeckProps) {
+  const { height } = useWindowDimensions();
+  const compact = height < 740;
+  const [dragging, setDragging] = useState(false);
+  const onDragStateChangeRef = useRef(onDragStateChange);
+  onDragStateChangeRef.current = onDragStateChange;
+  const data = useMemo(() => [...items], [items]);
+  const actionsDisabled = disabled || dragging;
+  const primaryActionDisabled = actionsDisabled || primaryDisabled;
+
+  useEffect(() => () => onDragStateChangeRef.current?.(false), []);
+
+  const applyMove = (from: number, requestedTo: number, announce = false) => {
+    const item = items[from];
+    if (!item?.draggable || disabled) return;
+    // Locked rows cannot be picked up, but they remain passable so the visible
+    // order after a drop is exactly the order committed to the session.
+    const to = Math.max(0, Math.min(items.length - 1, requestedTo));
+    if (to === from) return;
+    tick();
+    onReorder(moveItem(items, from, to), { from, to });
+    if (announce) {
+      AccessibilityInfo.announceForAccessibility(
+        `${item.name}, position ${to + 1} of ${items.length}`
+      );
+    }
+  };
+
+  const renderItem = ({
+    item,
+    getIndex,
+    drag,
+    isActive,
+  }: RenderItemParams<WorkoutOrderDeckItem>) => {
+    const index = getIndex();
+    if (index === undefined) return null;
+    const targetSets = normalizedCount(item.targetSets);
+    const completedSets = Math.min(targetSets, normalizedCount(item.completedSets));
+    const complete = targetSets > 0 && completedSets >= targetSets;
+    const canMoveEarlier = item.draggable && index > 0 && !disabled;
+    const canMoveLater = item.draggable && index < items.length - 1 && !disabled;
+    const dragEnabled = canMoveEarlier || canMoveLater;
+    const warmupDisabled = disabled || item.warmupLocked || !onWarmupChange;
+    const canJump =
+      variant === 'live' && Boolean(onJumpTo) && !item.current && !actionsDisabled;
+    const setCopy =
+      variant === 'preflight'
+        ? `${targetSets}×`
+        : `${completedSets}/${targetSets}`;
+
+    return (
+      <ScaleDecorator activeScale={1.015}>
+        <View
+          style={[
+            styles.row,
+            item.current && styles.rowCurrent,
+            complete && styles.rowComplete,
+            isActive && styles.rowDragging,
+          ]}
+        >
+          <Pressable
+            accessibilityRole="adjustable"
+            accessibilityLabel={`Reorder ${item.name}`}
+            accessibilityHint="Drag the handle, or use Move earlier and Move later actions"
+            accessibilityValue={{ text: `Position ${index + 1} of ${items.length}` }}
+            accessibilityState={{ disabled: !dragEnabled }}
+            accessibilityActions={[
+              ...(canMoveEarlier
+                ? [{ name: 'decrement' as const, label: 'Move earlier' }]
+                : []),
+              ...(canMoveLater
+                ? [{ name: 'increment' as const, label: 'Move later' }]
+                : []),
+            ]}
+            onAccessibilityAction={(event) => {
+              if (event.nativeEvent.actionName === 'decrement') {
+                applyMove(index, index - 1, true);
+              } else if (event.nativeEvent.actionName === 'increment') {
+                applyMove(index, index + 1, true);
+              }
+            }}
+            disabled={!dragEnabled}
+            onPressIn={dragEnabled ? drag : undefined}
+            hitSlop={6}
+            style={({ pressed }) => [
+              styles.dragHandle,
+              !dragEnabled && styles.controlDisabled,
+              pressed && dragEnabled && styles.dragHandlePressed,
+            ]}
+          >
+            <Text style={[styles.dragGlyph, isActive && styles.dragGlyphActive]}>≡</Text>
+          </Pressable>
+
+          {variant === 'live' && onJumpTo ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                item.current
+                  ? `${item.name}, current exercise`
+                  : `Open ${item.name}, exercise ${index + 1} of ${items.length}`
+              }
+              accessibilityHint={complete ? 'Opens the completed exercise for editing' : undefined}
+              accessibilityState={{ selected: item.current, disabled: !canJump }}
+              disabled={!canJump}
+              onPress={() => onJumpTo(item.key, index)}
+              style={({ pressed }) => [
+                styles.nameField,
+                pressed && canJump && styles.nameFieldPressed,
+              ]}
+            >
+              <Text
+                numberOfLines={1}
+                style={[styles.exerciseName, complete && styles.completeCopy]}
+              >
+                {item.name}
+              </Text>
+              {item.current && <Text style={styles.currentCopy}>Current</Text>}
+            </Pressable>
+          ) : (
+            <View style={styles.nameField}>
+              <Text numberOfLines={1} style={styles.exerciseName}>
+                {item.name}
+              </Text>
+            </View>
+          )}
+
+          <Text style={[styles.setCopy, complete && styles.completeCopy]}>{setCopy}</Text>
+
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityLabel={`Warm-up set for ${item.name}`}
+            accessibilityHint={
+              item.warmupLocked ? 'Warm-up choice is locked after work has begun' : undefined
+            }
+            accessibilityState={{ checked: item.warmupEnabled, disabled: warmupDisabled }}
+            disabled={warmupDisabled || dragging}
+            onPress={() => {
+              tick();
+              onWarmupChange?.(item.key, !item.warmupEnabled);
+            }}
+            hitSlop={6}
+            style={({ pressed }) => [
+              styles.warmupControl,
+              warmupDisabled && styles.controlDisabled,
+              pressed && !warmupDisabled && styles.warmupPressed,
+            ]}
+          >
+            <View style={[styles.warmupBox, item.warmupEnabled && styles.warmupBoxChecked]}>
+              {item.warmupEnabled && <Text style={styles.warmupCheck}>✓</Text>}
+            </View>
+            <Text style={styles.warmupLabel}>Warm-up</Text>
+          </Pressable>
+        </View>
+      </ScaleDecorator>
+    );
+  };
+
+  const list = (
+    <DraggableFlatList
+      data={data}
+      keyExtractor={(item) => item.key}
+      renderItem={renderItem}
+      activationDistance={8}
+      dragItemOverflow={false}
+      showsVerticalScrollIndicator={false}
+      containerStyle={variant === 'preflight' ? styles.preflightList : styles.liveList}
+      contentContainerStyle={styles.listContent}
+      onDragBegin={() => {
+        setDragging(true);
+        onDragStateChange?.(true);
+        tick();
+      }}
+      onDragEnd={({ from, to }) => {
+        setDragging(false);
+        onDragStateChange?.(false);
+        applyMove(from, to);
+      }}
+      ListEmptyComponent={<View style={styles.emptySpace} />}
+      ListFooterComponent={
+        onAddExercise ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Add exercise"
+            disabled={actionsDisabled}
+            onPress={() => {
+              tick();
+              onAddExercise();
+            }}
+            style={({ pressed }) => [
+              styles.addRow,
+              actionsDisabled && styles.actionDisabled,
+              pressed && styles.actionPressed,
+            ]}
+          >
+            <Text style={styles.addText}>+ Add exercise</Text>
+          </Pressable>
+        ) : null
+      }
+    />
+  );
+
+  const primaryAction = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    onPrimaryAction();
+  };
+
+  if (variant === 'preflight') {
+    return (
+      <View style={[styles.preflightDeck, compact && styles.preflightDeckCompact, style]}>
+        <View style={styles.editorHeaderRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Cancel workout"
+            disabled={actionsDisabled}
+            hitSlop={12}
+            onPress={onCancel}
+          >
+            <Text style={[styles.cancelText, actionsDisabled && styles.actionDisabled]}>
+              Cancel
+            </Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`${primaryLabel}, start workout`}
+            accessibilityState={{ disabled: primaryActionDisabled }}
+            disabled={primaryActionDisabled}
+            onPress={primaryAction}
+          >
+            <Glass style={styles.startButton} interactive={!primaryActionDisabled}>
+              <Text
+                style={[
+                  styles.startText,
+                  primaryActionDisabled && styles.primaryTextDisabled,
+                ]}
+              >
+                {primaryLabel}
+              </Text>
+            </Glass>
+          </Pressable>
+        </View>
+        <Text style={styles.preflightTitle}>{title}</Text>
+        {subtitle ? <Text style={styles.preflightSubtitle}>{subtitle}</Text> : null}
+        <Text style={styles.sectionLabel}>Exercises</Text>
+        {list}
+      </View>
+    );
+  }
+
+  return (
+    <Glass
+      style={[
+        styles.liveDeck,
+        compact && styles.liveDeckCompact,
+        { maxHeight: Math.max(390, height - (compact ? 34 : 76)) },
+        style,
+      ]}
+      tintColor="rgba(12,12,12,0.82)"
+    >
+      <View style={[styles.liveHeader, compact && styles.liveHeaderCompact]}>
+        <Text style={styles.liveTitle}>{title}</Text>
+        <Text style={styles.liveSubtitle}>
+          {subtitle ?? 'Hold and drag to reorder. Tap an exercise to open it.'}
+        </Text>
+      </View>
+      <Text style={styles.liveSectionLabel}>Exercises</Text>
+      {list}
+      <View style={[styles.liveFooter, compact && styles.liveFooterCompact]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={primaryLabel}
+          accessibilityState={{ disabled: primaryActionDisabled }}
+          disabled={primaryActionDisabled}
+          onPress={primaryAction}
+          style={({ pressed }) => [
+            styles.doneButton,
+            primaryActionDisabled && styles.actionDisabled,
+            pressed && !primaryActionDisabled && styles.actionPressed,
+          ]}
+        >
+          <Text style={styles.doneText}>{primaryLabel}</Text>
+        </Pressable>
+      </View>
+    </Glass>
+  );
+}
+
+const styles = StyleSheet.create({
+  preflightDeck: {
+    flex: 1,
+    width: '100%',
+    maxWidth: 620,
+    alignSelf: 'center',
+  },
+  preflightDeckCompact: {},
+  editorHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 18,
+  },
+  cancelText: {
+    color: theme.textDim,
+    fontSize: 14,
+  },
+  startButton: {
+    borderRadius: 17,
+    paddingVertical: 9,
+    paddingHorizontal: 18,
+  },
+  startText: {
+    color: theme.accent,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  primaryTextDisabled: {
+    opacity: 0.35,
+  },
+  preflightTitle: {
+    color: theme.text,
+    fontSize: 28,
+    lineHeight: 33,
+    fontWeight: '700',
+    letterSpacing: -0.5,
+  },
+  preflightSubtitle: {
+    color: theme.textDim,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 5,
+    marginBottom: 20,
+  },
+  sectionLabel: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 9,
+  },
+  preflightList: {
+    flex: 1,
+  },
+  liveDeck: {
+    width: '100%',
+    borderRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(12,12,12,0.46)',
+  },
+  liveDeckCompact: {
+    borderRadius: 22,
+  },
+  liveHeader: {
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 12,
+  },
+  liveHeaderCompact: {
+    paddingTop: 15,
+    paddingBottom: 9,
+  },
+  liveTitle: {
+    color: theme.text,
+    fontSize: 22,
+    lineHeight: 27,
+    fontWeight: '700',
+    letterSpacing: -0.35,
+  },
+  liveSubtitle: {
+    color: theme.textDim,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 4,
+  },
+  liveSectionLabel: {
+    color: theme.textDim,
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.9,
+    paddingHorizontal: 18,
+    marginBottom: 7,
+  },
+  liveList: {
+    flexGrow: 0,
+    maxHeight: 470,
+  },
+  listContent: {
+    paddingHorizontal: 12,
+    paddingBottom: 4,
+  },
+  row: {
+    minHeight: 56,
+    borderRadius: 14,
+    paddingVertical: 9,
+    paddingHorizontal: 11,
+    marginBottom: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  rowCurrent: {
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  rowComplete: {
+    backgroundColor: 'rgba(255,255,255,0.035)',
+  },
+  rowDragging: {
+    backgroundColor: 'rgba(255,255,255,0.13)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.28)',
+  },
+  dragHandle: {
+    paddingHorizontal: 2,
+    paddingVertical: 7,
+  },
+  dragHandlePressed: {
+    opacity: 0.65,
+  },
+  dragGlyph: {
+    color: theme.textDim,
+    fontSize: 22,
+    lineHeight: 17,
+    fontWeight: '700',
+  },
+  dragGlyphActive: {
+    color: theme.text,
+  },
+  nameField: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 10,
+    paddingHorizontal: 9,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  nameFieldPressed: {
+    backgroundColor: 'rgba(255,255,255,0.09)',
+  },
+  exerciseName: {
+    flex: 1,
+    minWidth: 0,
+    color: theme.text,
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: '500',
+  },
+  currentCopy: {
+    color: theme.textDim,
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: '700',
+    marginLeft: 7,
+  },
+  setCopy: {
+    minWidth: 30,
+    color: theme.text,
+    fontSize: 13,
+    lineHeight: 17,
+    textAlign: 'center',
+    fontVariant: ['tabular-nums'],
+  },
+  completeCopy: {
+    color: 'rgba(241,236,228,0.38)',
+  },
+  warmupControl: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 8,
+    paddingHorizontal: 2,
+  },
+  warmupPressed: {
+    opacity: 0.65,
+  },
+  warmupBox: {
+    width: 18,
+    height: 18,
+    borderRadius: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(241,236,228,0.42)',
+  },
+  warmupBoxChecked: {
+    borderColor: theme.accent,
+  },
+  warmupCheck: {
+    color: theme.accent,
+    fontSize: 12,
+    lineHeight: 14,
+    fontWeight: '800',
+  },
+  warmupLabel: {
+    color: theme.textDim,
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '600',
+  },
+  controlDisabled: {
+    opacity: 0.28,
+  },
+  emptySpace: {
+    minHeight: 12,
+  },
+  addRow: {
+    minHeight: 46,
+    borderRadius: 14,
+    marginTop: 1,
+    marginBottom: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.045)',
+  },
+  addText: {
+    color: theme.accent,
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '700',
+  },
+  liveFooter: {
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: 12,
+  },
+  liveFooterCompact: {
+    paddingTop: 3,
+    paddingBottom: 10,
+  },
+  doneButton: {
+    minHeight: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  doneText: {
+    color: theme.accent,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  actionDisabled: {
+    opacity: 0.35,
+  },
+  actionPressed: {
+    opacity: 0.7,
+  },
+});

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Linking, StyleSheet, View } from 'react-native';
+import { Animated, BackHandler, Easing, Linking, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppStateProvider, useAppState } from './src/state/AppState';
@@ -15,6 +15,7 @@ import AccountScreen from './src/screens/AccountScreen';
 import PrivacyScreen from './src/screens/PrivacyScreen';
 import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
 import WorkoutLaunchSplash from './src/ui/WorkoutLaunchSplash';
+import WorkoutOrderDeck, { WorkoutOrderDeckItem } from './src/ui/WorkoutOrderDeck';
 import { recoveryTokenFromUrl } from './src/auth/recoveryLink';
 
 // Deliberately barebones navigation: one state value, no navigator dependency.
@@ -36,6 +37,14 @@ type Screen =
 interface RootWorkoutLaunch {
   key: number;
   request: WorkoutLaunchRequest;
+  phase: 'covering' | 'reviewing' | 'revealing' | 'canceling';
+  draft: {
+    key: string;
+    sourceIndex: number;
+    name: string;
+    targetSets: number;
+    warmupEnabled: boolean;
+  }[];
 }
 
 function Root() {
@@ -58,7 +67,7 @@ function Root() {
   const [workoutLaunch, setWorkoutLaunch] = useState<RootWorkoutLaunch | null>(null);
   const workoutLaunchRef = useRef<RootWorkoutLaunch | null>(null);
   const workoutLaunchKeyRef = useRef(0);
-  const workoutLaunchCoveredRef = useRef(false);
+  const workoutOrderDraggingRef = useRef(false);
 
   const go = (next: Screen) => {
     if (next === shown) return;
@@ -87,8 +96,23 @@ function Root() {
     pendingRef.current = null;
     anim.stopAnimation();
     anim.setValue(1);
-    const launch = { key: ++workoutLaunchKeyRef.current, request };
-    workoutLaunchCoveredRef.current = false;
+    const key = ++workoutLaunchKeyRef.current;
+    const launch: RootWorkoutLaunch = {
+      key,
+      request,
+      phase: 'covering',
+      draft:
+        request.kind === 'planned'
+          ? request.plan.exercises.map(({ exercise, sets }, sourceIndex) => ({
+              key: `launch-${key}-${sourceIndex}`,
+              sourceIndex,
+              name: exercise.name,
+              targetSets: sets,
+              warmupEnabled: false,
+            }))
+          : [],
+    };
+    workoutOrderDraggingRef.current = false;
     workoutLaunchRef.current = launch;
     setWorkoutLaunch(launch);
     return true;
@@ -96,29 +120,118 @@ function Root() {
 
   const coverWorkoutTransition = (key: number) => {
     const launch = workoutLaunchRef.current;
-    if (!launch || launch.key !== key || workoutLaunchCoveredRef.current) return;
-    workoutLaunchCoveredRef.current = true;
+    if (!launch || launch.key !== key || launch.phase !== 'covering') return;
 
-    // The opaque pool is now covering every pixel. Commit the session and
-    // swap routes directly; WorkoutLaunchSplash remains mounted at Root while
-    // Session paints, then drains to reveal it.
-    if (launch.request.kind === 'planned') {
-      appState.startPlannedSession(launch.request.plan);
-    } else {
+    // Planned workouts pause on the fully green pool for a local review. The
+    // live session is intentionally not created yet, so this decision time is
+    // not counted as workout duration and Cancel needs no rollback.
+    if (launch.request.kind === 'planned' && launch.draft.length > 0) {
+      const reviewing = { ...launch, phase: 'reviewing' as const };
+      workoutLaunchRef.current = reviewing;
+      setWorkoutLaunch(reviewing);
+      return;
+    }
+
+    if (launch.request.kind === 'freestyle') {
       appState.startFreeSession();
+    } else {
+      appState.startPlannedSession(launch.request.plan);
     }
     pendingRef.current = null;
     anim.stopAnimation();
     anim.setValue(1);
     setShown('session');
+    const revealing = { ...launch, phase: 'revealing' as const };
+    workoutLaunchRef.current = revealing;
+    setWorkoutLaunch(revealing);
+  };
+
+  const cancelWorkoutTransition = (key: number) => {
+    const launch = workoutLaunchRef.current;
+    if (
+      !launch ||
+      launch.key !== key ||
+      launch.phase !== 'reviewing' ||
+      workoutOrderDraggingRef.current
+    ) return;
+    const canceling = { ...launch, phase: 'canceling' as const };
+    workoutLaunchRef.current = canceling;
+    setWorkoutLaunch(canceling);
+  };
+
+  const reorderWorkoutDraft = (key: number, orderedItems: WorkoutOrderDeckItem[]) => {
+    const launch = workoutLaunchRef.current;
+    if (!launch || launch.key !== key || launch.phase !== 'reviewing') return;
+    const byKey = new Map(launch.draft.map((item) => [item.key, item]));
+    const draft = orderedItems
+      .map((item) => byKey.get(item.key))
+      .filter((item): item is RootWorkoutLaunch['draft'][number] => Boolean(item));
+    if (draft.length !== launch.draft.length) return;
+    const reviewing = { ...launch, draft };
+    workoutLaunchRef.current = reviewing;
+    setWorkoutLaunch(reviewing);
+  };
+
+  const setWorkoutDraftWarmup = (key: number, itemKey: string, enabled: boolean) => {
+    const launch = workoutLaunchRef.current;
+    if (!launch || launch.key !== key || launch.phase !== 'reviewing') return;
+    const reviewing = {
+      ...launch,
+      draft: launch.draft.map((item) =>
+        item.key === itemKey ? { ...item, warmupEnabled: enabled } : item
+      ),
+    };
+    workoutLaunchRef.current = reviewing;
+    setWorkoutLaunch(reviewing);
+  };
+
+  const confirmWorkoutTransition = (key: number) => {
+    const launch = workoutLaunchRef.current;
+    if (
+      !launch ||
+      launch.key !== key ||
+      launch.phase !== 'reviewing' ||
+      launch.request.kind !== 'planned' ||
+      workoutOrderDraggingRef.current
+    ) return;
+
+    appState.startPlannedSession(
+      launch.request.plan,
+      launch.draft.map(({ sourceIndex, warmupEnabled }) => ({
+        sourceIndex,
+        warmupEnabled,
+      }))
+    );
+    pendingRef.current = null;
+    anim.stopAnimation();
+    anim.setValue(1);
+    setShown('session');
+    const revealing = { ...launch, phase: 'revealing' as const };
+    workoutLaunchRef.current = revealing;
+    setWorkoutLaunch(revealing);
   };
 
   const finishWorkoutTransition = (key: number) => {
     if (workoutLaunchRef.current?.key !== key) return;
+    workoutOrderDraggingRef.current = false;
     workoutLaunchRef.current = null;
-    workoutLaunchCoveredRef.current = false;
     setWorkoutLaunch(null);
   };
+
+  useEffect(() => {
+    if (!workoutLaunch) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      // Keep the water handoff atomic. At the review hold, Android Back has
+      // the same behavior as the visible Cancel action.
+      if (workoutLaunchRef.current?.phase === 'reviewing') {
+        if (!workoutOrderDraggingRef.current) {
+          cancelWorkoutTransition(workoutLaunchRef.current.key);
+        }
+      }
+      return true;
+    });
+    return () => subscription.remove();
+  }, [workoutLaunch?.key]);
 
   useEffect(() => {
     Animated.timing(anim, {
@@ -133,7 +246,7 @@ function Root() {
     if (account.status !== 'authenticated') {
       pendingRef.current = null;
       workoutLaunchRef.current = null;
-      workoutLaunchCoveredRef.current = false;
+      workoutOrderDraggingRef.current = false;
       setWorkoutLaunch(null);
       setShown('home');
       setCelebratePending(false);
@@ -143,7 +256,7 @@ function Root() {
     if (account.authReturnScreen) {
       pendingRef.current = null;
       workoutLaunchRef.current = null;
-      workoutLaunchCoveredRef.current = false;
+      workoutOrderDraggingRef.current = false;
       setWorkoutLaunch(null);
       setShown(account.authReturnScreen);
       account.clearAuthReturnScreen();
@@ -153,7 +266,12 @@ function Root() {
   useEffect(() => {
     const handleUrl = (url: string | null) => {
       const token = recoveryTokenFromUrl(url);
-      if (token) setRecoveryToken(token);
+      if (!token) return;
+      pendingRef.current = null;
+      workoutLaunchRef.current = null;
+      workoutOrderDraggingRef.current = false;
+      setWorkoutLaunch(null);
+      setRecoveryToken(token);
     };
     Linking.getInitialURL().then(handleUrl).catch(() => {});
     const subscription = Linking.addEventListener('url', ({ url }) => handleUrl(url));
@@ -226,7 +344,13 @@ function Root() {
 
   return (
     <View style={styles.root}>
-      <View style={{ flex: 1 }}>{screen}</View>
+      <View
+        accessibilityElementsHidden={Boolean(workoutLaunch)}
+        importantForAccessibility={workoutLaunch ? 'no-hide-descendants' : 'auto'}
+        style={{ flex: 1 }}
+      >
+        {screen}
+      </View>
       {/* the fade lives on a sibling overlay, never on the screen itself */}
       <Animated.View
         pointerEvents="none"
@@ -242,9 +366,40 @@ function Root() {
         <WorkoutLaunchSplash
           key={workoutLaunch.key}
           workoutName={workoutLaunch.request.workoutName}
+          phase={workoutLaunch.phase}
           onCovered={() => coverWorkoutTransition(workoutLaunch.key)}
           onFinished={() => finishWorkoutTransition(workoutLaunch.key)}
-        />
+        >
+          {workoutLaunch.request.kind === 'planned' && (
+            <View style={styles.orderReviewWrap}>
+              <WorkoutOrderDeck
+                variant="preflight"
+                items={workoutLaunch.draft.map((item) => ({
+                  key: item.key,
+                  name: item.name,
+                  targetSets: item.targetSets,
+                  completedSets: 0,
+                  warmupEnabled: item.warmupEnabled,
+                  warmupLocked: false,
+                  current: false,
+                  draggable: true,
+                }))}
+                onReorder={(items) => reorderWorkoutDraft(workoutLaunch.key, items)}
+                onWarmupChange={(itemKey, enabled) =>
+                  setWorkoutDraftWarmup(workoutLaunch.key, itemKey, enabled)
+                }
+                onDragStateChange={(dragging) => {
+                  workoutOrderDraggingRef.current = dragging;
+                }}
+                onCancel={() => cancelWorkoutTransition(workoutLaunch.key)}
+                onPrimaryAction={() => confirmWorkoutTransition(workoutLaunch.key)}
+                title="Review Workout"
+                subtitle={workoutLaunch.request.workoutName}
+                primaryLabel="Start"
+              />
+            </View>
+          )}
+        </WorkoutLaunchSplash>
       )}
     </View>
   );
@@ -254,6 +409,13 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: theme.bg,
+  },
+  orderReviewWrap: {
+    flex: 1,
+    backgroundColor: theme.bg,
+    paddingHorizontal: 24,
+    paddingTop: 64,
+    paddingBottom: 20,
   },
 });
 
