@@ -243,6 +243,22 @@ function Root() {
   }, [shown, anim]);
 
   useEffect(() => {
+    if (
+      account.status !== 'authenticated' ||
+      !appState.session ||
+      shown !== 'home' ||
+      workoutLaunchRef.current
+    ) return;
+    // A process restart always initializes the lightweight navigator at Home.
+    // Once account-scoped storage restores a live workout, return directly to
+    // it without replaying the launch animation or resetting its start time.
+    pendingRef.current = null;
+    anim.stopAnimation();
+    anim.setValue(1);
+    setShown('session');
+  }, [account.status, appState.session, shown, anim]);
+
+  useEffect(() => {
     if (account.status !== 'authenticated') {
       pendingRef.current = null;
       workoutLaunchRef.current = null;

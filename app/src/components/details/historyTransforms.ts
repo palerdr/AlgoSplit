@@ -5,6 +5,35 @@ export interface WorkoutTotals {
   volume: number;
 }
 
+const DAY_MS = 86_400_000;
+
+function localCalendarDayOrdinal(date: Date): number {
+  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS);
+}
+
+/** Calendar-day distance in the viewer's timezone, independent of hour/DST gaps. */
+export function localCalendarDaysAgo(iso: string, now = Date.now()): number | null {
+  const date = new Date(iso);
+  const current = new Date(now);
+  if (!Number.isFinite(date.getTime()) || !Number.isFinite(current.getTime())) return null;
+  return localCalendarDayOrdinal(current) - localCalendarDayOrdinal(date);
+}
+
+export function formatWorkoutDate(iso: string, now = Date.now()): string {
+  const date = new Date(iso);
+  const days = localCalendarDaysAgo(iso, now);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (!Number.isFinite(date.getTime())) return 'Unknown date';
+  const current = new Date(now);
+  return date.toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: date.getFullYear() === current.getFullYear() ? undefined : 'numeric',
+  });
+}
+
 export function sortWorkoutHistory(workouts: WorkoutLogResponse[]): WorkoutLogResponse[] {
   return [...workouts].sort(
     (a, b) => new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime()

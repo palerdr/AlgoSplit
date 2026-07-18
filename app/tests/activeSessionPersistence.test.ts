@@ -1,0 +1,108 @@
+import {
+  nextSessionExerciseOrdinal,
+  restoreActiveSession,
+} from '../src/state/activeSessionPersistence';
+import type { ActiveSession } from '../src/state/AppState';
+
+const startedAt = new Date(2026, 6, 16, 9, 30).getTime();
+
+function activeSession(): ActiveSession {
+  return {
+    name: 'Upper',
+    planned: true,
+    currentIndex: 1,
+    startedAt,
+    edited: true,
+    splitId: 'split-1',
+    sessionId: 'session-1',
+    exercises: [
+      {
+        sessionExerciseId: `session-${startedAt}-exercise-0`,
+        exercise: {
+          id: 'bench-press',
+          name: 'Bench Press',
+          muscles: [{ region: 'pectoralis_major', weight: 1, tier: 'prime' }],
+          axialLoad: 0.2,
+          resistanceProfile: 'ascending',
+          unilateral: false,
+          equipment: 'barbell',
+        },
+        targetSets: 3,
+        warmupEnabled: true,
+        warmupCompleted: true,
+        warmupBypassed: false,
+        completedSets: [
+          { weight: 185, reps: 8, rir: 2 },
+          { weight: 185, reps: 7, rir: 1 },
+        ],
+        notes: 'Pause on the chest',
+      },
+      {
+        sessionExerciseId: `session-${startedAt}-exercise-4`,
+        exercise: {
+          id: 'account:custom-1',
+          name: 'Custom Cable Press',
+          muscles: [],
+          axialLoad: 0,
+          resistanceProfile: 'mid',
+          unilateral: true,
+        },
+        targetSets: 2,
+        warmupEnabled: false,
+        warmupCompleted: false,
+        warmupBypassed: false,
+        completedSets: [{ weight: 40, reps: 12 }],
+        notes: '',
+      },
+    ],
+  };
+}
+
+describe('active workout persistence', () => {
+  it('round-trips every committed set and live-order field without a timeout', () => {
+    const source = activeSession();
+    const restored = restoreActiveSession(JSON.parse(JSON.stringify(source)));
+
+    expect(restored).toEqual(source);
+    expect(restored?.startedAt).toBe(startedAt);
+    expect(restored?.exercises[0].completedSets).toHaveLength(2);
+    expect(nextSessionExerciseOrdinal(restored as ActiveSession)).toBe(5);
+  });
+
+  it('isolates corrupt fields while keeping the rest of a resumable workout', () => {
+    const source = activeSession();
+    const restored = restoreActiveSession({
+      ...source,
+      currentIndex: 999,
+      exercises: [
+        {
+          ...source.exercises[0],
+          sessionExerciseId: '',
+          targetSets: 1,
+          completedSets: [
+            ...source.exercises[0].completedSets,
+            { weight: -1, reps: 8 },
+          ],
+        },
+        {
+          ...source.exercises[1],
+          sessionExerciseId: `session-${startedAt}-exercise-0`,
+        },
+        { exercise: null },
+      ],
+    });
+
+    expect(restored).not.toBeNull();
+    expect(restored?.exercises).toHaveLength(2);
+    expect(restored?.exercises[0].completedSets).toHaveLength(2);
+    expect(restored?.exercises[0].targetSets).toBe(2);
+    expect(new Set(restored?.exercises.map((exercise) => exercise.sessionExerciseId)).size).toBe(2);
+    expect(restored?.currentIndex).toBe(1);
+  });
+
+  it('rejects snapshots that cannot identify a real session', () => {
+    expect(restoreActiveSession(null)).toBeNull();
+    expect(restoreActiveSession({ startedAt: 0, exercises: [] })).toBeNull();
+    expect(restoreActiveSession({ startedAt, exercises: 'broken' })).toBeNull();
+  });
+});

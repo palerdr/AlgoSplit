@@ -15,6 +15,10 @@ import {
   demoStorageKey,
   removeLegacyGlobalData,
 } from './localPersistence';
+import {
+  nextSessionExerciseOrdinal,
+  restoreActiveSession,
+} from './activeSessionPersistence';
 import { Exercise, getExercise } from '../data/exercises';
 import { TEMPLATES as SEED_TEMPLATES, TemplateExercise, WorkoutTemplate } from '../data/templates';
 import {
@@ -272,6 +276,8 @@ interface PersistedState {
   templates: WorkoutTemplate[];
   lastUsed: Record<string, SetRecord>;
   exerciseNotes: Record<string, string>;
+  /** Null means there is no resumable workout for this account/device. */
+  activeSession: ActiveSession | null;
 }
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
@@ -310,6 +316,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const activeStorageKeyRef = React.useRef(storageKey);
   const syncInFlightRef = React.useRef<Set<string>>(new Set());
   const nextSessionExerciseOrdinalRef = React.useRef(0);
+  const persistenceQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   activeStorageKeyRef.current = storageKey;
 
   useEffect(() => {
@@ -370,6 +377,11 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           if (stored.exerciseNotes && typeof stored.exerciseNotes === 'object') {
             setExerciseNotes(stored.exerciseNotes);
           }
+          const restoredSession = restoreActiveSession(stored.activeSession);
+          if (restoredSession) {
+            nextSessionExerciseOrdinalRef.current = nextSessionExerciseOrdinal(restoredSession);
+            setSession(restoredSession);
+          }
         }
       })
       .catch(() => {
@@ -387,9 +399,25 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!hydrated || hydratedKeyRef.current !== storageKey) return;
-    const state: PersistedState = { history, templates, lastUsed, exerciseNotes };
-    AsyncStorage.setItem(storageKey, JSON.stringify(state)).catch(() => {});
-  }, [storageKey, hydrated, history, templates, lastUsed, exerciseNotes]);
+    const state: PersistedState = {
+      history,
+      templates,
+      lastUsed,
+      exerciseNotes,
+      activeSession: session,
+    };
+    const serialized = JSON.stringify(state);
+    // AsyncStorage does not guarantee that overlapping writes complete in call
+    // order on every platform. Serialize them so an older set/navigation
+    // snapshot can never overwrite the newest workout state.
+    persistenceQueueRef.current = persistenceQueueRef.current
+      .catch(() => {})
+      .then(() => {
+        if (activeStorageKeyRef.current !== storageKey) return;
+        return AsyncStorage.setItem(storageKey, serialized);
+      })
+      .catch(() => {});
+  }, [storageKey, hydrated, history, templates, lastUsed, exerciseNotes, session]);
 
   const recentStimulus = useMemo(() => computeRecentStimulus(history), [history]);
   const pendingSyncCount = history.filter((workout) => workout.syncStatus === 'pending').length;

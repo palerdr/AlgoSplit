@@ -1,6 +1,8 @@
 import type { WorkoutExerciseResponse, WorkoutLogResponse } from '../src/api/backend';
 import {
   formatLoggedSet,
+  formatWorkoutDate,
+  localCalendarDaysAgo,
   sortWorkoutHistory,
   workoutTotals,
 } from '../src/components/details/historyTransforms';
@@ -60,5 +62,17 @@ describe('history presentation transforms', () => {
     const logged = exercise();
     expect(formatLoggedSet(logged, 1)).toBe('205.5 lb × 6 · 1 RIR');
     expect(formatLoggedSet({ ...logged, rir: null }, 0)).toBe('185 lb × 8');
+  });
+
+  it('labels workouts by local calendar day instead of elapsed 24-hour windows', () => {
+    const now = new Date(2026, 6, 18, 0, 15).getTime();
+    const twoCalendarDaysAgo = new Date(2026, 6, 16, 23, 45).toISOString();
+    const yesterday = new Date(2026, 6, 17, 0, 16).toISOString();
+
+    // The first workout is only 24.5 elapsed hours old, which the previous
+    // implementation incorrectly displayed as Yesterday.
+    expect(localCalendarDaysAgo(twoCalendarDaysAgo, now)).toBe(2);
+    expect(formatWorkoutDate(twoCalendarDaysAgo, now)).not.toBe('Yesterday');
+    expect(formatWorkoutDate(yesterday, now)).toBe('Yesterday');
   });
 });

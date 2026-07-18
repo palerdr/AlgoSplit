@@ -7,22 +7,7 @@ import { theme } from '../../theme';
 import DeleteConfirmationModal from '../../ui/DeleteConfirmationModal';
 import FadeIn from '../../ui/FadeIn';
 import Glass from '../../ui/Glass';
-import { formatLoggedSet, workoutTotals } from './historyTransforms';
-
-const DAY_MS = 86_400_000;
-
-function formatDate(iso: string): string {
-  const date = new Date(iso);
-  const days = Math.floor((Date.now() - date.getTime()) / DAY_MS);
-  if (days === 0) return 'Today';
-  if (days === 1) return 'Yesterday';
-  return date.toLocaleDateString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    year: date.getFullYear() === new Date().getFullYear() ? undefined : 'numeric',
-  });
-}
+import { formatLoggedSet, formatWorkoutDate, workoutTotals } from './historyTransforms';
 
 function formatVolume(value: number): string {
   if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
@@ -88,7 +73,7 @@ function WorkoutCard({
           >
             <View style={styles.cardTitleBlock}>
               <Text style={styles.cardTitle}>{workout.session_name}</Text>
-              <Text style={styles.cardDate}>{formatDate(workout.completed_at)}</Text>
+              <Text style={styles.cardDate}>{formatWorkoutDate(workout.completed_at)}</Text>
             </View>
             <Text style={styles.chevron}>{expanded ? '⌃' : '⌄'}</Text>
           </Pressable>
