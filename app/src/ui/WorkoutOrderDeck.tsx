@@ -94,7 +94,7 @@ export default function WorkoutOrderDeck({
   onAddExercise,
   onCancel,
   onPrimaryAction,
-  title = variant === 'preflight' ? 'Review Workout' : 'Workout order',
+  title = variant === 'preflight' ? 'Review Workout Order' : 'Workout order',
   subtitle,
   primaryLabel = variant === 'preflight' ? 'Start' : 'Done',
   disabled = false,
@@ -488,10 +488,10 @@ const styles = StyleSheet.create({
   preflightMeta: {
     flex: 1,
     minWidth: 0,
-    color: theme.textDim,
-    fontSize: 12.5,
-    lineHeight: 17,
-    fontWeight: '600',
+    color: theme.text,
+    fontSize: 20,
+    lineHeight: 26,
+    fontWeight: '700',
   },
   warmupAllControl: {
     minHeight: 30,

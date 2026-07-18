@@ -100,6 +100,7 @@ const DIAL_STROKE = 5;
 const DIAL_R = (DIAL_SIZE - DIAL_STROKE) / 2;
 const DIAL_C = 2 * Math.PI * DIAL_R;
 const HOME_CONTROL_TINT = 'rgba(255,255,255,0.025)';
+const ACTIVE_ZONE_RADIUS = 22;
 const ACTIVE_DAY_OFFSETS = [-10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0] as const;
 const ACTIVE_DAY_OPACITY = [0.22, 0.42, 0.72, 0.92, 1, 1, 1, 0.92, 0.72, 0.52, 0.35] as const;
 
@@ -1159,9 +1160,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  // One geometry/material contract for the two home controls. The dial is
-  // circular and the active-split control extends that same circle into a
-  // capsule, so their height, end radius, edge, and tint always match.
+  // One height/material contract for the two home controls. The dial remains
+  // circular while the active-split control uses a softer rectangular shape.
   homeControlGlass: {
     height: DIAL_SIZE,
     borderRadius: DIAL_SIZE / 2,
@@ -1206,6 +1206,7 @@ const styles = StyleSheet.create({
   },
   activeZone: {
     width: '100%',
+    borderRadius: ACTIVE_ZONE_RADIUS,
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1217,11 +1218,11 @@ const styles = StyleSheet.create({
   activeZoneActiveContent: {
     width: '100%',
     alignItems: 'center',
-    gap: 7,
+    gap: 12,
   },
   activeLandingGlow: {
     ...StyleSheet.absoluteFillObject,
-    borderRadius: DIAL_SIZE / 2,
+    borderRadius: ACTIVE_ZONE_RADIUS,
     backgroundColor: theme.accent,
   },
   activeZoneRow: {
@@ -1484,6 +1485,7 @@ const styles = StyleSheet.create({
     flex: 1,
     marginBottom: 0,
     textAlign: 'right',
+    transform: [{ translateY: 8 }],
   },
   freeCard: {
     opacity: 0.85,

@@ -428,8 +428,7 @@ function Root() {
                 }}
                 onCancel={() => cancelWorkoutTransition(workoutLaunch.key)}
                 onPrimaryAction={() => confirmWorkoutTransition(workoutLaunch.key)}
-                title="Review Workout"
-                subtitle={workoutLaunch.request.workoutName}
+                title="Review Workout Order"
                 primaryLabel="Start"
               />
             </View>
