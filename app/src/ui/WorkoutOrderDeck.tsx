@@ -161,9 +161,11 @@ export default function WorkoutOrderDeck({
         <View
           style={[
             styles.row,
+            variant === 'preflight' && styles.preflightRow,
             item.current && styles.rowCurrent,
             complete && styles.rowComplete,
             isActive && styles.rowDragging,
+            variant === 'preflight' && isActive && styles.preflightRowDragging,
           ]}
         >
           <Pressable
@@ -231,7 +233,12 @@ export default function WorkoutOrderDeck({
             </Pressable>
           ) : (
             <View style={styles.rowSelectArea}>
-              <View style={styles.nameField}>
+              <View
+                style={[
+                  styles.nameField,
+                  variant === 'preflight' && styles.preflightNameField,
+                ]}
+              >
                 <Text numberOfLines={1} style={styles.exerciseName}>
                   {item.name}
                 </Text>
@@ -305,6 +312,7 @@ export default function WorkoutOrderDeck({
             }}
             style={({ pressed }) => [
               styles.addRow,
+              variant === 'preflight' && styles.preflightAddRow,
               actionsDisabled && styles.actionDisabled,
               pressed && styles.actionPressed,
             ]}
@@ -343,7 +351,11 @@ export default function WorkoutOrderDeck({
             disabled={primaryActionDisabled}
             onPress={primaryAction}
           >
-            <Glass style={styles.startButton} interactive={!primaryActionDisabled}>
+            <Glass
+              style={[styles.startButton, styles.preflightStartButton]}
+              tintColor="rgba(18,19,19,0.76)"
+              interactive={!primaryActionDisabled}
+            >
               <Text
                 style={[
                   styles.startText,
@@ -452,6 +464,11 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     paddingHorizontal: 18,
   },
+  preflightStartButton: {
+    backgroundColor: 'rgba(18,19,19,0.58)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.13)',
+  },
   startText: {
     color: theme.accent,
     fontSize: 14,
@@ -521,6 +538,11 @@ const styles = StyleSheet.create({
     gap: 9,
     backgroundColor: 'rgba(255,255,255,0.07)',
   },
+  preflightRow: {
+    backgroundColor: 'rgba(15,16,16,0.76)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
   rowCurrent: {
     backgroundColor: 'rgba(255,255,255,0.1)',
     borderWidth: StyleSheet.hairlineWidth,
@@ -533,6 +555,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.13)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.28)',
+  },
+  preflightRowDragging: {
+    backgroundColor: 'rgba(28,29,29,0.9)',
+    borderColor: 'rgba(255,255,255,0.24)',
   },
   dragHandle: {
     paddingHorizontal: 2,
@@ -560,6 +586,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 9,
     backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  preflightNameField: {
+    backgroundColor: 'rgba(255,255,255,0.045)',
   },
   rowSelectArea: {
     flex: 1,
@@ -649,6 +678,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.045)',
+  },
+  preflightAddRow: {
+    backgroundColor: 'rgba(15,16,16,0.68)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   addText: {
     color: theme.accent,

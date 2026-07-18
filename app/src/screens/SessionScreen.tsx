@@ -103,6 +103,7 @@ function Wheel({
   format = String,
   onChange,
   compact = false,
+  disabled = false,
 }: {
   label: string;
   values: number[];
@@ -113,6 +114,7 @@ function Wheel({
   format?: (value: number) => string;
   onChange: (v: number) => void;
   compact?: boolean;
+  disabled?: boolean;
 }) {
   // Start the animated offset AT the initial row so the selected value renders
   // solid white immediately — no dimmed state until first touch. Off-grid
@@ -156,6 +158,8 @@ function Wheel({
           style={[styles.wheelLens, { top: (wheelHeight - ITEM_H) / 2 - 2 }]}
         />
         <Animated.ScrollView
+          accessibilityState={{ disabled }}
+          scrollEnabled={!disabled}
           showsVerticalScrollIndicator={false}
           snapToInterval={ITEM_H}
           decelerationRate="fast"
@@ -356,10 +360,11 @@ function SlideToComplete({
             },
           ]}
         />
-        <Animated.Text
+        <Animated.View
+          pointerEvents="none"
           style={[
-            styles.sliderLabel,
-            compactActionLabel && styles.sliderLabelWarmup,
+            StyleSheet.absoluteFillObject,
+            styles.sliderLabelWrap,
             {
               opacity: frac.interpolate({
                 inputRange: [0, 0.55],
@@ -369,8 +374,15 @@ function SlideToComplete({
             },
           ]}
         >
-          {actionLabel}
-        </Animated.Text>
+          <Text
+            adjustsFontSizeToFit
+            minimumFontScale={0.72}
+            numberOfLines={1}
+            style={[styles.sliderLabel, compactActionLabel && styles.sliderLabelWarmup]}
+          >
+            {actionLabel}
+          </Text>
+        </Animated.View>
         {revealLabel ? (
           // The set's volume surfaces as “slide to complete” recedes.
           <Animated.View
@@ -590,7 +602,6 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     jumpToSessionExercise,
     reorderSessionExercises,
     setSessionExerciseWarmupEnabled,
-    addSetToExercise,
     updateExerciseNotes,
     completeWarmupSet,
     discardSession,
@@ -793,6 +804,30 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
 
   if (!view) return null;
 
+  // Preview the exact destination the completion chain will advance to. This
+  // uses the same projection as the rest timer, so injected warmups and the
+  // final set cannot disagree with the slider copy.
+  const completionActionLabel = (() => {
+    if (!current) return 'complete workout';
+    const nextStep = nextSessionStepAfterCompletion(
+      view.exercises,
+      current.sessionExerciseId,
+      warmupActive ? 'warmup' : 'working'
+    );
+    if (!nextStep) return 'complete workout';
+
+    const destination = view.exercises[nextStep.exerciseIndex];
+    if (!destination) return 'continue workout';
+    if (nextStep.kind === 'warmup') {
+      return `continue to ${destination.exercise.name} warm-up`;
+    }
+    if (destination.sessionExerciseId === current.sessionExerciseId) {
+      const nextSetNumber = current.completedSets.length + (warmupActive ? 1 : 2);
+      return `continue to set ${nextSetNumber}`;
+    }
+    return `continue to ${destination.exercise.name}`;
+  })();
+
   const anyWork = view.exercises.some((se) => se.completedSets.length > 0);
   const baseInteractionBlocked =
     resting ||
@@ -897,7 +932,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
 
     if (!nextStep) {
       // Keep the completed workout open for review. The user can move back
-      // through it, add an intentional extra set, or use the header Finish.
+      // through its completed exercises or use the header Finish.
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       completeSet(record, source);
       slideFrac.setValue(0);
@@ -908,13 +943,6 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
       setRestDurationSeconds(restSecondsBeforeSessionStep(nextStep, REST_SECONDS));
       setResting(true);
     }
-  };
-
-  const handleAddSet = () => {
-    if (!current || navigationBlocked) return;
-    tick();
-    addSetToExercise(view.currentIndex);
-    slideFrac.setValue(0);
   };
 
   const finishNow = () => {
@@ -1063,6 +1091,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   }
                   onChange={changeWeight}
                   compact={compactLayout}
+                  disabled={currentComplete}
                 />
                 <Wheel
                   key={`${wheelEpoch}-r`}
@@ -1074,6 +1103,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   }
                   onChange={changeReps}
                   compact={compactLayout}
+                  disabled={currentComplete}
                 />
                 <Wheel
                   key={`${wheelEpoch}-i`}
@@ -1088,6 +1118,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   format={(v) => (v === 0 ? 'Failure' : String(v))}
                   onChange={changeRir}
                   compact={compactLayout}
+                  disabled={currentComplete}
                 />
               </View>
               {remoteShadowError ? (
@@ -1159,23 +1190,18 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
           )}
 
           {currentComplete ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Add another set to ${current.exercise.name}`}
-              onPress={handleAddSet}
-              disabled={navigationBlocked}
+            <View
+              accessible
+              accessibilityRole="text"
+              accessibilityLabel={`${current.exercise.name}, exercise complete`}
+              style={[
+                styles.completedExerciseState,
+                compactLayout && styles.completedExerciseStateCompact,
+              ]}
             >
-              <Glass
-                style={[
-                  styles.addSetButton,
-                  compactLayout && styles.addSetButtonCompact,
-                  navigationBlocked && styles.addSetButtonDisabled,
-                ]}
-                interactive={!navigationBlocked}
-              >
-                <Text style={styles.addSetButtonText}>+ Add another set</Text>
-              </Glass>
-            </Pressable>
+              <View style={styles.completedExerciseDot} />
+              <Text style={styles.completedExerciseStateText}>Exercise complete</Text>
+            </View>
           ) : (
             <View style={[styles.sliderZone, compactLayout && styles.sliderZoneCompact]}>
               <SlideToComplete
@@ -1185,7 +1211,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                 }-${setNumber}`}
                 onComplete={handleSetComplete}
                 onSettlingChange={updateSliderSettling}
-                actionLabel={warmupActive ? 'slide to complete warm-up' : undefined}
+                actionLabel={completionActionLabel}
                 compactActionLabel={warmupActive}
                 revealLabel={
                   !warmupActive && weight > 0
@@ -1807,23 +1833,32 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 14,
   },
-  addSetButton: {
-    minHeight: 58,
-    borderRadius: 29,
+  completedExerciseState: {
+    height: TRACK_H,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 9,
     paddingHorizontal: 20,
+    backgroundColor: 'rgba(57, 156, 91, 0.2)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(109, 211, 143, 0.48)',
   },
-  addSetButtonCompact: {
-    minHeight: 50,
+  completedExerciseStateCompact: {
+    height: 60,
   },
-  addSetButtonDisabled: {
-    opacity: 0.48,
+  completedExerciseDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: theme.accent,
   },
-  addSetButtonText: {
-    color: theme.text,
+  completedExerciseStateText: {
+    color: theme.accent,
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
   sliderZone: {
     marginTop: 16,
@@ -1846,16 +1881,21 @@ const styles = StyleSheet.create({
     backgroundColor: theme.accent,
   },
   sliderLabel: {
+    alignSelf: 'stretch',
     color: theme.text,
     fontSize: 16,
     fontWeight: '500',
     textAlign: 'center',
     letterSpacing: 0.4,
   },
+  sliderLabelWrap: {
+    justifyContent: 'center',
+    paddingLeft: THUMB + TRACK_PAD + 10,
+    paddingRight: 14,
+  },
   sliderLabelWarmup: {
     fontSize: 13,
     letterSpacing: 0.2,
-    transform: [{ translateX: 14 }],
   },
   sliderRevealWrap: {
     alignItems: 'center',

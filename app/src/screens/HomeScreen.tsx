@@ -100,6 +100,36 @@ const DIAL_STROKE = 5;
 const DIAL_R = (DIAL_SIZE - DIAL_STROKE) / 2;
 const DIAL_C = 2 * Math.PI * DIAL_R;
 const HOME_CONTROL_TINT = 'rgba(255,255,255,0.025)';
+const ACTIVE_DAY_OFFSETS = [-10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0] as const;
+const ACTIVE_DAY_OPACITY = [0.22, 0.42, 0.72, 0.92, 1, 1, 1, 0.92, 0.72, 0.52, 0.35] as const;
+
+function localDayKey(timestamp: number): string {
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+function RecentSplitDays({ completed }: { completed: readonly boolean[] }) {
+  return (
+    <View
+      pointerEvents="none"
+      accessible={false}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={styles.activeDaysRow}
+    >
+      {completed.map((isComplete, index) => (
+        <View
+          key={ACTIVE_DAY_OFFSETS[index] ?? index}
+          style={[
+            styles.activeDayCell,
+            isComplete ? styles.activeDayCellComplete : styles.activeDayCellEmpty,
+            { opacity: ACTIVE_DAY_OPACITY[index] ?? 1 },
+          ]}
+        />
+      ))}
+    </View>
+  );
+}
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
@@ -224,6 +254,21 @@ export default function HomeScreen({
     () => (activeSplit ? splitWorkoutStreak(activeSplit, splitLogs, Date.now()) : 0),
     [activeSplit, splitLogs]
   );
+  const activeSplitRecentDays = React.useMemo(() => {
+    if (!activeSplit) return [];
+    const completedDays = new Set(
+      splitLogs
+        .filter((entry) => entry.splitId === activeSplit.id)
+        .map((entry) => localDayKey(entry.completedAt))
+    );
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return ACTIVE_DAY_OFFSETS.map((offset) => {
+      const date = new Date(today);
+      date.setDate(today.getDate() + offset);
+      return completedDays.has(localDayKey(date.getTime()));
+    });
+  }, [activeSplit, splitLogs]);
   const activeZoneLanding = useRef(new Animated.Value(1)).current;
   const activeZoneLandingAnimationRef = useRef<Animated.CompositeAnimation | null>(null);
   const landingHandledRef = useRef(onActiveSplitLandingHandled);
@@ -622,36 +667,42 @@ export default function HomeScreen({
               />
               <Animated.View
                 pointerEvents="none"
-                style={{
-                  opacity: activeZoneLanding.interpolate({
-                    inputRange: [0, 0.28, 1],
-                    outputRange: [0, 1, 1],
-                  }),
-                  transform: [
-                    {
-                      translateY: activeZoneLanding.interpolate({
-                        inputRange: [0, 0.68, 1],
-                        outputRange: [13, -2, 0],
-                      }),
-                    },
-                    {
-                      scale: activeZoneLanding.interpolate({
-                        inputRange: [0, 0.68, 1],
-                        outputRange: [0.94, 1.025, 1],
-                      }),
-                    },
-                  ],
-                }}
+                style={[
+                  styles.activeZoneContent,
+                  {
+                    opacity: activeZoneLanding.interpolate({
+                      inputRange: [0, 0.28, 1],
+                      outputRange: [0, 1, 1],
+                    }),
+                    transform: [
+                      {
+                        translateY: activeZoneLanding.interpolate({
+                          inputRange: [0, 0.68, 1],
+                          outputRange: [13, -2, 0],
+                        }),
+                      },
+                      {
+                        scale: activeZoneLanding.interpolate({
+                          inputRange: [0, 0.68, 1],
+                          outputRange: [0.94, 1.025, 1],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
               >
                 {activeSplit ? (
-                  <View style={styles.activeZoneRow}>
-                    <Text style={styles.activeZoneName} numberOfLines={1}>
-                      {activeSplit.name}
-                    </Text>
-                    <View style={styles.activeStreakRow}>
-                      <FireIcon size={15} lit={activeStreak > 0} />
-                      {activeStreak > 0 && <Text style={styles.activeTag}>{activeStreak}</Text>}
+                  <View style={styles.activeZoneActiveContent}>
+                    <View style={styles.activeZoneRow}>
+                      <Text style={styles.activeZoneName} numberOfLines={1}>
+                        {activeSplit.name}
+                      </Text>
+                      <View style={styles.activeStreakRow}>
+                        <FireIcon size={15} lit={activeStreak > 0} />
+                        {activeStreak > 0 && <Text style={styles.activeTag}>{activeStreak}</Text>}
+                      </View>
                     </View>
+                    <RecentSplitDays completed={activeSplitRecentDays} />
                   </View>
                 ) : (
                   <View style={styles.activeZoneRow}>
@@ -1159,15 +1210,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  activeZoneContent: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  activeZoneActiveContent: {
+    width: '100%',
+    alignItems: 'center',
+    gap: 7,
+  },
   activeLandingGlow: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: DIAL_SIZE / 2,
     backgroundColor: theme.accent,
   },
   activeZoneRow: {
+    maxWidth: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
+  },
+  activeDaysRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  activeDayCell: {
+    width: 7,
+    height: 7,
+    borderRadius: 2,
+  },
+  activeDayCellEmpty: {
+    backgroundColor: 'rgba(255,255,255,0.11)',
+  },
+  activeDayCellComplete: {
+    backgroundColor: theme.accent,
   },
   activeZoneName: {
     color: theme.text,
