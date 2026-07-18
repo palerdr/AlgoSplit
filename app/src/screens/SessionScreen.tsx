@@ -12,12 +12,18 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { useAccountState } from '../state/AccountState';
 import { EXERCISES } from '../data/exercises';
-import { useAppState, ActiveSession, SetRecord } from '../state/AppState';
+import {
+  useAppState,
+  ActiveSession,
+  SetCompletionSource,
+  SetRecord,
+} from '../state/AppState';
 import { theme } from '../theme';
 import Glass from '../ui/Glass';
 import PopupLayer from '../ui/PopupLayer';
@@ -28,6 +34,10 @@ import {
   previousRemoteExercise,
 } from '../workout/logging';
 import RestTimer from './RestTimer';
+import {
+  nextIncompleteExerciseIndex,
+  sessionWillBeCompleteAfterSet,
+} from '../workout/sessionNavigation';
 
 // Real SF Symbols pencil on iOS; falls back to a text glyph elsewhere.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -45,6 +55,10 @@ interface SessionScreenProps {
 }
 
 const DEFAULT_SET: SetRecord = { weight: 50, reps: 10 };
+interface PendingSet {
+  record: SetRecord;
+  source: SetCompletionSource;
+}
 // Kept lean — fewer rows keeps the set screen cheap to mount mid-transition.
 const WEIGHT_VALUES = Array.from({ length: 61 }, (_, i) => i * 5); // 0–300 by 5
 const REP_VALUES = Array.from({ length: 30 }, (_, i) => i + 1); // 1–30
@@ -76,6 +90,7 @@ function Wheel({
   markedValue,
   format = String,
   onChange,
+  compact = false,
 }: {
   label: string;
   values: number[];
@@ -85,6 +100,7 @@ function Wheel({
   /** Row label override (e.g. the RIR unset sentinel renders as “—”) */
   format?: (value: number) => string;
   onChange: (v: number) => void;
+  compact?: boolean;
 }) {
   // Start the animated offset AT the initial row so the selected value renders
   // solid white immediately — no dimmed state until first touch. Off-grid
@@ -99,6 +115,7 @@ function Wheel({
     return best;
   })();
   const scrollY = useRef(new Animated.Value(initialIdx * ITEM_H)).current;
+  const wheelHeight = compact ? ITEM_H * 3 : WHEEL_H;
   const lastIdxRef = useRef(initialIdx);
   // A flick fires onScrollEndDrag with the UN-snapped offset, then momentum
   // carries on — settling there would record a value the wheel doesn't land
@@ -117,18 +134,21 @@ function Wheel({
   }, []);
 
   return (
-    <Glass style={styles.wheelPanel}>
+    <Glass style={[styles.wheelPanel, compact && styles.wheelPanelCompact]}>
       <Text style={styles.wheelLabel}>{label}</Text>
-      <View style={styles.wheelWindow}>
+      <View style={[styles.wheelWindow, { height: wheelHeight }]}>
         {/* Selection lens — deliberately NOT a nested GlassView: glass inside
             glass renders unreliably on iOS 26, so this is a crisp overlay. */}
-        <View pointerEvents="none" style={styles.wheelLens} />
+        <View
+          pointerEvents="none"
+          style={[styles.wheelLens, { top: (wheelHeight - ITEM_H) / 2 - 2 }]}
+        />
         <Animated.ScrollView
           showsVerticalScrollIndicator={false}
           snapToInterval={ITEM_H}
           decelerationRate="fast"
           contentOffset={{ x: 0, y: initialIdx * ITEM_H }}
-          contentContainerStyle={{ paddingVertical: (WHEEL_H - ITEM_H) / 2 }}
+          contentContainerStyle={{ paddingVertical: (wheelHeight - ITEM_H) / 2 }}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
             {
@@ -206,11 +226,13 @@ const THUMB = TRACK_H - TRACK_PAD * 2;
 function SlideToComplete({
   frac,
   onComplete,
+  onSettlingChange,
   resetKey,
   revealLabel,
 }: {
   frac: Animated.Value;
   onComplete: () => void;
+  onSettlingChange: (settling: boolean) => void;
   resetKey: string;
   /** Subtle text (e.g. “+450 lb”) cross-faded in as the thumb travels */
   revealLabel?: string;
@@ -223,12 +245,15 @@ function SlideToComplete({
   const doneRef = useRef(false);
   const armedRef = useRef(false);
   const onCompleteRef = useRef(onComplete);
+  const onSettlingChangeRef = useRef(onSettlingChange);
   onCompleteRef.current = onComplete;
+  onSettlingChangeRef.current = onSettlingChange;
 
   // New set → thumb back to the start.
   useEffect(() => {
     doneRef.current = false;
     armedRef.current = false;
+    onSettlingChangeRef.current(false);
     frac.setValue(0);
   }, [resetKey, frac]);
 
@@ -263,13 +288,18 @@ function SlideToComplete({
         if (doneRef.current) return;
         if (g.dx >= maxXRef.current * 0.9) {
           doneRef.current = true;
+          onSettlingChangeRef.current(true);
           Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
           Animated.timing(frac, {
             toValue: 1,
             duration: 110,
             easing: Easing.out(Easing.quad),
             useNativeDriver: false,
-          }).start(() => onCompleteRef.current());
+          }).start(({ finished }) => {
+            onSettlingChangeRef.current(false);
+            if (finished) onCompleteRef.current();
+            else doneRef.current = false;
+          });
         } else {
           Animated.spring(frac, {
             toValue: 0,
@@ -407,6 +437,115 @@ function SetSegment({
   );
 }
 
+function ExerciseNavButton({
+  direction,
+  disabled,
+  destinationName,
+  onPress,
+}: {
+  direction: -1 | 1;
+  disabled: boolean;
+  destinationName?: string;
+  onPress: () => void;
+}) {
+  const action = direction < 0 ? 'Previous' : 'Next';
+  const accessibilityLabel =
+    destinationName === 'Workout summary'
+      ? 'Return to workout summary'
+      : destinationName
+        ? `${action} exercise, ${destinationName}`
+        : `${action} exercise`;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={styles.exerciseNavPressable}
+    >
+      <Glass
+        style={styles.exerciseNavGlass}
+        interactive={!disabled}
+      >
+        {SymbolView ? (
+          <SymbolView
+            name={direction < 0 ? 'chevron.left' : 'chevron.right'}
+            size={15}
+            tintColor={disabled ? 'rgba(255,255,255,0.2)' : theme.text}
+          />
+        ) : (
+          <Text style={[styles.exerciseNavGlyph, disabled && styles.exerciseNavGlyphDisabled]}>
+            {direction < 0 ? '‹' : '›'}
+          </Text>
+        )}
+      </Glass>
+    </Pressable>
+  );
+}
+
+function ExerciseNavigator({
+  exerciseNames,
+  currentIndex,
+  primaryLabel,
+  allowCompleteState,
+  compact,
+  disabled,
+  onMove,
+}: {
+  exerciseNames: string[];
+  currentIndex: number;
+  primaryLabel: string;
+  allowCompleteState: boolean;
+  compact: boolean;
+  disabled: boolean;
+  onMove: (direction: -1 | 1) => void;
+}) {
+  const count = exerciseNames.length;
+  const previousIndex =
+    count > 0 && currentIndex > 0 ? Math.min(currentIndex - 1, count - 1) : -1;
+  const nextIndex =
+    currentIndex >= 0 && currentIndex < count - 1
+      ? currentIndex + 1
+      : allowCompleteState && currentIndex === count - 1
+        ? count
+        : -1;
+  const atCompleteState = count > 0 && currentIndex >= count;
+
+  return (
+    <View style={[styles.exerciseNavigator, compact && styles.exerciseNavigatorCompact]}>
+      <ExerciseNavButton
+        direction={-1}
+        disabled={disabled || previousIndex < 0}
+        destinationName={previousIndex >= 0 ? exerciseNames[previousIndex] : undefined}
+        onPress={() => onMove(-1)}
+      />
+      <View style={styles.exerciseNavCopy}>
+        <Text style={styles.exerciseNavPrimary} numberOfLines={1}>
+          {primaryLabel}
+        </Text>
+        <Text style={styles.exerciseNavSecondary} numberOfLines={1}>
+          {atCompleteState
+            ? `${count} ${count === 1 ? 'exercise' : 'exercises'}`
+            : `Exercise ${currentIndex + 1} of ${count}`}
+        </Text>
+      </View>
+      <ExerciseNavButton
+        direction={1}
+        disabled={disabled || nextIndex < 0}
+        destinationName={
+          nextIndex === count
+            ? 'Workout summary'
+            : nextIndex >= 0
+              ? exerciseNames[nextIndex]
+              : undefined
+        }
+        onPress={() => onMove(1)}
+      />
+    </View>
+  );
+}
+
 // ── Session screen ────────────────────────────────────────────────
 export default function SessionScreen({ onComplete, onDiscard }: SessionScreenProps) {
   const {
@@ -416,17 +555,27 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     finishSession,
     addExercise,
     editExercise,
+    navigateSessionExercise,
+    addSetToExercise,
     updateExerciseNotes,
     discardSession,
     lastUsed,
   } = useAppState();
   const account = useAccountState();
+  const { height: screenHeight } = useWindowDimensions();
+  const compactLayout = screenHeight < 740;
   const [resting, setResting] = useState(false);
   const [picker, setPicker] = useState<'add' | 'edit' | null>(null);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   // Shared slide progress: drives the slider AND the live top-bar segment.
   const slideFrac = useRef(new Animated.Value(0)).current;
+  const sliderSettlingRef = useRef(false);
+  const [sliderSettling, setSliderSettling] = useState(false);
+  const updateSliderSettling = (settling: boolean) => {
+    sliderSettlingRef.current = settling;
+    setSliderSettling(settling);
+  };
 
   // Finishing/discarding nulls the session while the nav fade is still
   // transparent — keep rendering the last snapshot so the screen doesn't
@@ -438,6 +587,16 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   const current = view ? view.exercises[view.currentIndex] : undefined;
   const currentId = current?.exercise.id;
   const setNumber = current ? current.completedSets.length + 1 : 1;
+  const currentComplete = Boolean(
+    current && current.completedSets.length >= current.targetSets
+  );
+  const exerciseNames = view?.exercises.map((exercise) => exercise.exercise.name) ?? [];
+  const allExercisesComplete = Boolean(
+    view?.exercises.length &&
+      view.exercises.every(
+        (exercise) => exercise.completedSets.length >= exercise.targetSets
+      )
+  );
   const remoteHistory = account.workoutRanges.all;
 
   useEffect(() => {
@@ -472,10 +631,17 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   // The wheels remount when the exercise changes or when previous-set data
   // first arrives (async account history) — NOT between sets, so the user's
   // tweaks carry from set to set exactly like the original wheel UI.
-  const wheelEpoch = `${currentId ?? 'none'}-${previous ? 'shadowed' : 'bare'}`;
+  const wheelEpoch = `${view?.currentIndex ?? 'none'}-${currentId ?? 'none'}-${
+    previous ? 'shadowed' : 'bare'
+  }-${currentComplete ? 'complete' : 'entry'}`;
   const initialRecord: SetRecord = (() => {
     const fallback = (currentId ? lastUsed[currentId] : undefined) ?? DEFAULT_SET;
-    const base = previous?.records[setNumber - 1] ?? previous?.records[0] ?? fallback;
+    const currentSessionLast = current?.completedSets[current.completedSets.length - 1];
+    const base =
+      previous?.records[setNumber - 1] ??
+      currentSessionLast ??
+      previous?.records[0] ??
+      fallback;
     return {
       weight: snapTo(WEIGHT_VALUES, base.weight),
       reps: snapTo(REP_VALUES, base.reps),
@@ -485,13 +651,41 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   const [weight, setWeight] = useState(initialRecord.weight);
   const [reps, setReps] = useState(initialRecord.reps);
   const [rir, setRir] = useState(initialRecord.rir ?? 0);
+  const wheelDraftsRef = useRef<Record<string, SetRecord>>({});
+  const wheelDraftKey =
+    view && current
+      ? `${view.startedAt}-${view.currentIndex}-${current.exercise.id}-${setNumber}`
+      : null;
+  const effectiveInitialRecord =
+    (wheelDraftKey ? wheelDraftsRef.current[wheelDraftKey] : undefined) ?? initialRecord;
   useEffect(() => {
-    setWeight(initialRecord.weight);
-    setReps(initialRecord.reps);
-    setRir(initialRecord.rir ?? 0);
+    setWeight(effectiveInitialRecord.weight);
+    setReps(effectiveInitialRecord.reps);
+    setRir(effectiveInitialRecord.rir ?? 0);
     // Only when the wheels remount — keep the user's tweaks between sets.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wheelEpoch]);
+
+  const updateWheelDraft = (update: Partial<SetRecord>) => {
+    if (!wheelDraftKey) return;
+    const existing = wheelDraftsRef.current[wheelDraftKey] ?? { weight, reps, rir };
+    wheelDraftsRef.current[wheelDraftKey] = {
+      ...existing,
+      ...update,
+    };
+  };
+  const changeWeight = (value: number) => {
+    setWeight(value);
+    updateWheelDraft({ weight: value });
+  };
+  const changeReps = (value: number) => {
+    setReps(value);
+    updateWheelDraft({ reps: value });
+  };
+  const changeRir = (value: number) => {
+    setRir(value);
+    updateWheelDraft({ rir: value });
+  };
 
   const notesInitialized = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -512,6 +706,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   const [notesDraft, setNotesDraft] = useState('');
   const notesAnim = useRef(new Animated.Value(0)).current;
   const openNotes = () => {
+    if (sliderSettlingRef.current) return;
     tick();
     setNotesDraft(current?.notes ?? '');
     setNotesOpen(true);
@@ -544,11 +739,25 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   // everything resets — only once the cover is fully opaque (onShown).
   // NOTE: must be declared BEFORE the early return below — a hook after it
   // crashes the render when discarding/finishing nulls the session.
-  const pendingSetRef = useRef<SetRecord | null>(null);
+  const pendingSetRef = useRef<PendingSet | null>(null);
 
   if (!view) return null;
 
   const anyWork = view.exercises.some((se) => se.completedSets.length > 0);
+  const navigationBlocked =
+    resting ||
+    pendingSetRef.current !== null ||
+    notesOpen ||
+    picker !== null ||
+    confirmDiscard ||
+    sliderSettling;
+  const moveExercise = (direction: -1 | 1) => {
+    if (navigationBlocked || sliderSettlingRef.current) return;
+    tick();
+    slideFrac.stopAnimation();
+    slideFrac.setValue(0);
+    navigateSessionExercise(direction);
+  };
 
   // One segment per set, across the whole workout.
   const segments = view.exercises.flatMap((se, ei) =>
@@ -565,44 +774,73 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
 
   // Count the not-yet-committed set so the label is stable across the commit:
   // once the pending set lands, `current` itself is whatever comes after rest.
+  const pendingSet = pendingSetRef.current;
+  const pendingBelongsToCurrent = Boolean(
+    current &&
+      pendingSet &&
+      pendingSet.source.exerciseIndex === view.currentIndex &&
+      pendingSet.source.exerciseId === current.exercise.id
+  );
   const setsDone = current
-    ? current.completedSets.length + (pendingSetRef.current ? 1 : 0)
+    ? current.completedSets.length + (pendingBelongsToCurrent ? 1 : 0)
     : 0;
+  const pendingNextIndex = current
+    ? nextIncompleteExerciseIndex(
+        view.exercises,
+        view.currentIndex,
+        pendingBelongsToCurrent ? view.currentIndex : null
+      )
+    : view.exercises.length;
   const nextUp = current
     ? setsDone < current.targetSets
       ? current.exercise.name
-      : view.exercises[view.currentIndex + 1]?.exercise.name ?? null
+      : view.exercises[pendingNextIndex]?.exercise.name ?? null
     : null;
 
   // Wheels only land on valid API values, so no draft validation is needed.
   const wheelRecord = (): SetRecord => ({ weight, reps, rir });
 
   const commitPendingSet = () => {
-    if (!pendingSetRef.current) return;
-    completeSet(pendingSetRef.current);
+    const pending = pendingSetRef.current;
+    if (!pending) return;
     pendingSetRef.current = null;
+    completeSet(pending.record, pending.source);
     slideFrac.setValue(0);
   };
 
   const handleSetComplete = () => {
-    const willFinishWorkout =
-      view.planned &&
-      current !== undefined &&
-      view.currentIndex === view.exercises.length - 1 &&
-      current.completedSets.length + 1 >= current.targetSets;
+    if (!current || currentComplete || pendingSetRef.current) return;
+    const record = wheelRecord();
+    const source: SetCompletionSource = {
+      exerciseIndex: view.currentIndex,
+      exerciseId: current.exercise.id,
+    };
+    const completesWorkout = sessionWillBeCompleteAfterSet(
+      view.exercises,
+      view.currentIndex
+    );
 
-    if (willFinishWorkout) {
-      // Last set: no rest — fold the final record into the finish atomically.
+    if (completesWorkout) {
+      // Keep the completed workout open for review. The user can move back
+      // through it, add an intentional extra set, or use the header Finish.
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      finishSession(wheelRecord());
-      onComplete();
+      completeSet(record, source);
+      slideFrac.setValue(0);
     } else {
-      pendingSetRef.current = wheelRecord();
+      pendingSetRef.current = { record, source };
       setResting(true);
     }
   };
 
+  const handleAddSet = () => {
+    if (!current || navigationBlocked) return;
+    tick();
+    addSetToExercise(view.currentIndex);
+    slideFrac.setValue(0);
+  };
+
   const finishNow = () => {
+    if (sliderSettlingRef.current || pendingSetRef.current || resting) return;
     finishSession();
     if (anyWork) {
       onComplete();
@@ -612,19 +850,37 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
+    <View style={[styles.container, compactLayout && styles.containerCompact]}>
+      <View style={[styles.header, compactLayout && styles.headerCompact]}>
         <Pressable
-          onPress={() => setConfirmDiscard(true)}
+          onPress={() => {
+            if (!sliderSettlingRef.current) setConfirmDiscard(true);
+          }}
           hitSlop={8}
+          disabled={sliderSettling}
+          accessibilityState={{ disabled: sliderSettling }}
+          style={[styles.headerSide, styles.headerSideLeft]}
         >
           <Glass style={styles.headerBtn} interactive>
             <Text style={styles.headerAction}>Discard</Text>
           </Glass>
         </Pressable>
-        <Text style={styles.headerTitle}>{view.name}</Text>
+        <Text
+          adjustsFontSizeToFit
+          minimumFontScale={0.72}
+          numberOfLines={1}
+          style={styles.headerTitle}
+        >
+          {view.name}
+        </Text>
         {anyWork ? (
-          <Pressable onPress={finishNow} hitSlop={8}>
+          <Pressable
+            onPress={finishNow}
+            hitSlop={8}
+            disabled={sliderSettling}
+            accessibilityState={{ disabled: sliderSettling }}
+            style={[styles.headerSide, styles.headerSideRight]}
+          >
             <Glass style={styles.headerBtn} interactive>
               <Text style={[styles.headerAction, { color: theme.accent }]}>Finish</Text>
             </Glass>
@@ -645,11 +901,24 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
       </View>
 
       {current ? (
-        <View style={styles.body}>
-          <View style={styles.titleBlock}>
+        <View style={[styles.body, compactLayout && styles.bodyCompact]}>
+          <View style={[styles.titleBlock, compactLayout && styles.titleBlockCompact]}>
             <View style={styles.titleRow}>
-              <Text style={styles.exerciseName}>{current.exercise.name}</Text>
-              <Pressable onPress={() => setPicker('edit')} hitSlop={10} style={styles.editBtn}>
+              <Text
+                style={[styles.exerciseName, compactLayout && styles.exerciseNameCompact]}
+                numberOfLines={2}
+              >
+                {current.exercise.name}
+              </Text>
+              <Pressable
+                onPress={() => {
+                  if (!sliderSettlingRef.current) setPicker('edit');
+                }}
+                disabled={navigationBlocked}
+                accessibilityState={{ disabled: navigationBlocked }}
+                hitSlop={10}
+                style={styles.editBtn}
+              >
                 {SymbolView ? (
                   <SymbolView name="pencil" size={17} tintColor={theme.textDim} />
                 ) : (
@@ -657,56 +926,122 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                 )}
               </Pressable>
             </View>
-            <Text style={styles.setCounter}>
-              Set {setNumber} of {current.targetSets}
-            </Text>
+            <ExerciseNavigator
+              exerciseNames={exerciseNames}
+              currentIndex={view.currentIndex}
+              primaryLabel={
+                currentComplete
+                  ? `${current.completedSets.length} ${
+                      current.completedSets.length === 1 ? 'set' : 'sets'
+                    } complete`
+                  : `Set ${setNumber} of ${current.targetSets}`
+              }
+              allowCompleteState={allExercisesComplete}
+              compact={compactLayout}
+              disabled={navigationBlocked}
+              onMove={moveExercise}
+            />
           </View>
 
-          <View style={styles.entryArea}>
-            <View style={styles.wheelsRow}>
-              <Wheel
-                key={`${wheelEpoch}-w`}
-                label="LBS"
-                values={WEIGHT_VALUES}
-                initial={initialRecord.weight}
-                markedValue={shadow ? snapTo(WEIGHT_VALUES, shadow.weight) : undefined}
-                onChange={setWeight}
-              />
-              <Wheel
-                key={`${wheelEpoch}-r`}
-                label="REPS"
-                values={REP_VALUES}
-                initial={initialRecord.reps}
-                markedValue={shadow ? snapTo(REP_VALUES, shadow.reps) : undefined}
-                onChange={setReps}
-              />
-              <Wheel
-                key={`${wheelEpoch}-i`}
-                label="RIR"
-                values={RIR_VALUES}
-                initial={initialRecord.rir ?? 0}
-                markedValue={shadow?.rir == null ? undefined : snapTo(RIR_VALUES, shadow.rir)}
-                format={(v) => (v === 0 ? 'Failure' : String(v))}
-                onChange={setRir}
-              />
+          {currentComplete ? (
+            <View style={styles.completedExerciseArea}>
+              <Glass
+                style={[
+                  styles.completedExerciseCard,
+                  compactLayout && styles.completedExerciseCardCompact,
+                ]}
+              >
+                <View style={styles.completedExerciseHeader}>
+                  <View style={styles.completedCheck}>
+                    <Text style={styles.completedCheckText}>✓</Text>
+                  </View>
+                  <View>
+                    <Text style={styles.completedExerciseTitle}>Exercise complete</Text>
+                    <Text style={styles.completedExerciseSubtitle}>
+                      {current.completedSets.length}{' '}
+                      {current.completedSets.length === 1 ? 'set logged' : 'sets logged'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.completedSetsList}>
+                  {current.completedSets
+                    .slice(compactLayout ? -3 : -4)
+                    .map((record, visibleIndex) => {
+                      const visibleSetCount = compactLayout ? 3 : 4;
+                      const firstVisibleIndex = Math.max(
+                        0,
+                        current.completedSets.length - visibleSetCount
+                      );
+                      const setIndex = firstVisibleIndex + visibleIndex;
+                      return (
+                        <View key={setIndex} style={styles.completedSetRow}>
+                          <Text style={styles.completedSetNumber}>SET {setIndex + 1}</Text>
+                          <Text style={styles.completedSetValue}>
+                            {record.weight.toLocaleString()} lb × {record.reps}
+                          </Text>
+                          <Text style={styles.completedSetRir}>
+                            {record.rir === 0
+                              ? 'Failure'
+                              : record.rir == null
+                                ? 'RIR —'
+                                : `RIR ${record.rir}`}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                </View>
+              </Glass>
             </View>
-            {account.status === 'authenticated' && remoteHistory?.error ? (
-              <View style={styles.shadowErrorRow}>
-                <Text style={styles.shadowErrorText}>Couldn’t load previous-set shadows.</Text>
-                <Pressable onPress={() => account.refreshWorkouts()} hitSlop={8}>
-                  <Text style={styles.shadowRetry}>Retry</Text>
-                </Pressable>
+          ) : (
+            <View style={styles.entryArea}>
+              <View style={styles.wheelsRow}>
+                <Wheel
+                  key={`${wheelEpoch}-w`}
+                  label="LBS"
+                  values={WEIGHT_VALUES}
+                  initial={effectiveInitialRecord.weight}
+                  markedValue={shadow ? snapTo(WEIGHT_VALUES, shadow.weight) : undefined}
+                  onChange={changeWeight}
+                  compact={compactLayout}
+                />
+                <Wheel
+                  key={`${wheelEpoch}-r`}
+                  label="REPS"
+                  values={REP_VALUES}
+                  initial={effectiveInitialRecord.reps}
+                  markedValue={shadow ? snapTo(REP_VALUES, shadow.reps) : undefined}
+                  onChange={changeReps}
+                  compact={compactLayout}
+                />
+                <Wheel
+                  key={`${wheelEpoch}-i`}
+                  label="RIR"
+                  values={RIR_VALUES}
+                  initial={effectiveInitialRecord.rir ?? 0}
+                  markedValue={shadow?.rir == null ? undefined : snapTo(RIR_VALUES, shadow.rir)}
+                  format={(v) => (v === 0 ? 'Failure' : String(v))}
+                  onChange={changeRir}
+                  compact={compactLayout}
+                />
               </View>
-            ) : (
-              <Text style={styles.shadowHint}>
-                {account.status === 'authenticated' && remoteHistory?.loading
-                  ? 'Loading last-session values…'
-                  : shadow
-                    ? '★ marks your matching set from last time'
-                    : '0 lb = bodyweight · Failure = no reps left'}
-              </Text>
-            )}
-          </View>
+              {account.status === 'authenticated' && remoteHistory?.error ? (
+                <View style={styles.shadowErrorRow}>
+                  <Text style={styles.shadowErrorText}>Couldn’t load previous-set shadows.</Text>
+                  <Pressable onPress={() => account.refreshWorkouts()} hitSlop={8}>
+                    <Text style={styles.shadowRetry}>Retry</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Text style={styles.shadowHint}>
+                  {account.status === 'authenticated' && remoteHistory?.loading
+                    ? 'Loading last-session values…'
+                    : shadow
+                      ? '★ marks your matching set from last time'
+                      : '0 lb = bodyweight · Failure = no reps left'}
+                </Text>
+              )}
+            </View>
+          )}
 
           {/* The collapsed box settles back as the editor card takes its
               place. Keep this transform-only because it contains Glass. */}
@@ -731,13 +1066,22 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
               ],
             }}
           >
-            <Pressable accessibilityLabel="Notes" onPress={openNotes} disabled={notesOpen}>
+            <Pressable
+              accessibilityLabel="Notes"
+              onPress={openNotes}
+              disabled={notesOpen || navigationBlocked}
+              accessibilityState={{ disabled: notesOpen || navigationBlocked }}
+            >
               {/* Keep the resting notes surface quiet. Native LiquidGlassView
                   draws its own bright perimeter even without a React Native
                   border, so use a borderless blur until the editor opens. */}
-              <BlurView intensity={18} tint="dark" style={styles.notesGlass}>
+              <BlurView
+                intensity={18}
+                tint="dark"
+                style={[styles.notesGlass, compactLayout && styles.notesGlassCompact]}
+              >
                 <Text
-                  numberOfLines={3}
+                  numberOfLines={compactLayout ? 2 : 3}
                   style={current.notes.trim() ? styles.notesPreview : styles.notesPlaceholder}
                 >
                   {current.notes.trim() || 'Notes'}
@@ -746,22 +1090,54 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
             </Pressable>
           </Animated.View>
 
-          <View style={styles.sliderZone}>
-            <SlideToComplete
-              frac={slideFrac}
-              resetKey={`${view.currentIndex}-${setNumber}`}
-              onComplete={handleSetComplete}
-              revealLabel={
-                weight > 0 ? `+${(weight * reps).toLocaleString()} lb` : undefined
-              }
-            />
-          </View>
+          {currentComplete ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Add another set to ${current.exercise.name}`}
+              onPress={handleAddSet}
+              disabled={navigationBlocked}
+            >
+              <Glass
+                style={[
+                  styles.addSetButton,
+                  compactLayout && styles.addSetButtonCompact,
+                  navigationBlocked && styles.addSetButtonDisabled,
+                ]}
+                interactive={!navigationBlocked}
+              >
+                <Text style={styles.addSetButtonText}>+ Add another set</Text>
+              </Glass>
+            </Pressable>
+          ) : (
+            <View style={[styles.sliderZone, compactLayout && styles.sliderZoneCompact]}>
+              <SlideToComplete
+                frac={slideFrac}
+                resetKey={`${view.currentIndex}-${setNumber}`}
+                onComplete={handleSetComplete}
+                onSettlingChange={updateSliderSettling}
+                revealLabel={
+                  weight > 0 ? `+${(weight * reps).toLocaleString()} lb` : undefined
+                }
+              />
+            </View>
+          )}
         </View>
       ) : (
         <View style={styles.emptyBody}>
           <Text style={styles.setCounter}>
             {view.planned ? 'All exercises done' : 'What are you doing next?'}
           </Text>
+          {view.exercises.length > 0 && (
+            <ExerciseNavigator
+              exerciseNames={exerciseNames}
+              currentIndex={view.currentIndex}
+              primaryLabel="Ready to finish"
+              allowCompleteState={allExercisesComplete}
+              compact={compactLayout}
+              disabled={navigationBlocked}
+              onMove={moveExercise}
+            />
+          )}
           <Pressable onPress={() => setPicker('add')}>
             <Glass style={styles.addButton} interactive>
               <Text style={styles.addButtonText}>+ Add exercise</Text>
@@ -942,6 +1318,9 @@ const styles = StyleSheet.create({
     backgroundColor: theme.bg,
     paddingTop: 64,
   },
+  containerCompact: {
+    paddingTop: 46,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -949,10 +1328,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     marginBottom: 14,
   },
+  headerCompact: {
+    paddingHorizontal: 16,
+    marginBottom: 8,
+  },
   headerTitle: {
+    flex: 1,
+    minWidth: 0,
     color: theme.text,
     fontSize: 16,
     fontWeight: '600',
+    textAlign: 'center',
+    marginHorizontal: 6,
   },
   headerAction: {
     color: theme.textDim,
@@ -964,15 +1351,30 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     paddingHorizontal: 16,
   },
+  headerSide: {
+    width: 84,
+    flexDirection: 'row',
+  },
+  headerSideLeft: {
+    justifyContent: 'flex-start',
+  },
+  headerSideRight: {
+    justifyContent: 'flex-end',
+  },
   headerSpacer: {
     width: 84,
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    paddingHorizontal: 38,
     gap: 10,
   },
   editBtn: {
+    position: 'absolute',
+    right: 10,
     alignItems: 'center',
     justifyContent: 'center',
     // optical: the big title's cap height sits slightly high of true center
@@ -1005,15 +1407,81 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
     justifyContent: 'space-between',
   },
+  bodyCompact: {
+    paddingBottom: 18,
+  },
   titleBlock: {
     alignItems: 'center',
-    marginTop: 36,
+    marginTop: 26,
+  },
+  titleBlockCompact: {
+    marginTop: 10,
   },
   exerciseName: {
     color: theme.text,
     fontSize: 34,
+    lineHeight: 39,
     fontWeight: '700',
     textAlign: 'center',
+    flexShrink: 1,
+  },
+  exerciseNameCompact: {
+    fontSize: 28,
+    lineHeight: 32,
+  },
+  exerciseNavigator: {
+    width: '100%',
+    maxWidth: 330,
+    minHeight: 48,
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  exerciseNavigatorCompact: {
+    minHeight: 44,
+    marginTop: 4,
+  },
+  exerciseNavPressable: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exerciseNavGlass: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exerciseNavGlyph: {
+    color: theme.text,
+    fontSize: 26,
+    lineHeight: 28,
+    fontWeight: '300',
+  },
+  exerciseNavGlyphDisabled: {
+    color: 'rgba(255,255,255,0.2)',
+  },
+  exerciseNavCopy: {
+    flex: 1,
+    minWidth: 0,
+    alignItems: 'center',
+  },
+  exerciseNavPrimary: {
+    color: theme.text,
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '600',
+  },
+  exerciseNavSecondary: {
+    color: theme.textDim,
+    fontSize: 10.5,
+    lineHeight: 14,
+    fontWeight: '500',
+    marginTop: 1,
   },
   setCounter: {
     color: theme.textDim,
@@ -1032,6 +1500,9 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     paddingVertical: 14,
     alignItems: 'center',
+  },
+  wheelPanelCompact: {
+    paddingVertical: 8,
   },
   wheelLabel: {
     color: theme.textDim,
@@ -1097,6 +1568,77 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
   },
+  completedExerciseArea: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingVertical: 10,
+  },
+  completedExerciseCard: {
+    borderRadius: 24,
+    padding: 17,
+  },
+  completedExerciseCardCompact: {
+    padding: 13,
+  },
+  completedExerciseHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+  },
+  completedCheck: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(65,196,110,0.13)',
+  },
+  completedCheckText: {
+    color: theme.accent,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  completedExerciseTitle: {
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  completedExerciseSubtitle: {
+    color: theme.textDim,
+    fontSize: 11,
+    marginTop: 2,
+  },
+  completedSetsList: {
+    gap: 6,
+    marginTop: 15,
+  },
+  completedSetRow: {
+    minHeight: 36,
+    borderRadius: 12,
+    paddingHorizontal: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.045)',
+  },
+  completedSetNumber: {
+    width: 48,
+    color: theme.textDim,
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+  },
+  completedSetValue: {
+    flex: 1,
+    color: theme.text,
+    fontSize: 13,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
+  completedSetRir: {
+    color: theme.textDim,
+    fontSize: 10,
+    fontWeight: '600',
+  },
   notesGlass: {
     borderRadius: 24,
     overflow: 'hidden',
@@ -1104,6 +1646,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     backgroundColor: 'rgba(255,255,255,0.025)',
+  },
+  notesGlassCompact: {
+    minHeight: 62,
+    paddingVertical: 10,
   },
   notesPreview: {
     color: theme.text,
@@ -1163,8 +1709,29 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 14,
   },
+  addSetButton: {
+    minHeight: 58,
+    borderRadius: 29,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  addSetButtonCompact: {
+    minHeight: 50,
+  },
+  addSetButtonDisabled: {
+    opacity: 0.48,
+  },
+  addSetButtonText: {
+    color: theme.text,
+    fontSize: 15,
+    fontWeight: '600',
+  },
   sliderZone: {
     marginTop: 16,
+  },
+  sliderZoneCompact: {
+    marginTop: 6,
   },
   sliderTrack: {
     height: TRACK_H,
@@ -1222,6 +1789,8 @@ const styles = StyleSheet.create({
   },
   emptyBody: {
     flex: 1,
+    width: '100%',
+    paddingHorizontal: 24,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 18,

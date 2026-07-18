@@ -23,6 +23,10 @@ import {
   rollingNet,
 } from '../analysis/stimulus';
 import type { AccountWorkoutPlan } from '../workout/splitSessions';
+import {
+  moveSessionExerciseIndex,
+  nextIncompleteExerciseIndex,
+} from '../workout/sessionNavigation';
 
 // Rest duration between sets. Fixed at 3 minutes for now — will be tuned /
 // made adaptive later.
@@ -53,6 +57,11 @@ export interface ActiveSession {
   edited: boolean;
   splitId?: string;
   sessionId?: string;
+}
+
+export interface SetCompletionSource {
+  exerciseIndex: number;
+  exerciseId: string;
 }
 
 export type WorkoutSyncStatus = 'pending' | 'failed' | 'synced';
@@ -99,9 +108,13 @@ interface AppState {
   addExercise: (exercise: Exercise, sets?: number) => void;
   /** Swap the exercise at an index mid-session (marks the workout edited) */
   editExercise: (index: number, exercise: Exercise) => void;
+  /** Move the live session's viewport without logging or editing workout data. */
+  navigateSessionExercise: (direction: -1 | 1) => void;
+  /** Intentionally extend a completed exercise by one set. */
+  addSetToExercise: (index: number) => void;
   updateExerciseNotes: (exerciseId: string, notes: string) => void;
-  /** Records one set and advances. */
-  completeSet: (record: SetRecord) => void;
+  /** Records one set against its originating exercise and advances safely. */
+  completeSet: (record: SetRecord, source?: SetCompletionSource) => void;
   /** Finish the session; pass the final set's record to include it atomically. */
   finishSession: (finalRecord?: SetRecord) => void;
   discardSession: () => void;
@@ -511,6 +524,35 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       });
     },
 
+    navigateSessionExercise: (direction) => {
+      setSession((prev) => {
+        if (!prev) return prev;
+        const currentIndex = moveSessionExerciseIndex(
+          prev.currentIndex,
+          prev.exercises.length,
+          direction
+        );
+        return currentIndex === prev.currentIndex ? prev : { ...prev, currentIndex };
+      });
+    },
+
+    addSetToExercise: (index) => {
+      setSession((prev) => {
+        if (!prev) return prev;
+        const target = prev.exercises[index];
+        if (!target) return prev;
+        const targetSets = Math.max(target.targetSets, target.completedSets.length) + 1;
+        return {
+          ...prev,
+          edited: prev.edited || prev.planned,
+          currentIndex: index,
+          exercises: prev.exercises.map((exercise, exerciseIndex) =>
+            exerciseIndex === index ? { ...exercise, targetSets } : exercise
+          ),
+        };
+      });
+    },
+
     updateExerciseNotes: (exerciseId, notes) => {
       const nextNotes = notes.slice(0, 500);
       setExerciseNotes((previous) => ({ ...previous, [exerciseId]: nextNotes }));
@@ -527,24 +569,39 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       });
     },
 
-    completeSet: (record) => {
+    completeSet: (record, source) => {
       if (!session) return;
-      const currentBefore = session.exercises[session.currentIndex];
-      if (currentBefore) {
-        setLastUsed((prev) => ({ ...prev, [currentBefore.exercise.id]: record }));
-      }
+      const exerciseIndex = source?.exerciseIndex ?? session.currentIndex;
+      const currentBefore = session.exercises[exerciseIndex];
+      if (
+        !currentBefore ||
+        (source && currentBefore.exercise.id !== source.exerciseId) ||
+        currentBefore.completedSets.length >= currentBefore.targetSets
+      ) return;
+      setLastUsed((prev) => ({ ...prev, [currentBefore.exercise.id]: record }));
+
       // Functional update: safe even if another update lands in the same batch.
       setSession((prev) => {
         if (!prev) return prev;
+        const target = prev.exercises[exerciseIndex];
+        if (
+          !target ||
+          (source && target.exercise.id !== source.exerciseId) ||
+          target.completedSets.length >= target.targetSets
+        ) return prev;
         const exercises = prev.exercises.map((se, i) =>
-          i === prev.currentIndex ? { ...se, completedSets: [...se.completedSets, record] } : se
+          i === exerciseIndex ? { ...se, completedSets: [...se.completedSets, record] } : se
         );
-        const current = exercises[prev.currentIndex];
+        const current = exercises[exerciseIndex];
         const exerciseDone = current && current.completedSets.length >= current.targetSets;
+        const currentIndex =
+          prev.currentIndex === exerciseIndex && exerciseDone
+            ? nextIncompleteExerciseIndex(exercises, exerciseIndex)
+            : prev.currentIndex;
         return {
           ...prev,
           exercises,
-          currentIndex: exerciseDone ? prev.currentIndex + 1 : prev.currentIndex,
+          currentIndex,
         };
       });
     },
