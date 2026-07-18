@@ -101,11 +101,13 @@ export default function WorkoutLaunchSplash({
 }: WorkoutLaunchSplashProps) {
   const { width } = useWindowDimensions();
   const fill = useRef(new Animated.Value(0)).current;
-  const reviewTone = useRef(new Animated.Value(0)).current;
+  const reviewCover = useRef(new Animated.Value(1)).current;
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
-  const toneAnimationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const reviewAnimationRef = useRef<Animated.CompositeAnimation | null>(null);
   const firstFrameRef = useRef<number | null>(null);
   const secondFrameRef = useRef<number | null>(null);
+  const reviewFirstFrameRef = useRef<number | null>(null);
+  const reviewSecondFrameRef = useRef<number | null>(null);
   const coveredRef = useRef(false);
   const drainStartedRef = useRef(false);
   const finishedRef = useRef(false);
@@ -114,6 +116,7 @@ export default function WorkoutLaunchSplash({
   const onFinishedRef = useRef(onFinished);
   const [covered, setCovered] = useState(false);
   const [reviewReady, setReviewReady] = useState(false);
+  const [reviewRevealed, setReviewRevealed] = useState(false);
   const [waveMotionEnabled, setWaveMotionEnabled] = useState(false);
   onCoveredRef.current = onCovered;
   onFinishedRef.current = onFinished;
@@ -126,7 +129,7 @@ export default function WorkoutLaunchSplash({
       reduceMotionRef.current = reduceMotion;
       setWaveMotionEnabled(!reduceMotion);
       fill.setValue(0);
-      reviewTone.setValue(0);
+      reviewCover.setValue(1);
 
       const rise = Animated.timing(fill, {
         toValue: 1,
@@ -152,40 +155,62 @@ export default function WorkoutLaunchSplash({
       alive = false;
       animationRef.current?.stop();
       animationRef.current = null;
-      toneAnimationRef.current?.stop();
-      toneAnimationRef.current = null;
+      reviewAnimationRef.current?.stop();
+      reviewAnimationRef.current = null;
       if (firstFrameRef.current !== null) cancelAnimationFrame(firstFrameRef.current);
       if (secondFrameRef.current !== null) cancelAnimationFrame(secondFrameRef.current);
+      if (reviewFirstFrameRef.current !== null) {
+        cancelAnimationFrame(reviewFirstFrameRef.current);
+      }
+      if (reviewSecondFrameRef.current !== null) {
+        cancelAnimationFrame(reviewSecondFrameRef.current);
+      }
     };
-  }, [fill, reviewTone]);
+  }, [fill, reviewCover]);
 
-  // Once the green pool has fully covered Home, shade that same opaque surface
-  // to the app background before mounting the review. Only the plain pool
-  // color animates; native Liquid Glass remains at full opacity throughout.
+  // Mount the review at full opacity behind an opaque green sibling, then lift
+  // that sibling away. The result is a fade onto the same green pool without
+  // ever opacity-animating native Liquid Glass or changing the background.
   useEffect(() => {
     if (!covered || phase !== 'reviewing') return;
-    setReviewReady(false);
-    toneAnimationRef.current?.stop();
-    const shade = Animated.timing(reviewTone, {
-      toValue: 1,
-      duration: reduceMotionRef.current ? 80 : 230,
-      easing: reduceMotionRef.current ? Easing.linear : Easing.inOut(Easing.cubic),
-      useNativeDriver: false,
-    });
-    toneAnimationRef.current = shade;
-    shade.start(({ finished }) => {
-      if (toneAnimationRef.current === shade) toneAnimationRef.current = null;
-      if (finished) setReviewReady(true);
+    setReviewReady(true);
+    setReviewRevealed(false);
+    reviewCover.setValue(1);
+    reviewAnimationRef.current?.stop();
+    reviewFirstFrameRef.current = requestAnimationFrame(() => {
+      reviewFirstFrameRef.current = null;
+      reviewSecondFrameRef.current = requestAnimationFrame(() => {
+        reviewSecondFrameRef.current = null;
+        const reveal = Animated.timing(reviewCover, {
+          toValue: 0,
+          duration: reduceMotionRef.current ? 80 : 230,
+          easing: reduceMotionRef.current ? Easing.linear : Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
+        });
+        reviewAnimationRef.current = reveal;
+        reveal.start(({ finished }) => {
+          if (reviewAnimationRef.current === reveal) reviewAnimationRef.current = null;
+          if (finished) setReviewRevealed(true);
+        });
+      });
     });
     return () => {
-      shade.stop();
-      if (toneAnimationRef.current === shade) toneAnimationRef.current = null;
+      if (reviewFirstFrameRef.current !== null) {
+        cancelAnimationFrame(reviewFirstFrameRef.current);
+        reviewFirstFrameRef.current = null;
+      }
+      if (reviewSecondFrameRef.current !== null) {
+        cancelAnimationFrame(reviewSecondFrameRef.current);
+        reviewSecondFrameRef.current = null;
+      }
+      reviewAnimationRef.current?.stop();
+      reviewAnimationRef.current = null;
     };
-  }, [covered, phase, reviewTone]);
+  }, [covered, phase, reviewCover]);
 
-  // Confirmation mounts Session behind the fully opaque pool. First return the
-  // review surface to green, then unmount its glass controls, wait two paints,
-  // and drain. Cancel follows the same path back to Home without a session.
+  // Confirmation mounts Session behind the fully opaque pool. Cover the review
+  // with green, unmount its glass controls invisibly, wait two paints, and drain
+  // that same green water. Cancel follows the same path back to Home.
   useEffect(() => {
     if (
       !covered ||
@@ -194,7 +219,8 @@ export default function WorkoutLaunchSplash({
     ) return;
 
     drainStartedRef.current = true;
-    toneAnimationRef.current?.stop();
+    reviewAnimationRef.current?.stop();
+    setReviewRevealed(false);
     const beginDrain = () => {
       setReviewReady(false);
       firstFrameRef.current = requestAnimationFrame(() => {
@@ -220,28 +246,28 @@ export default function WorkoutLaunchSplash({
     };
 
     // Freestyle and empty workouts skip review entirely, so their green pool
-    // can drain immediately without an artificial color-transition pause.
+    // drains immediately without an artificial content-fade pause.
     if (!reviewReady) {
-      reviewTone.setValue(0);
+      reviewCover.setValue(1);
       beginDrain();
       return;
     }
 
-    const restoreGreen = Animated.timing(reviewTone, {
-      toValue: 0,
+    const conceal = Animated.timing(reviewCover, {
+      toValue: 1,
       duration: reduceMotionRef.current ? 80 : 170,
       easing: reduceMotionRef.current ? Easing.linear : Easing.inOut(Easing.quad),
-      useNativeDriver: false,
+      useNativeDriver: true,
     });
-    toneAnimationRef.current = restoreGreen;
-    restoreGreen.start(({ finished }) => {
-      if (toneAnimationRef.current === restoreGreen) toneAnimationRef.current = null;
+    reviewAnimationRef.current = conceal;
+    conceal.start(({ finished }) => {
+      if (reviewAnimationRef.current === conceal) reviewAnimationRef.current = null;
       if (!finished) return;
       beginDrain();
     });
-  }, [covered, fill, phase, reviewReady, reviewTone]);
+  }, [covered, fill, phase, reviewCover, reviewReady]);
 
-  const reviewInteractive = phase === 'reviewing' && reviewReady;
+  const reviewInteractive = phase === 'reviewing' && reviewReady && reviewRevealed;
   const reviewVisible = covered && reviewReady;
   const progressLabel =
     phase === 'canceling'
@@ -276,10 +302,6 @@ export default function WorkoutLaunchSplash({
               inputRange: [0, 1],
               outputRange: ['0%', '100%'],
             }),
-            backgroundColor: reviewTone.interpolate({
-              inputRange: [0, 1],
-              outputRange: [POOL_COLOR, theme.bg],
-            }),
           },
         ]}
       >
@@ -310,6 +332,12 @@ export default function WorkoutLaunchSplash({
           {children}
         </View>
       )}
+      {reviewVisible && (
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.reviewFadeCover, { opacity: reviewCover }]}
+        />
+      )}
     </View>
   );
 }
@@ -324,10 +352,16 @@ const styles = StyleSheet.create({
   },
   pool: {
     width: '100%',
+    backgroundColor: POOL_COLOR,
   },
   reviewLayer: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 2,
+  },
+  reviewFadeCover: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 3,
+    backgroundColor: POOL_COLOR,
   },
   waveBand: {
     position: 'absolute',

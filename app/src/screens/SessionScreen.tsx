@@ -242,6 +242,7 @@ function SlideToComplete({
   resetKey,
   revealLabel,
   actionLabel = 'slide to complete',
+  compactActionLabel = false,
 }: {
   frac: Animated.Value;
   onComplete: () => void;
@@ -250,6 +251,7 @@ function SlideToComplete({
   /** Subtle text (e.g. “+450 lb”) cross-faded in as the thumb travels */
   revealLabel?: string;
   actionLabel?: string;
+  compactActionLabel?: boolean;
 }) {
   const [trackW, setTrackW] = useState(0);
   const maxX = Math.max(1, trackW - THUMB - TRACK_PAD * 2);
@@ -357,6 +359,7 @@ function SlideToComplete({
         <Animated.Text
           style={[
             styles.sliderLabel,
+            compactActionLabel && styles.sliderLabelWarmup,
             {
               opacity: frac.interpolate({
                 inputRange: [0, 0.55],
@@ -662,7 +665,15 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     return null;
   }, [account.status, current, history, remoteHistory?.data, view, warmupActive]);
 
+  const currentSessionLast = current?.completedSets[current.completedSets.length - 1];
   const shadow = warmupActive ? undefined : previous?.records[setNumber - 1];
+  // Once this workout has a logged set, its newest values become the dial
+  // markers immediately. Prior-session history is only the opening fallback.
+  const markedRecord = warmupActive ? undefined : currentSessionLast ?? shadow;
+  const remoteShadowError =
+    account.status === 'authenticated' && Boolean(remoteHistory?.error) && !currentSessionLast;
+  const remoteShadowLoading =
+    account.status === 'authenticated' && Boolean(remoteHistory?.loading) && !currentSessionLast;
 
   // The wheels remount when the exercise changes or when previous-set data
   // first arrives (async account history) — NOT between sets, so the user's
@@ -672,7 +683,6 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   }-${warmupActive ? 'warmup' : 'working'}-${currentComplete ? 'complete' : 'entry'}`;
   const initialRecord: SetRecord = (() => {
     const fallback = (currentId ? lastUsed[currentId] : undefined) ?? DEFAULT_SET;
-    const currentSessionLast = current?.completedSets[current.completedSets.length - 1];
     const base =
       previous?.records[setNumber - 1] ??
       currentSessionLast ??
@@ -981,7 +991,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
       {current ? (
         <View style={[styles.body, compactLayout && styles.bodyCompact]}>
           <View style={[styles.titleBlock, compactLayout && styles.titleBlockCompact]}>
-            <View style={styles.titleRow}>
+            <View style={[styles.titleRow, compactLayout && styles.titleRowCompact]}>
               <Text
                 style={[styles.exerciseName, compactLayout && styles.exerciseNameCompact]}
                 numberOfLines={2}
@@ -1031,56 +1041,14 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
 
           {warmupActive ? (
             // Warmups are intentionally data-free: no wheels, shadows,
-            // volume, RIR, or decorative card competes with the exercise name.
-            <View style={styles.warmupSpace} />
-          ) : currentComplete ? (
-            <View style={styles.completedExerciseArea}>
-              <Glass
-                style={[
-                  styles.completedExerciseCard,
-                  compactLayout && styles.completedExerciseCardCompact,
-                ]}
-              >
-                <View style={styles.completedExerciseHeader}>
-                  <View style={styles.completedCheck}>
-                    <Text style={styles.completedCheckText}>✓</Text>
-                  </View>
-                  <View>
-                    <Text style={styles.completedExerciseTitle}>Exercise complete</Text>
-                    <Text style={styles.completedExerciseSubtitle}>
-                      {current.completedSets.length}{' '}
-                      {current.completedSets.length === 1 ? 'set logged' : 'sets logged'}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.completedSetsList}>
-                  {current.completedSets
-                    .slice(compactLayout ? -3 : -4)
-                    .map((record, visibleIndex) => {
-                      const visibleSetCount = compactLayout ? 3 : 4;
-                      const firstVisibleIndex = Math.max(
-                        0,
-                        current.completedSets.length - visibleSetCount
-                      );
-                      const setIndex = firstVisibleIndex + visibleIndex;
-                      return (
-                        <View key={setIndex} style={styles.completedSetRow}>
-                          <Text style={styles.completedSetNumber}>SET {setIndex + 1}</Text>
-                          <Text style={styles.completedSetValue}>
-                            {record.weight.toLocaleString()} lb × {record.reps}
-                          </Text>
-                          <Text style={styles.completedSetRir}>
-                            {record.rir === 0
-                              ? 'Failure'
-                              : record.rir == null
-                                ? 'RIR —'
-                                : `RIR ${record.rir}`}
-                          </Text>
-                        </View>
-                      );
-                    })}
-                </View>
-              </Glass>
+            // volume, RIR, or notes compete with the exercise name. A quiet
+            // neutral target gives the otherwise empty middle some balance.
+            <View style={styles.warmupSpace} pointerEvents="none" accessible={false}>
+              <View style={styles.warmupMark}>
+                <View style={styles.warmupRingOuter} />
+                <View style={styles.warmupRingInner} />
+                <View style={styles.warmupDot} />
+              </View>
             </View>
           ) : (
             <View style={styles.entryArea}>
@@ -1090,7 +1058,9 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   label="LBS"
                   values={WEIGHT_VALUES}
                   initial={effectiveInitialRecord.weight}
-                  markedValue={shadow ? snapTo(WEIGHT_VALUES, shadow.weight) : undefined}
+                  markedValue={
+                    markedRecord ? snapTo(WEIGHT_VALUES, markedRecord.weight) : undefined
+                  }
                   onChange={changeWeight}
                   compact={compactLayout}
                 />
@@ -1099,7 +1069,9 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   label="REPS"
                   values={REP_VALUES}
                   initial={effectiveInitialRecord.reps}
-                  markedValue={shadow ? snapTo(REP_VALUES, shadow.reps) : undefined}
+                  markedValue={
+                    markedRecord ? snapTo(REP_VALUES, markedRecord.reps) : undefined
+                  }
                   onChange={changeReps}
                   compact={compactLayout}
                 />
@@ -1108,13 +1080,17 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   label="RIR"
                   values={RIR_VALUES}
                   initial={effectiveInitialRecord.rir ?? 0}
-                  markedValue={shadow?.rir == null ? undefined : snapTo(RIR_VALUES, shadow.rir)}
+                  markedValue={
+                    markedRecord?.rir == null
+                      ? undefined
+                      : snapTo(RIR_VALUES, markedRecord.rir)
+                  }
                   format={(v) => (v === 0 ? 'Failure' : String(v))}
                   onChange={changeRir}
                   compact={compactLayout}
                 />
               </View>
-              {account.status === 'authenticated' && remoteHistory?.error ? (
+              {remoteShadowError ? (
                 <View style={styles.shadowErrorRow}>
                   <Text style={styles.shadowErrorText}>Couldn’t load previous-set shadows.</Text>
                   <Pressable onPress={() => account.refreshWorkouts()} hitSlop={8}>
@@ -1123,10 +1099,12 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                 </View>
               ) : (
                 <Text style={styles.shadowHint}>
-                  {account.status === 'authenticated' && remoteHistory?.loading
+                  {remoteShadowLoading
                     ? 'Loading last-session values…'
-                    : shadow
-                      ? '★ marks your matching set from last time'
+                    : currentSessionLast
+                      ? '★ marks your most recently logged set'
+                      : shadow
+                        ? '★ marks your matching set from last time'
                       : '0 lb = bodyweight · Failure = no reps left'}
                 </Text>
               )}
@@ -1208,6 +1186,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                 onComplete={handleSetComplete}
                 onSettlingChange={updateSliderSettling}
                 actionLabel={warmupActive ? 'slide to complete warm-up' : undefined}
+                compactActionLabel={warmupActive}
                 revealLabel={
                   !warmupActive && weight > 0
                     ? `+${(weight * reps).toLocaleString()} lb`
@@ -1510,12 +1489,16 @@ const styles = StyleSheet.create({
     width: 84,
   },
   titleRow: {
+    height: 78,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
     paddingHorizontal: 38,
     gap: 10,
+  },
+  titleRowCompact: {
+    height: 64,
   },
   editBtn: {
     position: 'absolute',
@@ -1648,6 +1631,36 @@ const styles = StyleSheet.create({
   },
   warmupSpace: {
     flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  warmupMark: {
+    width: 84,
+    height: 84,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  warmupRingOuter: {
+    position: 'absolute',
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(241,236,228,0.13)',
+  },
+  warmupRingInner: {
+    position: 'absolute',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(241,236,228,0.19)',
+  },
+  warmupDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(241,236,228,0.32)',
   },
   wheelsRow: {
     flexDirection: 'row',
@@ -1725,77 +1738,6 @@ const styles = StyleSheet.create({
     color: theme.accent,
     fontSize: 11,
     fontWeight: '700',
-  },
-  completedExerciseArea: {
-    flex: 1,
-    justifyContent: 'center',
-    paddingVertical: 10,
-  },
-  completedExerciseCard: {
-    borderRadius: 24,
-    padding: 17,
-  },
-  completedExerciseCardCompact: {
-    padding: 13,
-  },
-  completedExerciseHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-  },
-  completedCheck: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(65,196,110,0.13)',
-  },
-  completedCheckText: {
-    color: theme.accent,
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  completedExerciseTitle: {
-    color: theme.text,
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  completedExerciseSubtitle: {
-    color: theme.textDim,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  completedSetsList: {
-    gap: 6,
-    marginTop: 15,
-  },
-  completedSetRow: {
-    minHeight: 36,
-    borderRadius: 12,
-    paddingHorizontal: 11,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.045)',
-  },
-  completedSetNumber: {
-    width: 48,
-    color: theme.textDim,
-    fontSize: 9,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-  },
-  completedSetValue: {
-    flex: 1,
-    color: theme.text,
-    fontSize: 13,
-    fontWeight: '600',
-    fontVariant: ['tabular-nums'],
-  },
-  completedSetRir: {
-    color: theme.textDim,
-    fontSize: 10,
-    fontWeight: '600',
   },
   notesResting: {
     minHeight: 84,
@@ -1909,6 +1851,11 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textAlign: 'center',
     letterSpacing: 0.4,
+  },
+  sliderLabelWarmup: {
+    fontSize: 13,
+    letterSpacing: 0.2,
+    transform: [{ translateX: 14 }],
   },
   sliderRevealWrap: {
     alignItems: 'center',

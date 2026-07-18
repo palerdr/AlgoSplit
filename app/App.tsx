@@ -185,6 +185,22 @@ function Root() {
     setWorkoutLaunch(reviewing);
   };
 
+  const setAllWorkoutDraftWarmups = (key: number, enabled: boolean) => {
+    const launch = workoutLaunchRef.current;
+    if (
+      !launch ||
+      launch.key !== key ||
+      launch.phase !== 'reviewing' ||
+      workoutOrderDraggingRef.current
+    ) return;
+    const reviewing = {
+      ...launch,
+      draft: launch.draft.map((item) => ({ ...item, warmupEnabled: enabled })),
+    };
+    workoutLaunchRef.current = reviewing;
+    setWorkoutLaunch(reviewing);
+  };
+
   const confirmWorkoutTransition = (key: number) => {
     const launch = workoutLaunchRef.current;
     if (
@@ -403,6 +419,9 @@ function Root() {
                 onReorder={(items) => reorderWorkoutDraft(workoutLaunch.key, items)}
                 onWarmupChange={(itemKey, enabled) =>
                   setWorkoutDraftWarmup(workoutLaunch.key, itemKey, enabled)
+                }
+                onAllWarmupsChange={(enabled) =>
+                  setAllWorkoutDraftWarmups(workoutLaunch.key, enabled)
                 }
                 onDragStateChange={(dragging) => {
                   workoutOrderDraggingRef.current = dragging;

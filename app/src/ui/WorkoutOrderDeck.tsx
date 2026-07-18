@@ -41,6 +41,8 @@ export interface WorkoutOrderDeckProps {
     movement: { from: number; to: number }
   ) => void;
   onWarmupChange?: (key: string, enabled: boolean) => void;
+  /** Preflight-only: atomically enable or disable every warm-up. */
+  onAllWarmupsChange?: (enabled: boolean) => void;
   onDragStateChange?: (dragging: boolean) => void;
   /** Live-only: jump directly to the selected exercise. */
   onJumpTo?: (key: string, index: number) => void;
@@ -86,6 +88,7 @@ export default function WorkoutOrderDeck({
   items,
   onReorder,
   onWarmupChange,
+  onAllWarmupsChange,
   onDragStateChange,
   onJumpTo,
   onAddExercise,
@@ -106,6 +109,13 @@ export default function WorkoutOrderDeck({
   const data = useMemo(() => [...items], [items]);
   const actionsDisabled = disabled || dragging;
   const primaryActionDisabled = actionsDisabled || primaryDisabled;
+  const warmupCount = items.reduce(
+    (count, item) => count + (item.warmupEnabled ? 1 : 0),
+    0
+  );
+  const allWarmupsEnabled = items.length > 0 && warmupCount === items.length;
+  const someWarmupsEnabled = warmupCount > 0 && !allWarmupsEnabled;
+  const allWarmupsDisabled = actionsDisabled || items.length === 0;
 
   useEffect(() => () => onDragStateChangeRef.current?.(false), []);
 
@@ -345,9 +355,44 @@ export default function WorkoutOrderDeck({
             </Glass>
           </Pressable>
         </View>
-        <Text style={styles.preflightTitle}>{title}</Text>
-        {subtitle ? <Text style={styles.preflightSubtitle}>{subtitle}</Text> : null}
-        <Text style={styles.sectionLabel}>Exercises</Text>
+        <View style={styles.preflightMetaRow}>
+          <Text numberOfLines={1} style={styles.preflightMeta}>
+            {subtitle ? `${title} — ${subtitle}` : title}
+          </Text>
+          {onAllWarmupsChange ? (
+            <Pressable
+              accessibilityRole="checkbox"
+              accessibilityLabel="Warm-up all exercises"
+              accessibilityState={{
+                checked: someWarmupsEnabled ? 'mixed' : allWarmupsEnabled,
+                disabled: allWarmupsDisabled,
+              }}
+              disabled={allWarmupsDisabled}
+              onPress={() => {
+                tick();
+                onAllWarmupsChange(!allWarmupsEnabled);
+              }}
+              hitSlop={8}
+              style={({ pressed }) => [
+                styles.warmupAllControl,
+                allWarmupsDisabled && styles.controlDisabled,
+                pressed && !allWarmupsDisabled && styles.warmupPressed,
+              ]}
+            >
+              <View
+                style={[
+                  styles.warmupBox,
+                  (allWarmupsEnabled || someWarmupsEnabled) && styles.warmupBoxChecked,
+                ]}
+              >
+                {(allWarmupsEnabled || someWarmupsEnabled) && (
+                  <Text style={styles.warmupCheck}>{someWarmupsEnabled ? '–' : '✓'}</Text>
+                )}
+              </View>
+              <Text style={styles.warmupAllLabel}>Warm-up all</Text>
+            </Pressable>
+          ) : null}
+        </View>
         {list}
       </View>
     );
@@ -415,27 +460,33 @@ const styles = StyleSheet.create({
   primaryTextDisabled: {
     opacity: 0.35,
   },
-  preflightTitle: {
-    color: theme.text,
-    fontSize: 28,
-    lineHeight: 33,
-    fontWeight: '700',
-    letterSpacing: -0.5,
+  preflightMetaRow: {
+    minHeight: 30,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
-  preflightSubtitle: {
+  preflightMeta: {
+    flex: 1,
+    minWidth: 0,
     color: theme.textDim,
-    fontSize: 12,
+    fontSize: 12.5,
+    lineHeight: 17,
     fontWeight: '600',
-    marginTop: 5,
-    marginBottom: 20,
   },
-  sectionLabel: {
-    color: theme.textDim,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 9,
+  warmupAllControl: {
+    minHeight: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  warmupAllLabel: {
+    color: theme.text,
+    fontSize: 10.5,
+    lineHeight: 14,
+    fontWeight: '600',
   },
   preflightList: {
     flex: 1,
