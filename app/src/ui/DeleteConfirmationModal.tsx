@@ -7,6 +7,7 @@ import {
 } from 'react-native';
 import { theme } from '../theme';
 import Glass from './Glass';
+import PopupContent from './PopupContent';
 import PopupLayer from './PopupLayer';
 
 interface DeleteConfirmationModalProps {
@@ -30,35 +31,48 @@ export default function DeleteConfirmationModal({
   onConfirm,
 }: DeleteConfirmationModalProps) {
   return (
-    <PopupLayer visible={visible} onDismiss={onCancel} dismissDisabled={busy}>
-      <View accessible accessibilityRole="alert">
+    <PopupLayer
+      visible={visible}
+      onDismiss={onCancel}
+      accessibilityLabel={`${title} confirmation`}
+      dismissDisabled={busy}
+    >
+      <View>
         <Glass style={styles.card}>
-          <Text style={styles.title}>{title}</Text>
-          <Text style={styles.message}>{message}</Text>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-          <View style={styles.actions}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={onCancel}
-              disabled={busy}
-              hitSlop={8}
-              style={styles.actionButton}
-            >
-              <Text style={[styles.cancel, busy && styles.disabled]}>Cancel</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={busy ? 'Deleting' : 'Confirm delete'}
-              onPress={onConfirm}
-              disabled={busy}
-              hitSlop={8}
-              style={styles.actionButton}
-            >
-              <Text style={[styles.confirm, busy && styles.disabled]}>
-                {busy ? 'Deleting…' : 'Delete'}
+          <PopupContent>
+            <Text accessibilityRole="header" style={styles.title}>
+              {title}
+            </Text>
+            <Text style={styles.message}>{message}</Text>
+            {error ? (
+              <Text accessibilityLiveRegion="polite" style={styles.error}>
+                {error}
               </Text>
-            </Pressable>
-          </View>
+            ) : null}
+            <View style={styles.actions}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={onCancel}
+                disabled={busy}
+                hitSlop={8}
+                style={styles.actionButton}
+              >
+                <Text style={[styles.cancel, busy && styles.disabled]}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={busy ? 'Deleting' : 'Confirm delete'}
+                onPress={onConfirm}
+                disabled={busy}
+                hitSlop={8}
+                style={styles.actionButton}
+              >
+                <Text style={[styles.confirm, busy && styles.disabled]}>
+                  {busy ? 'Deleting…' : 'Delete'}
+                </Text>
+              </Pressable>
+            </View>
+          </PopupContent>
         </Glass>
       </View>
     </PopupLayer>

@@ -528,7 +528,7 @@ export default function WorkoutEditor(props: WorkoutEditorProps) {
 
       <Modal
         visible={pickerOpen}
-        animationType="fade"
+        animationType="slide"
         statusBarTranslucent
         onRequestClose={() => setPickerOpen(false)}
       >

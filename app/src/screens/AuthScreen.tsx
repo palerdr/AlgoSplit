@@ -218,13 +218,17 @@ export default function AuthScreen() {
                 accessibilityState={{ disabled: socialBusy !== null || !socialConfigured }}
                 onPress={() => submitSocial('google')}
                 disabled={socialBusy !== null || !socialConfigured}
-                style={!socialConfigured ? styles.socialDisabled : undefined}
               >
                 <Glass style={styles.socialButton} interactive>
                   {socialBusy === 'google' ? (
                     <ActivityIndicator color={theme.accent} />
                   ) : (
-                    <View style={styles.socialButtonContent}>
+                    <View
+                      style={[
+                        styles.socialButtonContent,
+                        !socialConfigured && styles.socialContentDisabled,
+                      ]}
+                    >
                       <SocialProviderIcon provider="google" />
                       <Text style={styles.socialText}>Continue with Google</Text>
                     </View>
@@ -237,13 +241,17 @@ export default function AuthScreen() {
                   accessibilityState={{ disabled: socialBusy !== null || !socialConfigured }}
                   onPress={() => submitSocial('apple')}
                   disabled={socialBusy !== null || !socialConfigured}
-                  style={!socialConfigured ? styles.socialDisabled : undefined}
                 >
                   <Glass style={styles.socialButton} interactive>
                     {socialBusy === 'apple' ? (
                       <ActivityIndicator color={theme.accent} />
                     ) : (
-                      <View style={styles.socialButtonContent}>
+                      <View
+                        style={[
+                          styles.socialButtonContent,
+                          !socialConfigured && styles.socialContentDisabled,
+                        ]}
+                      >
                         <SocialProviderIcon provider="apple" />
                         <Text style={styles.socialText}>Continue with Apple</Text>
                       </View>
@@ -382,7 +390,7 @@ const styles = StyleSheet.create({
   dividerText: { color: theme.textDim, fontSize: 11 },
   socialButton: { borderRadius: 16, paddingVertical: 12, alignItems: 'center' },
   socialButtonContent: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  socialDisabled: { opacity: 0.45 },
+  socialContentDisabled: { opacity: 0.45 },
   socialText: { color: theme.text, fontSize: 14, fontWeight: '700' },
   socialConfigurationHint: {
     color: theme.textDim,

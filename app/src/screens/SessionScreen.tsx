@@ -4,7 +4,6 @@ import {
   Easing,
   FlatList,
   Keyboard,
-  Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
   PanResponder,
@@ -21,6 +20,8 @@ import { EXERCISES } from '../data/exercises';
 import { useAppState, ActiveSession, SetRecord } from '../state/AppState';
 import { theme } from '../theme';
 import Glass from '../ui/Glass';
+import PopupLayer from '../ui/PopupLayer';
+import PopupContent from '../ui/PopupContent';
 import {
   PreviousExerciseData,
   previousLocalExercise,
@@ -707,11 +708,27 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
             )}
           </View>
 
-          {/* The collapsed box recedes as the editor card takes its place —
-              inverse of the popup's opacity so the two never show together. */}
+          {/* The collapsed box settles back as the editor card takes its
+              place. Keep this transform-only because it contains Glass. */}
           <Animated.View
+            pointerEvents={notesOpen ? 'none' : 'auto'}
+            accessibilityElementsHidden={notesOpen}
+            importantForAccessibility={notesOpen ? 'no-hide-descendants' : 'yes'}
             style={{
-              opacity: notesAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
+              transform: [
+                {
+                  translateY: notesAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, 8],
+                  }),
+                },
+                {
+                  scale: notesAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [1, 0.985],
+                  }),
+                },
+              ],
             }}
           >
             <Pressable accessibilityLabel="Notes" onPress={openNotes} disabled={notesOpen}>
@@ -861,46 +878,46 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
         </Animated.View>
       )}
 
-      <Modal
+      <PopupLayer
         visible={confirmDiscard}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setConfirmDiscard(false)}
+        onDismiss={() => setConfirmDiscard(false)}
+        accessibilityLabel="Discard workout confirmation"
+        maxWidth={440}
+        cardRadius={22}
       >
-        <View style={styles.confirmLayer}>
-          <Pressable
-            accessibilityLabel="Close discard confirmation"
-            style={styles.confirmBackdrop}
-            onPress={() => setConfirmDiscard(false)}
-          />
-          <Glass style={styles.confirmCard}>
+        <Glass style={styles.confirmCard}>
+          <PopupContent>
             <Text style={styles.confirmTitle}>Discard workout?</Text>
             <Text style={styles.confirmBody}>
               Logged sets from this session will be removed. Your persistent exercise notes will
               stay available next time.
             </Text>
-            <View style={styles.confirmActions}>
-              <Pressable onPress={() => setConfirmDiscard(false)} style={styles.confirmPressable}>
-                <Glass style={styles.confirmButton} interactive>
+          </PopupContent>
+          <View style={styles.confirmActions}>
+            <Pressable onPress={() => setConfirmDiscard(false)} style={styles.confirmPressable}>
+              <Glass style={styles.confirmButton} interactive>
+                <PopupContent>
                   <Text style={styles.confirmKeep}>Keep workout</Text>
-                </Glass>
-              </Pressable>
-              <Pressable
-                style={styles.confirmPressable}
-                onPress={() => {
-                  setConfirmDiscard(false);
-                  discardSession();
-                  onDiscard();
-                }}
-              >
-                <Glass style={styles.confirmButton} interactive>
+                </PopupContent>
+              </Glass>
+            </Pressable>
+            <Pressable
+              style={styles.confirmPressable}
+              onPress={() => {
+                setConfirmDiscard(false);
+                discardSession();
+                onDiscard();
+              }}
+            >
+              <Glass style={styles.confirmButton} interactive>
+                <PopupContent>
                   <Text style={styles.confirmDiscardText}>Discard workout</Text>
-                </Glass>
-              </Pressable>
-            </View>
-          </Glass>
-        </View>
-      </Modal>
+                </PopupContent>
+              </Glass>
+            </Pressable>
+          </View>
+        </Glass>
+      </PopupLayer>
 
       {resting && (
         <RestTimer
@@ -1239,16 +1256,6 @@ const styles = StyleSheet.create({
   pickerCancel: {
     alignItems: 'center',
     paddingVertical: 20,
-  },
-  confirmLayer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-  },
-  confirmBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.72)',
   },
   confirmCard: {
     width: '100%',

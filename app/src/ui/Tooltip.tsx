@@ -1,21 +1,26 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { ReactNode, useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import { theme } from '../theme';
 
 interface TooltipProps {
   visible: boolean;
-  text: string;
+  /** Plain copy for the common case. Use children for richer chart callouts. */
+  text?: string;
+  children?: ReactNode;
   /** Which edge of the bubble the caret sits on, pointing back at the anchor. */
   pointer?: 'top' | 'bottom';
   /** Distance in px from the bubble's left edge to the caret's center. Omit to center it under the bubble. */
   caretOffset?: number;
   maxWidth?: number;
+  bubbleStyle?: StyleProp<ViewStyle>;
+  /** Called only after a completed fade-out. Useful for swapping anchored content cleanly. */
+  onHidden?: () => void;
   /** Positions the whole tooltip (top/left/right, etc.) — the anchor decides where it sits. */
   style?: StyleProp<ViewStyle>;
 }
 
-const BUBBLE_BG = 'rgba(20,20,20,0.96)';
-const CARET_HALF = 6;
+const BUBBLE_BG = 'rgba(30,30,30,0.98)';
+const CARET_HALF = 5;
 const FADE_MS = 160;
 
 /** A proper speech-bubble tooltip — pointed caret, fades in and out (never just vanishes). */
@@ -25,51 +30,70 @@ export default function Tooltip({
   pointer = 'top',
   caretOffset,
   maxWidth = 160,
+  bubbleStyle,
+  onHidden,
   style,
+  children,
 }: TooltipProps) {
   const [mounted, setMounted] = useState(visible);
   const opacity = useRef(new Animated.Value(0)).current;
+  const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const transitionRef = useRef(0);
+  const visibleRef = useRef(visible);
+  const onHiddenRef = useRef(onHidden);
+  visibleRef.current = visible;
+  onHiddenRef.current = onHidden;
 
   useEffect(() => {
-    if (visible) {
+    animationRef.current?.stop();
+    const transition = ++transitionRef.current;
+
+    if (visible && !mounted) {
       setMounted(true);
-      opacity.setValue(0);
-      Animated.timing(opacity, {
-        toValue: 1,
-        duration: FADE_MS,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }).start();
       return;
     }
     if (!mounted) return;
-    Animated.timing(opacity, {
-      toValue: 0,
+
+    const animation = Animated.timing(opacity, {
+      toValue: visible ? 1 : 0,
       duration: FADE_MS,
-      easing: Easing.in(Easing.quad),
+      easing: visible ? Easing.out(Easing.quad) : Easing.in(Easing.quad),
       useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) setMounted(false);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible]);
+    animationRef.current = animation;
+    animation.start(({ finished }) => {
+      if (animationRef.current === animation) animationRef.current = null;
+      if (
+        finished &&
+        transitionRef.current === transition &&
+        !visibleRef.current
+      ) {
+        setMounted(false);
+        onHiddenRef.current?.();
+      }
+    });
+
+    return () => {
+      animation.stop();
+      if (animationRef.current === animation) animationRef.current = null;
+    };
+  }, [mounted, opacity, visible]);
 
   if (!mounted) return null;
 
   const caretStyle =
     caretOffset !== undefined
       ? {
-          position: 'absolute' as const,
-          left: caretOffset - CARET_HALF,
-          [pointer === 'top' ? 'top' : 'bottom']: 0,
+          alignSelf: 'flex-start' as const,
+          marginLeft: Math.max(0, caretOffset - CARET_HALF),
         }
       : undefined;
 
   return (
     <Animated.View pointerEvents="none" style={[styles.wrap, style, { opacity, maxWidth }]}>
       {pointer === 'top' && <View style={[styles.caretUp, caretStyle]} />}
-      <View style={styles.bubble}>
-        <Text style={styles.text}>{text}</Text>
+      <View style={[styles.bubble, bubbleStyle]}>
+        {children ?? <Text style={styles.text}>{text}</Text>}
       </View>
       {pointer === 'bottom' && <View style={[styles.caretDown, caretStyle]} />}
     </Animated.View>
@@ -81,18 +105,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   bubble: {
-    paddingVertical: 8,
-    paddingHorizontal: 11,
-    borderRadius: 10,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    borderRadius: 6,
     backgroundColor: BUBBLE_BG,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   text: {
     color: theme.text,
-    fontSize: 11,
-    lineHeight: 15,
-    fontWeight: '600',
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '400',
     textAlign: 'center',
   },
   caretUp: {
@@ -100,19 +124,23 @@ const styles = StyleSheet.create({
     height: 0,
     borderLeftWidth: CARET_HALF,
     borderRightWidth: CARET_HALF,
-    borderBottomWidth: 7,
+    borderBottomWidth: 6,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
     borderBottomColor: BUBBLE_BG,
+    marginBottom: -1,
+    zIndex: 1,
   },
   caretDown: {
     width: 0,
     height: 0,
     borderLeftWidth: CARET_HALF,
     borderRightWidth: CARET_HALF,
-    borderTopWidth: 7,
+    borderTopWidth: 6,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
     borderTopColor: BUBBLE_BG,
+    marginTop: -1,
+    zIndex: 1,
   },
 });

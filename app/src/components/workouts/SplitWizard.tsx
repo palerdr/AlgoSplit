@@ -575,7 +575,7 @@ export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
 
       <Modal
         visible={pickerDayIndex !== null}
-        animationType="fade"
+        animationType="slide"
         statusBarTranslucent
         onRequestClose={() => setPickerDayIndex(null)}
       >

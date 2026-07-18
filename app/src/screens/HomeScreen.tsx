@@ -18,6 +18,7 @@ import BodyHeatmap from '../3d/BodyHeatmap';
 import FireIcon from '../ui/FireIcon';
 import Glass from '../ui/Glass';
 import PopupLayer from '../ui/PopupLayer';
+import PopupContent from '../ui/PopupContent';
 import Tooltip from '../ui/Tooltip';
 import { levelsFromNet, stimulusScore } from '../analysis/stimulus';
 import { useAppState } from '../state/AppState';
@@ -65,6 +66,7 @@ const DIAL_SIZE = 74;
 const DIAL_STROKE = 5;
 const DIAL_R = (DIAL_SIZE - DIAL_STROKE) / 2;
 const DIAL_C = 2 * Math.PI * DIAL_R;
+const HOME_CONTROL_TINT = 'rgba(255,255,255,0.025)';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
@@ -92,7 +94,11 @@ function StimulusDial({ value }: { value: number | null }) {
   }, [value, progress]);
 
   return (
-    <Glass style={styles.dialGlass}>
+    <Glass
+      style={[styles.homeControlGlass, styles.dialGlass]}
+      tintColor={HOME_CONTROL_TINT}
+      interactive
+    >
       <Svg width={DIAL_SIZE} height={DIAL_SIZE}>
         <Circle
           cx={DIAL_SIZE / 2}
@@ -456,7 +462,12 @@ export default function HomeScreen({
         <View>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Weekly stimulus score"
+            accessibilityLabel={
+              loadedWeekEffort === null
+                ? 'Weekly stimulus score, loading'
+                : `Weekly stimulus score, ${Math.round(loadedWeekEffort)} out of 100`
+            }
+            accessibilityHint="Shows your weekly training stimulus on a zero to one hundred scale"
             hitSlop={8}
             onPress={showDialTip}
           >
@@ -483,7 +494,11 @@ export default function HomeScreen({
               setSplitPickerOpen(true);
             }}
           >
-            <Glass style={styles.activeZone} interactive>
+            <Glass
+              style={[styles.homeControlGlass, styles.activeZone]}
+              tintColor={HOME_CONTROL_TINT}
+              interactive
+            >
               {activeSplit ? (
                 <View style={styles.activeZoneRow}>
                   <Text style={styles.activeZoneName} numberOfLines={1}>
@@ -875,60 +890,73 @@ export default function HomeScreen({
       <PopupLayer
         visible={splitPickerOpen}
         onDismiss={() => setSplitPickerOpen(false)}
+        accessibilityLabel="Active split picker"
         maxWidth={380}
         cardRadius={24}
       >
         <Glass style={styles.pickerCard}>
-          <Text style={styles.pickerTitle}>Active split</Text>
-          <Text style={styles.pickerHint}>
-            Lives on your home screen with a streak and one-tap start.
-          </Text>
-          <ScrollView
-            style={styles.pickerList}
-            showsVerticalScrollIndicator={false}
-          >
-            {account.splits.data.map((split) => {
-              const isCurrent = split.id === account.activeSplitId;
-              return (
-                <Pressable
-                  key={split.id}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Make ${split.name} the active split`}
-                  onPress={() => {
-                    thump();
-                    account.setActiveSplit(split.id);
-                    setSplitPickerOpen(false);
-                  }}
-                  style={styles.pickerRow}
-                >
-                  <Text
-                    style={[styles.pickerRowText, isCurrent && styles.pickerRowCurrent]}
-                    numberOfLines={1}
-                  >
-                    {split.name}
-                  </Text>
-                  {isCurrent && <Text style={styles.pickerRowCurrent}>✓</Text>}
-                </Pressable>
-              );
-            })}
-            {account.splits.data.length === 0 && (
-              <Text style={styles.pickerHint}>
-                No splits yet — create one from the Workouts screen.
-              </Text>
-            )}
-          </ScrollView>
-          {activeSplit && (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => {
-                tick();
-                account.setActiveSplit(null);
-                setSplitPickerOpen(false);
-              }}
+          <PopupContent>
+            <View style={styles.pickerHeaderRow}>
+              <Text style={styles.pickerTitle}>Active split</Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Close active split picker"
+                hitSlop={8}
+                onPress={() => setSplitPickerOpen(false)}
+              >
+                <Text style={styles.pickerDone}>Done</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.pickerHint}>
+              Lives on your home screen with a streak and one-tap start.
+            </Text>
+            <ScrollView
+              style={styles.pickerList}
+              showsVerticalScrollIndicator={false}
             >
-              <Text style={styles.pickerClear}>Clear active split</Text>
-            </Pressable>
-          )}
+              {account.splits.data.map((split) => {
+                const isCurrent = split.id === account.activeSplitId;
+                return (
+                  <Pressable
+                    key={split.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Make ${split.name} the active split`}
+                    onPress={() => {
+                      thump();
+                      account.setActiveSplit(split.id);
+                      setSplitPickerOpen(false);
+                    }}
+                    style={styles.pickerRow}
+                  >
+                    <Text
+                      style={[styles.pickerRowText, isCurrent && styles.pickerRowCurrent]}
+                      numberOfLines={1}
+                    >
+                      {split.name}
+                    </Text>
+                    {isCurrent && <Text style={styles.pickerRowCurrent}>✓</Text>}
+                  </Pressable>
+                );
+              })}
+              {account.splits.data.length === 0 && (
+                <Text style={styles.pickerHint}>
+                  No splits yet — create one from the Workouts screen.
+                </Text>
+              )}
+            </ScrollView>
+            {activeSplit && (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => {
+                  tick();
+                  account.setActiveSplit(null);
+                  setSplitPickerOpen(false);
+                }}
+              >
+                <Text style={styles.pickerClear}>Clear active split</Text>
+              </Pressable>
+            )}
+          </PopupContent>
         </Glass>
       </PopupLayer>
 
@@ -936,14 +964,17 @@ export default function HomeScreen({
       <PopupLayer
         visible={forceStartPlan !== null}
         onDismiss={() => setForceStartPlan(null)}
+        accessibilityLabel="Workout already completed today"
         maxWidth={380}
         cardRadius={24}
       >
         <Glass style={styles.pickerCard}>
-          <Text style={styles.pickerTitle}>Already done for today</Text>
-          <Text style={styles.pickerHint}>
-            You’ve completed {activeSplit?.name ?? 'this split'}’s assigned workout for today.
-          </Text>
+          <PopupContent>
+            <Text style={styles.pickerTitle}>Already done for today</Text>
+            <Text style={styles.pickerHint}>
+              You’ve completed {activeSplit?.name ?? 'this split'}’s assigned workout for today.
+            </Text>
+          </PopupContent>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Start it anyway"
@@ -954,7 +985,9 @@ export default function HomeScreen({
             }}
           >
             <Glass style={styles.forceStartButton} interactive>
-              <Text style={styles.forceStartButtonText}>Start it anyway</Text>
+              <PopupContent>
+                <Text style={styles.forceStartButtonText}>Start it anyway</Text>
+              </PopupContent>
             </Glass>
           </Pressable>
           <Pressable
@@ -964,7 +997,9 @@ export default function HomeScreen({
               setForceStartPlan(null);
             }}
           >
-            <Text style={styles.forceStartCancel}>Not now</Text>
+            <PopupContent>
+              <Text style={styles.forceStartCancel}>Not now</Text>
+            </PopupContent>
           </Pressable>
         </Glass>
       </PopupLayer>
@@ -1061,10 +1096,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  dialGlass: {
-    width: DIAL_SIZE,
+  // One geometry/material contract for the two home controls. The dial is
+  // circular and the active-split control extends that same circle into a
+  // capsule, so their height, end radius, edge, and tint always match.
+  homeControlGlass: {
     height: DIAL_SIZE,
     borderRadius: DIAL_SIZE / 2,
+    borderCurve: 'continuous',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
+    overflow: 'hidden',
+  },
+  dialGlass: {
+    width: DIAL_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1097,11 +1141,8 @@ const styles = StyleSheet.create({
     marginLeft: 'auto',
     width: 168,
   },
-  // Same circular "format" as the stim dial beside it — height and radius
-  // both derive from DIAL_SIZE so the two stay in lockstep.
   activeZone: {
-    height: DIAL_SIZE,
-    borderRadius: DIAL_SIZE / 2,
+    width: '100%',
     paddingHorizontal: 16,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1138,6 +1179,17 @@ const styles = StyleSheet.create({
     color: theme.text,
     fontSize: 18,
     fontWeight: '700',
+  },
+  pickerHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+  },
+  pickerDone: {
+    color: theme.accent,
+    fontSize: 13,
+    fontWeight: '600',
   },
   pickerHint: {
     color: theme.textDim,

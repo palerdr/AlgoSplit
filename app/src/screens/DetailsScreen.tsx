@@ -19,6 +19,8 @@ interface DetailsScreenProps {
 }
 
 const DAY_MS = 86_400_000;
+const STAT_TILE_GAP = 10;
+const ANIMAL_TOOLTIP_WIDTH = 210;
 const tick = () => Haptics.selectionAsync().catch(() => {});
 
 interface OverviewWorkout {
@@ -33,12 +35,30 @@ function fmtVolume(v: number): string {
   return `${Math.round(v)}`;
 }
 
-function StatTile({ value, label, delay }: { value: string; label: string; delay: number }) {
+function StatTile({
+  value,
+  label,
+  delay,
+  children,
+}: {
+  value: string;
+  label: string;
+  delay: number;
+  children?: React.ReactNode;
+}) {
   return (
     <FadeIn delay={delay} style={{ flex: 1 }}>
       <Glass style={styles.statTile}>
-        <Text style={styles.statValue}>{value}</Text>
+        <Text
+          adjustsFontSizeToFit
+          minimumFontScale={0.72}
+          numberOfLines={1}
+          style={styles.statValue}
+        >
+          {value}
+        </Text>
         <Text style={styles.statLabel}>{label}</Text>
+        {children}
       </Glass>
     </FadeIn>
   );
@@ -240,6 +260,20 @@ export default function DetailsScreen({ onBack }: DetailsScreenProps) {
   const weekSets = thisWeek.reduce((n, w) => n + w.totalSets, 0);
   const weekVolume = thisWeek.reduce((n, w) => n + w.volume, 0);
   const weekAnimalTier = animalTierForWeight(weekVolume);
+  const weekAnimalMultiplier = weekAnimalTier
+    ? animalLiftMultiplier(weekVolume, weekAnimalTier)
+    : 0;
+  const weekAnimalNoun = weekAnimalTier
+    ? weekAnimalMultiplier === 1
+      ? weekAnimalTier.name
+      : weekAnimalTier.plural
+    : '';
+  const [statsRowWidth, setStatsRowWidth] = useState(0);
+  const statTileWidth = Math.max(0, (statsRowWidth - STAT_TILE_GAP * 2) / 3);
+  const animalCaretOffset =
+    statsRowWidth > 0
+      ? Math.max(10, Math.min(ANIMAL_TOOLTIP_WIDTH - 10, ANIMAL_TOOLTIP_WIDTH - statTileWidth / 2))
+      : ANIMAL_TOOLTIP_WIDTH / 2;
 
   // Tapping the animal silhouette explains the comparison briefly, then fades on its own.
   const [animalTipVisible, setAnimalTipVisible] = useState(false);
@@ -299,43 +333,43 @@ export default function DetailsScreen({ onBack }: DetailsScreenProps) {
         />
       )}
       <Text style={styles.sectionLabel}>This week</Text>
-      <View style={styles.statsRow}>
+      <View
+        style={styles.statsRow}
+        onLayout={(event) => setStatsRowWidth(event.nativeEvent.layout.width)}
+      >
         <StatTile value={`${thisWeek.length}`} label="workouts" delay={0} />
         <StatTile value={`${weekSets}`} label="sets" delay={45} />
-        <StatTile value={fmtVolume(weekVolume)} label="lbs moved" delay={90} />
-      </View>
-
-      {weekAnimalTier && (
-        <View style={styles.animalWrap}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Weight moved this week compares to lifting ${animalLiftMultiplier(
-              weekVolume,
-              weekAnimalTier
-            )} ${weekAnimalTier.plural}`}
-            hitSlop={8}
-            style={styles.animalRow}
-            onPress={showAnimalTip}
-          >
-            <AnimalSilhouette
-              slug={weekAnimalTier.slug}
-              size={weekAnimalTier.iconSize}
-              color={theme.textDim}
-            />
-            <Text style={styles.animalLabel}>{weekAnimalTier.name}</Text>
-          </Pressable>
+        <StatTile value={fmtVolume(weekVolume)} label="lbs moved" delay={90}>
+          {weekAnimalTier && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Weight moved this week compares to lifting ${weekAnimalMultiplier} ${weekAnimalNoun}`}
+              hitSlop={6}
+              style={({ pressed }) => [styles.animalInline, pressed && styles.animalInlinePressed]}
+              onPress={showAnimalTip}
+            >
+              <AnimalSilhouette
+                slug={weekAnimalTier.slug}
+                size={Math.min(30, Math.max(22, weekAnimalTier.iconSize * 0.72))}
+                color={theme.textDim}
+              />
+              <Text numberOfLines={1} style={styles.animalLabel}>
+                {weekAnimalTier.name}
+              </Text>
+            </Pressable>
+          )}
+        </StatTile>
+        {weekAnimalTier && (
           <Tooltip
             visible={animalTipVisible}
-            text={`You've moved enough to lift ${animalLiftMultiplier(
-              weekVolume,
-              weekAnimalTier
-            )} ${weekAnimalTier.plural}!`}
+            text={`You've moved enough to lift ${weekAnimalMultiplier} ${weekAnimalNoun}!`}
             pointer="top"
-            maxWidth={210}
+            caretOffset={animalCaretOffset}
+            maxWidth={ANIMAL_TOOLTIP_WIDTH}
             style={styles.animalTipPosition}
           />
-        </View>
-      )}
+        )}
+      </View>
 
       {accountMode && account.recentStimulus.error && (
         <OverviewNotice
@@ -492,32 +526,44 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: STAT_TILE_GAP,
     marginBottom: 14,
+    position: 'relative',
+    zIndex: 2,
   },
-  animalWrap: {
+  animalInline: {
+    minHeight: 30,
     alignItems: 'center',
-    marginBottom: 14,
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+    gap: 1,
+    marginTop: 4,
+    paddingHorizontal: 3,
   },
-  animalRow: {
-    alignItems: 'center',
-    gap: 6,
+  animalInlinePressed: {
+    opacity: 0.58,
   },
   animalLabel: {
     color: theme.textDim,
-    fontSize: 12,
-    fontWeight: '600',
+    flexShrink: 1,
+    fontSize: 10,
+    fontWeight: '500',
   },
   animalTipPosition: {
     position: 'absolute',
-    top: 78,
-    left: 0,
+    top: '100%',
     right: 0,
+    width: ANIMAL_TOOLTIP_WIDTH,
+    zIndex: 4,
   },
   statTile: {
+    flex: 1,
+    minHeight: 108,
     borderRadius: 18,
-    paddingVertical: 16,
+    paddingVertical: 13,
+    paddingHorizontal: 5,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   statValue: {
     color: theme.text,

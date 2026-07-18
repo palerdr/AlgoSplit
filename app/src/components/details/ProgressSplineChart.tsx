@@ -1,7 +1,8 @@
-import React, { useCallback, useMemo, useState } from 'react';
-import { LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { LayoutChangeEvent, Pressable, StyleSheet, Text } from 'react-native';
 import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
 import { theme } from '../../theme';
+import Tooltip from '../../ui/Tooltip';
 import {
   ChartPoint,
   SessionDataPoint,
@@ -12,11 +13,34 @@ import {
 
 const CHART_HEIGHT = 220;
 const PAD = { top: 16, right: 16, bottom: 28, left: 44 };
+const TOOLTIP_WIDTH = 128;
+const TOOLTIP_MARGIN = 8;
+const TOOLTIP_POINT_GAP = 5;
 
 export default function ProgressSplineChart({ points }: { points: SessionDataPoint[] }) {
   const [containerWidth, setContainerWidth] = useState(0);
-  const [tappedIndex, setTappedIndex] = useState<number | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [pendingIndex, setPendingIndex] = useState<number | null>(null);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+  const [tooltipClosing, setTooltipClosing] = useState(false);
   const normalized = useMemo(() => normalizeScores(points), [points]);
+  const pointsIdentity = useMemo(
+    () =>
+      JSON.stringify(
+        points.map((point) =>
+          [
+            point.date.getTime(),
+            point.sessionName,
+            point.weight,
+            point.reps,
+            point.rir ?? '',
+            point.capacityScore,
+            point.setNumber,
+          ]
+        )
+      ),
+    [points]
+  );
   const chartWidth = containerWidth - PAD.left - PAD.right;
   const chartHeight = CHART_HEIGHT - PAD.top - PAD.bottom;
 
@@ -53,8 +77,79 @@ export default function ProgressSplineChart({ points }: { points: SessionDataPoi
   }, [chartHeight, yMin, yMax]);
 
   const selectPoint = useCallback((index: number) => {
-    setTappedIndex((previous) => (previous === index ? null : index));
-  }, []);
+    if (tooltipClosing) {
+      setPendingIndex(index);
+      return;
+    }
+    if (selectedIndex === index) {
+      if (tooltipVisible) {
+        setPendingIndex(null);
+        setTooltipClosing(true);
+        setTooltipVisible(false);
+      } else {
+        setTooltipVisible(true);
+      }
+      return;
+    }
+    if (tooltipVisible && selectedIndex !== null) {
+      setPendingIndex(index);
+      setTooltipClosing(true);
+      setTooltipVisible(false);
+      return;
+    }
+    setSelectedIndex(index);
+    setTooltipVisible(true);
+  }, [selectedIndex, tooltipClosing, tooltipVisible]);
+
+  const hideTooltip = useCallback(() => {
+    if (!tooltipVisible && !tooltipClosing) return;
+    setPendingIndex(null);
+    setTooltipClosing(true);
+    setTooltipVisible(false);
+  }, [tooltipClosing, tooltipVisible]);
+
+  const showPendingTooltip = useCallback(() => {
+    setTooltipClosing(false);
+    if (pendingIndex !== null) {
+      setSelectedIndex(pendingIndex);
+      setTooltipVisible(true);
+    }
+    setPendingIndex(null);
+  }, [pendingIndex]);
+
+  useEffect(() => {
+    setSelectedIndex(null);
+    setPendingIndex(null);
+    setTooltipVisible(false);
+    setTooltipClosing(false);
+  }, [pointsIdentity]);
+
+  useEffect(() => {
+    const selectedInvalid = selectedIndex !== null && !chartPoints[selectedIndex];
+    const pendingInvalid = pendingIndex !== null && !chartPoints[pendingIndex];
+    if (!selectedInvalid && !pendingInvalid) return;
+    setSelectedIndex(null);
+    setPendingIndex(null);
+    setTooltipVisible(false);
+    setTooltipClosing(false);
+  }, [chartPoints, pendingIndex, selectedIndex]);
+
+  const selectedChartPoint = selectedIndex === null ? null : chartPoints[selectedIndex] ?? null;
+  const tooltipWidth = Math.max(1, Math.min(TOOLTIP_WIDTH, containerWidth - TOOLTIP_MARGIN * 2));
+  const tooltipLeft = selectedChartPoint
+    ? Math.min(
+        Math.max(selectedChartPoint.x - tooltipWidth / 2, TOOLTIP_MARGIN),
+        Math.max(TOOLTIP_MARGIN, containerWidth - tooltipWidth - TOOLTIP_MARGIN)
+      )
+    : TOOLTIP_MARGIN;
+  const caretInset = Math.min(10, tooltipWidth / 2);
+  const tooltipCaretOffset = selectedChartPoint
+    ? Math.min(
+        tooltipWidth - caretInset,
+        Math.max(caretInset, selectedChartPoint.x - tooltipLeft)
+      )
+    : tooltipWidth / 2;
+  const tooltipAbove = (selectedChartPoint?.y ?? 0) >= 80;
 
   if (points.length === 0) return null;
   const firstDate = points[0].date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -67,7 +162,10 @@ export default function ProgressSplineChart({ points }: { points: SessionDataPoi
     <Pressable
       style={styles.container}
       onLayout={(event: LayoutChangeEvent) => setContainerWidth(event.nativeEvent.layout.width)}
-      onPress={() => setTappedIndex(null)}
+      onPress={hideTooltip}
+      accessible={false}
+      focusable={false}
+      tabIndex={-1}
     >
       {containerWidth > 0 && (
         <Svg width={containerWidth} height={CHART_HEIGHT}>
@@ -120,7 +218,7 @@ export default function ProgressSplineChart({ points }: { points: SessionDataPoi
               key={index}
               cx={point.x}
               cy={point.y}
-              r={tappedIndex === index ? 6 : 4}
+              r={tooltipVisible && selectedIndex === index ? 6 : 4}
               fill={progressColor(normalized[index])}
               stroke={theme.bg}
               strokeWidth={1.5}
@@ -134,37 +232,51 @@ export default function ProgressSplineChart({ points }: { points: SessionDataPoi
           key={index}
           style={[styles.hitTarget, { left: point.x - 18, top: point.y - 18 }]}
           onPress={() => selectPoint(index)}
+          accessibilityRole="button"
+          accessibilityLabel={`${points[index].date.toLocaleDateString()}, ${points[index].sessionName}, set ${points[index].setNumber}, ${points[index].weight} pounds by ${points[index].reps} reps${
+            points[index].rir !== null ? ` at ${points[index].rir} reps in reserve` : ''
+          }, capacity ${Math.round(points[index].capacityScore)}`}
+          accessibilityHint="Shows details for this progress point"
+          accessibilityState={{ selected: tooltipVisible && selectedIndex === index }}
         />
       ))}
 
-      {tappedIndex !== null && chartPoints[tappedIndex] && (
-        <View
+      {selectedIndex !== null && selectedChartPoint && (
+        <Tooltip
+          visible={tooltipVisible}
+          pointer={tooltipAbove ? 'bottom' : 'top'}
+          caretOffset={tooltipCaretOffset}
+          maxWidth={tooltipWidth}
+          bubbleStyle={[styles.tooltipBubble, { width: tooltipWidth }]}
+          onHidden={showPendingTooltip}
           style={[
-            styles.tooltip,
+            styles.tooltipPosition,
             {
-              left: Math.min(Math.max(chartPoints[tappedIndex].x - 64, 8), containerWidth - 136),
-              top: Math.max(chartPoints[tappedIndex].y - 82, 4),
+              left: tooltipLeft,
+              ...(tooltipAbove
+                ? { bottom: CHART_HEIGHT - selectedChartPoint.y + TOOLTIP_POINT_GAP }
+                : { top: selectedChartPoint.y + TOOLTIP_POINT_GAP }),
             },
           ]}
         >
-          <Text style={styles.tooltipDate}>
-            {points[tappedIndex].date.toLocaleDateString(undefined, {
+          <Text style={styles.tooltipDate} numberOfLines={1}>
+            {points[selectedIndex].date.toLocaleDateString(undefined, {
               month: 'short',
               day: 'numeric',
               year: '2-digit',
             })}
           </Text>
           <Text style={styles.tooltipSession} numberOfLines={1}>
-            {points[tappedIndex].sessionName} · Set {points[tappedIndex].setNumber}
+            {points[selectedIndex].sessionName} · Set {points[selectedIndex].setNumber}
           </Text>
-          <Text style={styles.tooltipLine}>
-            {points[tappedIndex].weight}lb × {points[tappedIndex].reps}
-            {points[tappedIndex].rir !== null ? ` @${points[tappedIndex].rir} RIR` : ''}
+          <Text style={styles.tooltipLine} numberOfLines={1}>
+            {points[selectedIndex].weight}lb × {points[selectedIndex].reps}
+            {points[selectedIndex].rir !== null ? ` @${points[selectedIndex].rir} RIR` : ''}
           </Text>
-          <Text style={styles.tooltipScore}>
-            Capacity {Math.round(points[tappedIndex].capacityScore)}
+          <Text style={styles.tooltipScore} numberOfLines={1}>
+            Capacity {Math.round(points[selectedIndex].capacityScore)}
           </Text>
-        </View>
+        </Tooltip>
       )}
     </Pressable>
   );
@@ -173,19 +285,33 @@ export default function ProgressSplineChart({ points }: { points: SessionDataPoi
 const styles = StyleSheet.create({
   container: { width: '100%', height: CHART_HEIGHT, position: 'relative' },
   hitTarget: { position: 'absolute', width: 36, height: 36, borderRadius: 18 },
-  tooltip: {
+  tooltipPosition: {
     position: 'absolute',
-    width: 128,
-    backgroundColor: theme.surfaceHigh,
-    borderColor: theme.border,
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 9,
-    paddingVertical: 7,
     zIndex: 10,
   },
-  tooltipDate: { color: theme.textDim, fontSize: 10 },
-  tooltipSession: { color: theme.textDim, fontSize: 10, marginTop: 2 },
-  tooltipLine: { color: theme.text, fontSize: 12, marginTop: 3 },
-  tooltipScore: { color: theme.accent, fontSize: 10, marginTop: 2 },
+  tooltipBubble: {
+    minWidth: 1,
+  },
+  tooltipDate: { color: theme.textDim, fontSize: 9, lineHeight: 12, fontWeight: '400' },
+  tooltipSession: {
+    color: theme.textDim,
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: '400',
+    marginTop: 1,
+  },
+  tooltipLine: {
+    color: theme.text,
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '400',
+    marginTop: 2,
+  },
+  tooltipScore: {
+    color: theme.accent,
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: '400',
+    marginTop: 1,
+  },
 });
