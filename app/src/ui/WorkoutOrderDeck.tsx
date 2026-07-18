@@ -140,8 +140,7 @@ export default function WorkoutOrderDeck({
     const canMoveLater = item.draggable && index < items.length - 1 && !disabled;
     const dragEnabled = canMoveEarlier || canMoveLater;
     const warmupDisabled = disabled || item.warmupLocked || !onWarmupChange;
-    const canJump =
-      variant === 'live' && Boolean(onJumpTo) && !item.current && !actionsDisabled;
+    const canSelect = variant === 'live' && Boolean(onJumpTo) && !actionsDisabled;
     const setCopy =
       variant === 'preflight'
         ? `${targetSets}×`
@@ -195,35 +194,41 @@ export default function WorkoutOrderDeck({
               accessibilityRole="button"
               accessibilityLabel={
                 item.current
-                  ? `${item.name}, current exercise`
-                  : `Open ${item.name}, exercise ${index + 1} of ${items.length}`
+                  ? `Keep ${item.name} as the current exercise`
+                  : `Set ${item.name} as the current exercise`
               }
               accessibilityHint={complete ? 'Opens the completed exercise for editing' : undefined}
-              accessibilityState={{ selected: item.current, disabled: !canJump }}
-              disabled={!canJump}
+              accessibilityState={{ selected: item.current, disabled: !canSelect }}
+              disabled={!canSelect}
               onPress={() => onJumpTo(item.key, index)}
               style={({ pressed }) => [
-                styles.nameField,
-                pressed && canJump && styles.nameFieldPressed,
+                styles.rowSelectArea,
+                pressed && canSelect && styles.rowSelectAreaPressed,
               ]}
             >
-              <Text
-                numberOfLines={1}
-                style={[styles.exerciseName, complete && styles.completeCopy]}
-              >
-                {item.name}
+              <View style={styles.nameField} pointerEvents="none">
+                <Text
+                  numberOfLines={1}
+                  style={[styles.exerciseName, complete && styles.completeCopy]}
+                >
+                  {item.name}
+                </Text>
+                {item.current && <Text style={styles.currentCopy}>Current</Text>}
+              </View>
+              <Text style={[styles.setCopy, complete && styles.completeCopy]}>
+                {setCopy}
               </Text>
-              {item.current && <Text style={styles.currentCopy}>Current</Text>}
             </Pressable>
           ) : (
-            <View style={styles.nameField}>
-              <Text numberOfLines={1} style={styles.exerciseName}>
-                {item.name}
-              </Text>
+            <View style={styles.rowSelectArea}>
+              <View style={styles.nameField}>
+                <Text numberOfLines={1} style={styles.exerciseName}>
+                  {item.name}
+                </Text>
+              </View>
+              <Text style={styles.setCopy}>{setCopy}</Text>
             </View>
           )}
-
-          <Text style={[styles.setCopy, complete && styles.completeCopy]}>{setCopy}</Text>
 
           <Pressable
             accessibilityRole="checkbox"
@@ -263,7 +268,10 @@ export default function WorkoutOrderDeck({
       dragItemOverflow={false}
       showsVerticalScrollIndicator={false}
       containerStyle={variant === 'preflight' ? styles.preflightList : styles.liveList}
-      contentContainerStyle={styles.listContent}
+      contentContainerStyle={[
+        styles.listContent,
+        variant === 'live' && styles.liveListContent,
+      ]}
       onDragBegin={() => {
         setDragging(true);
         onDragStateChange?.(true);
@@ -355,13 +363,6 @@ export default function WorkoutOrderDeck({
       ]}
       tintColor="rgba(12,12,12,0.82)"
     >
-      <View style={[styles.liveHeader, compact && styles.liveHeaderCompact]}>
-        <Text style={styles.liveTitle}>{title}</Text>
-        <Text style={styles.liveSubtitle}>
-          {subtitle ?? 'Hold and drag to reorder. Tap an exercise to open it.'}
-        </Text>
-      </View>
-      <Text style={styles.liveSectionLabel}>Exercises</Text>
       {list}
       <View style={[styles.liveFooter, compact && styles.liveFooterCompact]}>
         <Pressable
@@ -448,38 +449,6 @@ const styles = StyleSheet.create({
   liveDeckCompact: {
     borderRadius: 22,
   },
-  liveHeader: {
-    paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 12,
-  },
-  liveHeaderCompact: {
-    paddingTop: 15,
-    paddingBottom: 9,
-  },
-  liveTitle: {
-    color: theme.text,
-    fontSize: 22,
-    lineHeight: 27,
-    fontWeight: '700',
-    letterSpacing: -0.35,
-  },
-  liveSubtitle: {
-    color: theme.textDim,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 4,
-  },
-  liveSectionLabel: {
-    color: theme.textDim,
-    fontSize: 10,
-    lineHeight: 13,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.9,
-    paddingHorizontal: 18,
-    marginBottom: 7,
-  },
   liveList: {
     flexGrow: 0,
     maxHeight: 470,
@@ -488,14 +457,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingBottom: 4,
   },
+  liveListContent: {
+    paddingTop: 12,
+  },
   row: {
     minHeight: 56,
     borderRadius: 14,
-    paddingVertical: 9,
     paddingHorizontal: 11,
     marginBottom: 7,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'stretch',
     gap: 9,
     backgroundColor: 'rgba(255,255,255,0.07)',
   },
@@ -515,6 +486,7 @@ const styles = StyleSheet.create({
   dragHandle: {
     paddingHorizontal: 2,
     paddingVertical: 7,
+    justifyContent: 'center',
   },
   dragHandlePressed: {
     opacity: 0.65,
@@ -538,8 +510,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     backgroundColor: 'rgba(255,255,255,0.05)',
   },
-  nameFieldPressed: {
-    backgroundColor: 'rgba(255,255,255,0.09)',
+  rowSelectArea: {
+    flex: 1,
+    minWidth: 0,
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    borderRadius: 10,
+  },
+  rowSelectAreaPressed: {
+    backgroundColor: 'rgba(255,255,255,0.055)',
   },
   exerciseName: {
     flex: 1,
@@ -571,6 +552,7 @@ const styles = StyleSheet.create({
     minHeight: 34,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 5,
     borderRadius: 8,
     paddingHorizontal: 2,

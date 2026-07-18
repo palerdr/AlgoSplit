@@ -1133,8 +1133,8 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
             </View>
           )}
 
-          {/* The collapsed box settles back as the editor card takes its
-              place. Keep this transform-only because it contains Glass. */}
+          {/* The resting state is deliberately only text on the page. It
+              settles subtly while the separate editor popup takes focus. */}
           {!warmupActive && (
             <Animated.View
               pointerEvents={notesOpen ? 'none' : 'auto'}
@@ -1163,13 +1163,11 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                 disabled={notesOpen || navigationBlocked}
                 accessibilityState={{ disabled: notesOpen || navigationBlocked }}
               >
-                {/* Keep the resting notes surface quiet. Native LiquidGlassView
-                    draws its own bright perimeter even without a React Native
-                    border, so use a borderless blur until the editor opens. */}
-                <BlurView
-                  intensity={18}
-                  tint="dark"
-                  style={[styles.notesGlass, compactLayout && styles.notesGlassCompact]}
+                <View
+                  style={[
+                    styles.notesResting,
+                    compactLayout && styles.notesRestingCompact,
+                  ]}
                 >
                   <Text
                     numberOfLines={compactLayout ? 2 : 3}
@@ -1177,7 +1175,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   >
                     {current.notes.trim() || 'Notes'}
                   </Text>
-                </BlurView>
+                </View>
               </Pressable>
             </Animated.View>
           )}
@@ -1799,15 +1797,13 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
   },
-  notesGlass: {
-    borderRadius: 24,
-    overflow: 'hidden',
+  notesResting: {
     minHeight: 84,
-    paddingHorizontal: 16,
+    justifyContent: 'center',
+    paddingHorizontal: 2,
     paddingVertical: 14,
-    backgroundColor: 'rgba(255,255,255,0.025)',
   },
-  notesGlassCompact: {
+  notesRestingCompact: {
     minHeight: 62,
     paddingVertical: 10,
   },

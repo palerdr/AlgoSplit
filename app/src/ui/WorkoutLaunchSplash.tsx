@@ -101,7 +101,9 @@ export default function WorkoutLaunchSplash({
 }: WorkoutLaunchSplashProps) {
   const { width } = useWindowDimensions();
   const fill = useRef(new Animated.Value(0)).current;
+  const reviewTone = useRef(new Animated.Value(0)).current;
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const toneAnimationRef = useRef<Animated.CompositeAnimation | null>(null);
   const firstFrameRef = useRef<number | null>(null);
   const secondFrameRef = useRef<number | null>(null);
   const coveredRef = useRef(false);
@@ -124,6 +126,7 @@ export default function WorkoutLaunchSplash({
       reduceMotionRef.current = reduceMotion;
       setWaveMotionEnabled(!reduceMotion);
       fill.setValue(0);
+      reviewTone.setValue(0);
 
       const rise = Animated.timing(fill, {
         toValue: 1,
@@ -149,25 +152,40 @@ export default function WorkoutLaunchSplash({
       alive = false;
       animationRef.current?.stop();
       animationRef.current = null;
+      toneAnimationRef.current?.stop();
+      toneAnimationRef.current = null;
       if (firstFrameRef.current !== null) cancelAnimationFrame(firstFrameRef.current);
       if (secondFrameRef.current !== null) cancelAnimationFrame(secondFrameRef.current);
     };
-  }, [fill]);
+  }, [fill, reviewTone]);
 
-  // Give the just-settled waterline a tiny visual beat before mounting native
-  // glass. The glass itself never sits under an opacity animation.
+  // Once the green pool has fully covered Home, shade that same opaque surface
+  // to the app background before mounting the review. Only the plain pool
+  // color animates; native Liquid Glass remains at full opacity throughout.
   useEffect(() => {
-    if (!covered || phase !== 'reviewing') {
-      setReviewReady(false);
-      return;
-    }
-    const timer = setTimeout(() => setReviewReady(true), 150);
-    return () => clearTimeout(timer);
-  }, [covered, phase]);
+    if (!covered || phase !== 'reviewing') return;
+    setReviewReady(false);
+    toneAnimationRef.current?.stop();
+    const shade = Animated.timing(reviewTone, {
+      toValue: 1,
+      duration: reduceMotionRef.current ? 80 : 230,
+      easing: reduceMotionRef.current ? Easing.linear : Easing.inOut(Easing.cubic),
+      useNativeDriver: false,
+    });
+    toneAnimationRef.current = shade;
+    shade.start(({ finished }) => {
+      if (toneAnimationRef.current === shade) toneAnimationRef.current = null;
+      if (finished) setReviewReady(true);
+    });
+    return () => {
+      shade.stop();
+      if (toneAnimationRef.current === shade) toneAnimationRef.current = null;
+    };
+  }, [covered, phase, reviewTone]);
 
-  // Confirmation mounts Session behind the fully opaque pool. Wait for two
-  // paints, then drain. Cancel uses the same water motion back to Home without
-  // ever creating a session.
+  // Confirmation mounts Session behind the fully opaque pool. First return the
+  // review surface to green, then unmount its glass controls, wait two paints,
+  // and drain. Cancel follows the same path back to Home without a session.
   useEffect(() => {
     if (
       !covered ||
@@ -176,29 +194,55 @@ export default function WorkoutLaunchSplash({
     ) return;
 
     drainStartedRef.current = true;
-    firstFrameRef.current = requestAnimationFrame(() => {
-      firstFrameRef.current = null;
-      secondFrameRef.current = requestAnimationFrame(() => {
-        secondFrameRef.current = null;
-        const reduceMotion = reduceMotionRef.current;
-        const drain = Animated.timing(fill, {
-          toValue: 0,
-          duration: reduceMotion ? 80 : 480,
-          easing: reduceMotion ? Easing.linear : Easing.inOut(Easing.cubic),
-          useNativeDriver: false,
-        });
-        animationRef.current = drain;
-        drain.start(({ finished }) => {
-          if (animationRef.current === drain) animationRef.current = null;
-          if (!finished || finishedRef.current) return;
-          finishedRef.current = true;
-          onFinishedRef.current();
+    toneAnimationRef.current?.stop();
+    const beginDrain = () => {
+      setReviewReady(false);
+      firstFrameRef.current = requestAnimationFrame(() => {
+        firstFrameRef.current = null;
+        secondFrameRef.current = requestAnimationFrame(() => {
+          secondFrameRef.current = null;
+          const reduceMotion = reduceMotionRef.current;
+          const drain = Animated.timing(fill, {
+            toValue: 0,
+            duration: reduceMotion ? 80 : 480,
+            easing: reduceMotion ? Easing.linear : Easing.inOut(Easing.cubic),
+            useNativeDriver: false,
+          });
+          animationRef.current = drain;
+          drain.start(({ finished: drainFinished }) => {
+            if (animationRef.current === drain) animationRef.current = null;
+            if (!drainFinished || finishedRef.current) return;
+            finishedRef.current = true;
+            onFinishedRef.current();
+          });
         });
       });
-    });
-  }, [covered, fill, phase]);
+    };
 
-  const reviewing = phase === 'reviewing' && reviewReady;
+    // Freestyle and empty workouts skip review entirely, so their green pool
+    // can drain immediately without an artificial color-transition pause.
+    if (!reviewReady) {
+      reviewTone.setValue(0);
+      beginDrain();
+      return;
+    }
+
+    const restoreGreen = Animated.timing(reviewTone, {
+      toValue: 0,
+      duration: reduceMotionRef.current ? 80 : 170,
+      easing: reduceMotionRef.current ? Easing.linear : Easing.inOut(Easing.quad),
+      useNativeDriver: false,
+    });
+    toneAnimationRef.current = restoreGreen;
+    restoreGreen.start(({ finished }) => {
+      if (toneAnimationRef.current === restoreGreen) toneAnimationRef.current = null;
+      if (!finished) return;
+      beginDrain();
+    });
+  }, [covered, fill, phase, reviewReady, reviewTone]);
+
+  const reviewInteractive = phase === 'reviewing' && reviewReady;
+  const reviewVisible = covered && reviewReady;
   const progressLabel =
     phase === 'canceling'
       ? 'Closing workout order'
@@ -214,10 +258,10 @@ export default function WorkoutLaunchSplash({
 
   return (
     <View
-      accessible={!reviewing}
-      accessibilityRole={!reviewing ? 'progressbar' : undefined}
-      accessibilityLabel={!reviewing ? progressLabel : undefined}
-      accessibilityValue={!reviewing ? { text: progressValue } : undefined}
+      accessible={!reviewInteractive}
+      accessibilityRole={!reviewInteractive ? 'progressbar' : undefined}
+      accessibilityLabel={!reviewInteractive ? progressLabel : undefined}
+      accessibilityValue={!reviewInteractive ? { text: progressValue } : undefined}
       accessibilityLiveRegion="assertive"
       accessibilityViewIsModal
       importantForAccessibility="yes"
@@ -231,6 +275,10 @@ export default function WorkoutLaunchSplash({
             height: fill.interpolate({
               inputRange: [0, 1],
               outputRange: ['0%', '100%'],
+            }),
+            backgroundColor: reviewTone.interpolate({
+              inputRange: [0, 1],
+              outputRange: [POOL_COLOR, theme.bg],
             }),
           },
         ]}
@@ -252,8 +300,13 @@ export default function WorkoutLaunchSplash({
           />
         </View>
       </Animated.View>
-      {reviewing && (
-        <View style={styles.reviewLayer} pointerEvents="box-none">
+      {reviewVisible && (
+        <View
+          style={styles.reviewLayer}
+          pointerEvents={reviewInteractive ? 'box-none' : 'none'}
+          accessibilityElementsHidden={!reviewInteractive}
+          importantForAccessibility={reviewInteractive ? 'yes' : 'no-hide-descendants'}
+        >
           {children}
         </View>
       )}
@@ -271,7 +324,6 @@ const styles = StyleSheet.create({
   },
   pool: {
     width: '100%',
-    backgroundColor: POOL_COLOR,
   },
   reviewLayer: {
     ...StyleSheet.absoluteFillObject,

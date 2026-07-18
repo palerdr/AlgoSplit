@@ -428,7 +428,6 @@ const styles = StyleSheet.create({
   },
   orderReviewWrap: {
     flex: 1,
-    backgroundColor: theme.bg,
     paddingHorizontal: 24,
     paddingTop: 64,
     paddingBottom: 20,
