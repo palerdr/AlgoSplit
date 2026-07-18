@@ -12,13 +12,19 @@ from fastapi.responses import JSONResponse
 from jose import JWTError
 
 logger = logging.getLogger("algosplit.auth")
-from db.supabase import SUPABASE_URL, get_supabase_auth_client, get_supabase_admin
+from db.supabase import (
+    SUPABASE_PUBLISHABLE_KEY,
+    SUPABASE_URL,
+    get_supabase_auth_client,
+    get_supabase_admin,
+)
 from schemas.auth import (
     AuthClientPlatform,
     SignUpRequest,
     LoginRequest,
     RefreshRequest,
     OAuthSessionCompleteRequest,
+    SocialAuthConfigResponse,
     SocialProvider,
     SignInProvider,
     IdentityLinkRequest,
@@ -433,6 +439,19 @@ def bootstrap_csrf(response: Response):
     set_csrf_cookie(response)
     logger.info("auth_event=csrf_bootstrap result=success")
     return None
+
+
+@router.get(
+    "/social-config",
+    response_model=SocialAuthConfigResponse,
+    summary="Get public social authentication configuration",
+)
+def social_auth_config():
+    """Return only the public values required by the disposable OAuth client."""
+    return SocialAuthConfigResponse(
+        supabase_url=SUPABASE_URL,
+        supabase_publishable_key=SUPABASE_PUBLISHABLE_KEY,
+    )
 
 
 @router.post(

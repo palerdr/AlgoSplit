@@ -158,11 +158,13 @@ Point the dev bundle at the deployed API instead:
 
    ```env
    EXPO_PUBLIC_ALGOSPLIT_API=https://algosplit-api-staging.vercel.app
-   EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-   EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-public-key
    EXPO_PUBLIC_ALGOSPLIT_OAUTH_NATIVE_CALLBACK_URL=algosplit://oauth/callback
    EXPO_PUBLIC_ALGOSPLIT_IDENTITY_NATIVE_CALLBACK_URL=algosplit://identity/callback
    ```
+
+   Social sign-in loads the public Supabase URL and publishable key from the
+   deployed API's `GET /auth/social-config` endpoint. They do not need to be
+   duplicated in the Expo environment.
 
 2. Make sure the backend Vercel Production environment sets
    `AUTH_EXPOSE_ACCESS_TOKEN=true` and has been redeployed since (see
@@ -199,8 +201,8 @@ npm run start:dev-client -- -c
 ```
 
 Use `--profile development-simulator` only for an iOS Simulator. Configure the
-five public values above in the Expo project's `development`, `preview`, and
-`production` environments before building. See [SOCIAL_AUTH_SETUP.md](SOCIAL_AUTH_SETUP.md)
+API and callback values above in the Expo project's `development`, `preview`,
+and `production` environments before building. See [SOCIAL_AUTH_SETUP.md](SOCIAL_AUTH_SETUP.md)
 for provider and callback registration.
 
 Pointing a phone at a *local* backend does not currently work: in

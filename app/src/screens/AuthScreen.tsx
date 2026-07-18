@@ -4,10 +4,12 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useAccountState } from '../state/AccountState';
 import { theme } from '../theme';
@@ -17,10 +19,10 @@ import PrivacyScreen from './PrivacyScreen';
 import { authErrorMessageForDisplay, type SocialProvider } from '../api/backend';
 import {
   isSocialAuthCancellation,
-  socialAuthConfigured,
   socialAuthErrorMessageForDisplay,
   socialProviderVisible,
 } from '../auth/socialAuth';
+import { authCardWidth } from '../auth/authLayout';
 import SocialProviderIcon from '../ui/SocialProviderIcon';
 import StartupSplash from '../ui/StartupSplash';
 
@@ -33,7 +35,8 @@ export default function AuthScreen() {
   const [message, setMessage] = useState<string | null>(null);
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [socialBusy, setSocialBusy] = useState<SocialProvider | null>(null);
-  const socialConfigured = socialAuthConfigured();
+  const { width: viewportWidth } = useWindowDimensions();
+  const boundedCardWidth = authCardWidth(viewportWidth);
 
   const submit = async () => {
     if (!email.trim() || (mode !== 'forgot' && !password)) {
@@ -100,8 +103,8 @@ export default function AuthScreen() {
 
   if (account.status === 'unconfigured') {
     return (
-      <View style={styles.container}>
-        <FadeIn style={styles.cardWrap}>
+      <View style={styles.staticContainer}>
+        <FadeIn style={[styles.cardWrap, { width: boundedCardWidth }]}>
           <Glass style={styles.card}>
             <Text style={styles.brand}>AlgoSplit</Text>
             <Text style={styles.title}>Backend not configured</Text>
@@ -116,8 +119,8 @@ export default function AuthScreen() {
 
   if (account.status === 'error') {
     return (
-      <View style={styles.container}>
-        <FadeIn style={styles.cardWrap}>
+      <View style={styles.staticContainer}>
+        <FadeIn style={[styles.cardWrap, { width: boundedCardWidth }]}>
           <Glass style={styles.card}>
             <Text style={styles.brand}>AlgoSplit</Text>
             <Text style={styles.title}>Account connection failed</Text>
@@ -135,11 +138,17 @@ export default function AuthScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <FadeIn style={styles.cardWrap}>
-        <Glass style={styles.card}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        bounces={false}
+      >
+        <FadeIn style={[styles.cardWrap, { width: boundedCardWidth }]}>
+          <Glass style={styles.card}>
           <Text style={styles.brand}>AlgoSplit</Text>
           <Text style={styles.title}>
             {mode === 'login'
@@ -211,20 +220,15 @@ export default function AuthScreen() {
               </View>
               <Pressable
                 accessibilityLabel="Continue with Google"
-                accessibilityState={{ disabled: socialBusy !== null || !socialConfigured }}
+                accessibilityState={{ disabled: socialBusy !== null }}
                 onPress={() => submitSocial('google')}
-                disabled={socialBusy !== null || !socialConfigured}
+                disabled={socialBusy !== null}
               >
                 <Glass style={styles.socialButton} interactive>
                   {socialBusy === 'google' ? (
                     <ActivityIndicator color={theme.accent} />
                   ) : (
-                    <View
-                      style={[
-                        styles.socialButtonContent,
-                        !socialConfigured && styles.socialContentDisabled,
-                      ]}
-                    >
+                    <View style={styles.socialButtonContent}>
                       <SocialProviderIcon provider="google" />
                       <Text style={styles.socialText}>Continue with Google</Text>
                     </View>
@@ -234,32 +238,21 @@ export default function AuthScreen() {
               {account.appleProviderEnabled && socialProviderVisible('apple') && (
                 <Pressable
                   accessibilityLabel="Continue with Apple"
-                  accessibilityState={{ disabled: socialBusy !== null || !socialConfigured }}
+                  accessibilityState={{ disabled: socialBusy !== null }}
                   onPress={() => submitSocial('apple')}
-                  disabled={socialBusy !== null || !socialConfigured}
+                  disabled={socialBusy !== null}
                 >
                   <Glass style={styles.socialButton} interactive>
                     {socialBusy === 'apple' ? (
                       <ActivityIndicator color={theme.accent} />
                     ) : (
-                      <View
-                        style={[
-                          styles.socialButtonContent,
-                          !socialConfigured && styles.socialContentDisabled,
-                        ]}
-                      >
+                      <View style={styles.socialButtonContent}>
                         <SocialProviderIcon provider="apple" />
                         <Text style={styles.socialText}>Continue with Apple</Text>
                       </View>
                     )}
                   </Glass>
                 </Pressable>
-              )}
-              {!socialConfigured && (
-                <Text style={styles.socialConfigurationHint}>
-                  Social sign-in is not configured for this build. Add the public Supabase URL and
-                  publishable key, then restart or rebuild the app.
-                </Text>
               )}
             </View>
           )}
@@ -295,25 +288,35 @@ export default function AuthScreen() {
           <Pressable onPress={() => setShowPrivacy(true)} hitSlop={8} accessibilityRole="link">
             <Text style={styles.privacyText}>Privacy policy</Text>
           </Pressable>
-        </Glass>
-      </FadeIn>
+          </Glass>
+        </FadeIn>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
+    flex: 1,
+    backgroundColor: theme.bg,
+  },
+  scroll: {
+    flex: 1,
+  },
+  staticContainer: {
     flex: 1,
     backgroundColor: theme.bg,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    paddingVertical: 24,
   },
-  // FadeIn needs a concrete width: inside the centered container it would
-  // otherwise auto-size, making the card's width:'100%' resolve to the longest
-  // unwrapped text line and overflow the screen.
+  scrollContent: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+  },
   cardWrap: {
-    width: '100%',
     maxWidth: 420,
   },
   card: {
@@ -381,15 +384,7 @@ const styles = StyleSheet.create({
   dividerText: { color: theme.textDim, fontSize: 11 },
   socialButton: { borderRadius: 16, paddingVertical: 12, alignItems: 'center' },
   socialButtonContent: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  socialContentDisabled: { opacity: 0.45 },
   socialText: { color: theme.text, fontSize: 14, fontWeight: '700' },
-  socialConfigurationHint: {
-    color: theme.textDim,
-    fontSize: 10,
-    lineHeight: 15,
-    textAlign: 'center',
-    marginTop: 2,
-  },
   switchText: {
     color: theme.textDim,
     fontSize: 12,

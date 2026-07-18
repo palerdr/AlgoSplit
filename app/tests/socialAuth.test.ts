@@ -11,15 +11,30 @@ jest.mock('expo-secure-store', () => ({
 jest.mock('expo-auth-session', () => ({
   makeRedirectUri: jest.fn(() => 'algosplit://oauth/callback'),
 }));
+jest.mock('expo-constants', () => ({
+  __esModule: true,
+  default: { executionEnvironment: 'bare' },
+  ExecutionEnvironment: {
+    Bare: 'bare',
+    Standalone: 'standalone',
+    StoreClient: 'storeClient',
+  },
+}));
 jest.mock('expo-web-browser', () => ({
   openAuthSessionAsync: jest.fn(),
 }));
 jest.mock('expo-apple-authentication', () => ({}));
 jest.mock('expo-crypto', () => ({}));
 jest.mock('@supabase/supabase-js', () => ({ createClient: jest.fn() }));
+jest.mock('../src/api/backend', () => ({
+  auth: { socialConfig: jest.fn() },
+}));
 
 import { createClient } from '@supabase/supabase-js';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import * as WebBrowser from 'expo-web-browser';
+import { Platform } from 'react-native';
+import { auth } from '../src/api/backend';
 import {
   SocialAuthError,
   appleProviderEnabled,
@@ -27,17 +42,19 @@ import {
   clearTemporaryOAuthCredentials,
   completeIdentityLink,
   completePendingWebAuth,
+  expoGoOAuthUnsupported,
   oauthCodeFromCallbackUrl,
   resetSocialAuthCaches,
-  socialAuthConfigured,
   socialAuthErrorMessageForDisplay,
   socialProviderVisible,
+  socialSessionForProvider,
   startWebOAuthRedirect,
   temporaryOAuthStorage,
 } from '../src/auth/socialAuth';
 
 const mockOpenAuthSessionAsync = WebBrowser.openAuthSessionAsync as jest.Mock;
 const mockCreateClient = createClient as jest.Mock;
+const mockSocialConfig = auth.socialConfig as jest.Mock;
 
 function response(status: number, body: unknown): Response {
   return {
@@ -71,8 +88,10 @@ describe('social auth bridge', () => {
     sessionValues.clear();
     jest.clearAllMocks();
     resetSocialAuthCaches();
-    process.env.EXPO_PUBLIC_SUPABASE_URL = 'https://project.supabase.co';
-    process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_test';
+    mockSocialConfig.mockResolvedValue({
+      supabase_url: 'https://project.supabase.co',
+      supabase_publishable_key: 'sb_publishable_test',
+    });
     process.env.EXPO_PUBLIC_ALGOSPLIT_OAUTH_WEB_CALLBACK_URL =
       'https://app.example/oauth/callback';
     process.env.EXPO_PUBLIC_ALGOSPLIT_IDENTITY_WEB_CALLBACK_URL =
@@ -99,10 +118,11 @@ describe('social auth bridge', () => {
     expect(socialProviderVisible('apple', 'web')).toBe(true);
   });
 
-  it('reports whether the public client configuration is present', () => {
-    expect(socialAuthConfigured()).toBe(true);
-    delete process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-    expect(socialAuthConfigured()).toBe(false);
+  it('detects Expo Go only for native OAuth', () => {
+    expect(expoGoOAuthUnsupported('ios', ExecutionEnvironment.StoreClient)).toBe(true);
+    expect(expoGoOAuthUnsupported('android', ExecutionEnvironment.StoreClient)).toBe(true);
+    expect(expoGoOAuthUnsupported('web', ExecutionEnvironment.StoreClient)).toBe(false);
+    expect(expoGoOAuthUnsupported('ios', ExecutionEnvironment.Bare)).toBe(false);
   });
 
   it('shows deliberate social-auth errors without exposing unknown errors', () => {
@@ -138,6 +158,102 @@ describe('social auth bridge', () => {
       'https://project.supabase.co/auth/v1/authorize?provider=google'
     );
     expect(mockOpenAuthSessionAsync).not.toHaveBeenCalled();
+  });
+
+  it('loads and caches public Supabase configuration from the backend', async () => {
+    const { signInWithOAuth } = oauthClient();
+
+    await startWebOAuthRedirect('google', jest.fn(), 1_000);
+    await startWebOAuthRedirect('google', jest.fn(), 2_000);
+
+    expect(mockSocialConfig).toHaveBeenCalledTimes(1);
+    expect(mockCreateClient).toHaveBeenCalledTimes(1);
+    expect(mockCreateClient).toHaveBeenCalledWith(
+      'https://project.supabase.co',
+      'sb_publishable_test',
+      expect.any(Object)
+    );
+    expect(signInWithOAuth).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries backend configuration after a recoverable failure', async () => {
+    oauthClient();
+    mockSocialConfig
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({
+        supabase_url: 'https://project.supabase.co',
+        supabase_publishable_key: 'sb_publishable_test',
+      });
+
+    await expect(startWebOAuthRedirect('google', jest.fn(), 1_000)).rejects.toThrow(
+      'Could not load social sign-in configuration. Please try again.'
+    );
+    await expect(startWebOAuthRedirect('google', jest.fn(), 2_000)).resolves.toBeUndefined();
+    expect(mockSocialConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects a callback URL supplied as the Supabase project URL', async () => {
+    oauthClient();
+    mockSocialConfig.mockResolvedValueOnce({
+      supabase_url: 'https://project.supabase.co/auth/v1/callback',
+      supabase_publishable_key: 'sb_publishable_test',
+    });
+
+    await expect(startWebOAuthRedirect('google', jest.fn(), 1_000)).rejects.toThrow(
+      'Could not load social sign-in configuration. Please try again.'
+    );
+    expect(mockCreateClient).not.toHaveBeenCalled();
+  });
+
+  it('rejects Expo Go before creating a client or opening a browser', async () => {
+    const previousPlatform = Platform.OS;
+    const previousEnvironment = Constants.executionEnvironment;
+    Object.assign(Platform, { OS: 'ios' });
+    Object.assign(Constants, { executionEnvironment: ExecutionEnvironment.StoreClient });
+    try {
+      await expect(socialSessionForProvider('google')).rejects.toThrow(
+        'Google sign-in requires the AlgoSplit development build; Expo Go cannot return from Google sign-in.'
+      );
+      expect(mockSocialConfig).not.toHaveBeenCalled();
+      expect(mockCreateClient).not.toHaveBeenCalled();
+      expect(mockOpenAuthSessionAsync).not.toHaveBeenCalled();
+    } finally {
+      Object.assign(Platform, { OS: previousPlatform });
+      Object.assign(Constants, { executionEnvironment: previousEnvironment });
+    }
+  });
+
+  it('completes Google PKCE in an AlgoSplit native build', async () => {
+    const { signInWithOAuth, exchangeCodeForSession } = oauthClient();
+    const previousPlatform = Platform.OS;
+    const previousEnvironment = Constants.executionEnvironment;
+    Object.assign(Platform, { OS: 'ios' });
+    Object.assign(Constants, { executionEnvironment: ExecutionEnvironment.Bare });
+    mockOpenAuthSessionAsync.mockResolvedValue({
+      type: 'success',
+      url: 'algosplit://oauth/callback?code=native-code',
+    });
+    try {
+      await expect(socialSessionForProvider('google')).resolves.toEqual({
+        access_token: 'temporary-access',
+        refresh_token: 'temporary-refresh',
+      });
+      expect(signInWithOAuth).toHaveBeenCalledWith({
+        provider: 'google',
+        options: {
+          redirectTo: 'algosplit://oauth/callback',
+          skipBrowserRedirect: true,
+        },
+      });
+      expect(mockOpenAuthSessionAsync).toHaveBeenCalledWith(
+        'https://project.supabase.co/auth/v1/authorize?provider=google',
+        'algosplit://oauth/callback'
+      );
+      expect(exchangeCodeForSession).toHaveBeenCalledWith('native-code');
+    } finally {
+      Object.assign(Platform, { OS: previousPlatform });
+      Object.assign(Constants, { executionEnvironment: previousEnvironment });
+    }
   });
 
   it('exchanges a web callback code into a temporary API handoff session', async () => {

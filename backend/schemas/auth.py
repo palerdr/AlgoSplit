@@ -30,6 +30,13 @@ class AuthClientPlatform(str, Enum):
     NATIVE = "native"
 
 
+class SocialAuthConfigResponse(BaseModel):
+    """Public Supabase values needed to start a client-side OAuth flow."""
+
+    supabase_url: str
+    supabase_publishable_key: str
+
+
 class SignUpRequest(BaseModel):
     """Request body for user sign up"""
 

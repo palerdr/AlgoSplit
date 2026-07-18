@@ -17,11 +17,13 @@ Use corresponding development URLs such as `http://localhost:8081/oauth/callback
 
 ## App and API environment
 
-The app needs only public Supabase values and the canonical callbacks. Put values like these in the app build environment (see [app/.env.example](app/.env.example)):
+The app loads the Supabase URL and publishable key from the API's unauthenticated
+`GET /auth/social-config` endpoint. Those values are already configured on the
+backend and do not need to be duplicated in Expo. Put only the canonical
+callback overrides in the app build environment when the defaults are not
+sufficient (see [app/.env.example](app/.env.example)):
 
 ```env
-EXPO_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 EXPO_PUBLIC_ALGOSPLIT_OAUTH_WEB_CALLBACK_URL=https://your-web-app.example/oauth/callback
 EXPO_PUBLIC_ALGOSPLIT_OAUTH_NATIVE_CALLBACK_URL=algosplit://oauth/callback
 EXPO_PUBLIC_ALGOSPLIT_IDENTITY_WEB_CALLBACK_URL=https://your-web-app.example/identity/callback
@@ -38,7 +40,10 @@ AUTH_IDENTITY_NATIVE_CALLBACK_URL=algosplit://identity/callback
 
 `FRONTEND_URL` must contain the canonical web origin so the backend accepts the web callback. The public OAuth callback values and server-controlled identity callback values must all be in Supabase's allowlist. In production, missing or untrusted backend identity callback configuration makes account linking fail closed.
 
-Never put a Google client secret, Apple private key, Apple client secret, or Supabase secret/service key in Expo public variables, source, logs, or build artifacts. The Supabase URL and publishable key are designed to be public.
+Never put a Google client secret, Apple private key, Apple client secret, or
+Supabase secret/service key in Expo public variables, source, logs, or build
+artifacts. The API endpoint returns only the Supabase URL and publishable key;
+it must never expose the secret/service key or provider credentials.
 
 ## Google
 

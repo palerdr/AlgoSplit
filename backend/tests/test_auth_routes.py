@@ -1,6 +1,24 @@
 import api.routes.auth as auth_routes
 
 
+def test_social_auth_config_is_public_and_exposes_only_publishable_values(client, monkeypatch):
+    monkeypatch.setattr(auth_routes, "SUPABASE_URL", "https://project.supabase.co")
+    monkeypatch.setattr(auth_routes, "SUPABASE_PUBLISHABLE_KEY", "sb_publishable_public")
+
+    response = client.get("/auth/social-config")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "supabase_url": "https://project.supabase.co",
+        "supabase_publishable_key": "sb_publishable_public",
+    }
+    serialized = response.text.lower()
+    assert "secret" not in serialized
+    assert "service_role" not in serialized
+    assert "google" not in serialized
+    assert "apple" not in serialized
+
+
 def test_signup_sets_auth_and_csrf_cookies(client):
     response = client.post(
         "/auth/signup",

@@ -3,11 +3,17 @@ import 'react-native-url-polyfill/auto';
 import { Platform } from 'react-native';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as AuthSession from 'expo-auth-session';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import * as Crypto from 'expo-crypto';
 import * as SecureStore from 'expo-secure-store';
 import * as WebBrowser from 'expo-web-browser';
 import { createClient } from '@supabase/supabase-js';
-import type { OAuthSessionCompleteRequest, SocialProvider } from '../api/backend';
+import {
+  auth,
+  type OAuthSessionCompleteRequest,
+  type SocialAuthConfigResponse,
+  type SocialProvider,
+} from '../api/backend';
 
 const TEMPORARY_STORAGE_KEY = 'algosplit_oauth_temporary_v1';
 const PENDING_WEB_AUTH_KEY = 'algosplit_oauth_pending_v1';
@@ -55,6 +61,7 @@ export type WebAuthCallbackResult =
 // This client is intentionally disposable. Once the API has adopted a social
 // session, dropping the bridge client releases its in-memory OAuth session too.
 let oauthClient: ReturnType<typeof createClient> | null = null;
+let socialConfigPromise: Promise<SocialAuthConfigResponse> | null = null;
 let appleAvailabilityPromise: Promise<boolean> | null = null;
 
 function sessionStorageOrNull(): SessionStorageLike | null {
@@ -245,23 +252,53 @@ function isExpectedCallback(url: string, expected: string): boolean {
   }
 }
 
-export function socialAuthConfigured(): boolean {
-  return Boolean(
-    normalizedPublicEnv(process.env.EXPO_PUBLIC_SUPABASE_URL) &&
-      normalizedPublicEnv(process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY)
-  );
+export function expoGoOAuthUnsupported(
+  platform: DevicePlatform = Platform.OS,
+  executionEnvironment: ExecutionEnvironment | string | null = Constants.executionEnvironment
+): boolean {
+  return platform !== 'web' && executionEnvironment === ExecutionEnvironment.StoreClient;
+}
+
+async function loadSocialAuthConfig(): Promise<SocialAuthConfigResponse> {
+  if (socialConfigPromise) return socialConfigPromise;
+  socialConfigPromise = auth
+    .socialConfig()
+    .then((config) => {
+      const supabaseUrl = normalizedPublicEnv(config.supabase_url);
+      const supabaseKey = normalizedPublicEnv(config.supabase_publishable_key);
+      if (!supabaseUrl || !supabaseKey) throw new Error('Incomplete social auth configuration');
+      const parsedUrl = new URL(supabaseUrl);
+      const isOriginOnly =
+        !parsedUrl.username &&
+        !parsedUrl.password &&
+        !parsedUrl.search &&
+        !parsedUrl.hash &&
+        (parsedUrl.pathname === '' || parsedUrl.pathname === '/');
+      if (!['http:', 'https:'].includes(parsedUrl.protocol) || !isOriginOnly) {
+        throw new Error('Invalid social auth URL');
+      }
+      return {
+        supabase_url: parsedUrl.origin,
+        supabase_publishable_key: supabaseKey,
+      };
+    })
+    .catch(() => {
+      socialConfigPromise = null;
+      throw new SocialAuthError('Could not load social sign-in configuration. Please try again.');
+    });
+  return socialConfigPromise;
 }
 
 /** Hide Apple unless Supabase publicly reports that the provider is enabled. */
 export function appleProviderEnabled(): Promise<boolean> {
   if (Platform.OS === 'android') return Promise.resolve(false);
   if (appleAvailabilityPromise) return appleAvailabilityPromise;
-  const supabaseUrl = normalizedPublicEnv(process.env.EXPO_PUBLIC_SUPABASE_URL);
-  const supabaseKey = normalizedPublicEnv(process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
-  if (!supabaseUrl || !supabaseKey) return Promise.resolve(false);
-  appleAvailabilityPromise = fetch(`${supabaseUrl.replace(/\/$/, '')}/auth/v1/settings`, {
-    headers: { apikey: supabaseKey },
-  })
+  appleAvailabilityPromise = loadSocialAuthConfig()
+    .then((config) =>
+      fetch(`${config.supabase_url}/auth/v1/settings`, {
+        headers: { apikey: config.supabase_publishable_key },
+      })
+    )
     .then(async (response) => {
       if (!response.ok) return false;
       const settings = (await response.json()) as { external?: { apple?: unknown } };
@@ -274,16 +311,14 @@ export function appleProviderEnabled(): Promise<boolean> {
 /** Test helper for clearing the process-local provider-settings cache. */
 export function resetSocialAuthCaches(): void {
   appleAvailabilityPromise = null;
+  socialConfigPromise = null;
+  oauthClient = null;
 }
 
-function getOAuthClient(): ReturnType<typeof createClient> {
-  const supabaseUrl = normalizedPublicEnv(process.env.EXPO_PUBLIC_SUPABASE_URL);
-  const supabaseKey = normalizedPublicEnv(process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY);
-  if (!supabaseUrl || !supabaseKey) {
-    throw new SocialAuthError('Social sign-in is not configured for this build.');
-  }
+async function getOAuthClient(): Promise<ReturnType<typeof createClient>> {
   if (!oauthClient) {
-    oauthClient = createClient(supabaseUrl, supabaseKey, {
+    const config = await loadSocialAuthConfig();
+    oauthClient = createClient(config.supabase_url, config.supabase_publishable_key, {
       auth: {
         storage: temporaryOAuthStorage,
         storageKey: OAUTH_STORAGE_KEY,
@@ -357,7 +392,7 @@ export async function startWebOAuthRedirect(
   navigate: WebNavigator = defaultWebNavigator,
   now = Date.now()
 ): Promise<void> {
-  const client = getOAuthClient();
+  const client = await getOAuthClient();
   const { data, error } = await client.auth.signInWithOAuth({
     provider,
     options: {
@@ -380,7 +415,7 @@ export async function startWebOAuthRedirect(
 
 async function nativeOAuthSession(provider: SocialProvider): Promise<OAuthSessionCompleteRequest> {
   const redirectTo = oauthCallbackUrl();
-  const client = getOAuthClient();
+  const client = await getOAuthClient();
   const { data, error } = await client.auth.signInWithOAuth({
     provider,
     options: {
@@ -437,7 +472,7 @@ async function nativeAppleSession(): Promise<OAuthSessionCompleteRequest> {
   if (!credential.identityToken) {
     throw new SocialAuthError('Apple did not return an identity token. Please try again.');
   }
-  const { data, error } = await getOAuthClient().auth.signInWithIdToken({
+  const { data, error } = await (await getOAuthClient()).auth.signInWithIdToken({
     provider: 'apple',
     token: credential.identityToken,
     nonce,
@@ -457,6 +492,16 @@ export async function socialSessionForProvider(
 ): Promise<OAuthSessionCompleteRequest | null> {
   if (!socialProviderVisible(provider)) {
     throw new SocialAuthError('This sign-in method is not available on this device.');
+  }
+  if (expoGoOAuthUnsupported()) {
+    if (provider === 'apple') {
+      throw new SocialAuthError(
+        'Apple sign-in requires the AlgoSplit development build; Expo Go cannot return from Apple sign-in.'
+      );
+    }
+    throw new SocialAuthError(
+      'Google sign-in requires the AlgoSplit development build; Expo Go cannot return from Google sign-in.'
+    );
   }
   try {
     if (Platform.OS === 'web') {
@@ -549,7 +594,7 @@ export async function completePendingWebAuth(
       pending.returnScreen
     );
   }
-  const { data, error } = await getOAuthClient().auth.exchangeCodeForSession(code);
+  const { data, error } = await (await getOAuthClient()).auth.exchangeCodeForSession(code);
   if (error) {
     await clearTemporaryOAuthCredentials();
     throw new SocialAuthError(

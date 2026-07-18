@@ -299,6 +299,7 @@ function qs(params: Record<string, QueryValue>): string {
  */
 const AUTH_ROUTES_WITHOUT_REFRESH = new Set([
   '/auth/csrf',
+  '/auth/social-config',
   '/auth/login',
   '/auth/signup',
   '/auth/forgot-password',
@@ -603,6 +604,12 @@ export type AuthClientPlatform = 'web' | 'native';
 export interface OAuthSessionCompleteRequest {
   access_token: string;
   refresh_token: string;
+}
+
+/** Public values returned by GET /auth/social-config for the disposable OAuth client. */
+export interface SocialAuthConfigResponse {
+  supabase_url: string;
+  supabase_publishable_key: string;
 }
 
 /** Safe identity data returned by GET /auth/identities. */
@@ -1890,6 +1897,11 @@ export const auth = {
   /** GET /auth/csrf — issue a readable browser double-submit token. */
   csrf(): Promise<void> {
     return request<void>('GET', '/auth/csrf', undefined, false);
+  },
+
+  /** GET /auth/social-config — public values for the short-lived OAuth bridge. */
+  socialConfig(): Promise<SocialAuthConfigResponse> {
+    return request<SocialAuthConfigResponse>('GET', '/auth/social-config');
   },
 
   async refreshIfNeeded(): Promise<boolean> {
