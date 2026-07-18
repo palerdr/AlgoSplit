@@ -39,11 +39,6 @@ export interface WorkoutDraft {
   exercises: WorkoutDraftExercise[];
 }
 
-export function parseWorkoutDayInput(value: string): { text: string; dayNumber: number } {
-  const text = value.replace(/\D/g, '').slice(0, 2);
-  return { text, dayNumber: text === '' ? Number.NaN : Number(text) };
-}
-
 /** Day numbers run 1..cycle_length; legacy splits without one stay weekly. */
 export function splitDayLimit(split: SplitResponse): number {
   const limit = split.cycle_length ?? 7;

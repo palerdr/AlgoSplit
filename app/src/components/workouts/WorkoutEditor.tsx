@@ -29,9 +29,7 @@ import {
   WorkoutDraft,
   WorkoutDraftExercise,
   newWorkoutDraft,
-  parseWorkoutDayInput,
   replaceWorkoutDraftExercise,
-  splitDayLimit,
   workoutDraftError,
   workoutDraftFromSession,
   workoutDraftFromTemplate,
@@ -43,7 +41,7 @@ import type { WizardWorkout } from '../../workout/splitWizard';
 
 /**
  * One editor, three destinations:
- * - 'session': a day inside a saved split (persists via the splits API; has a Day field)
+ * - 'session': a fixed day inside a saved split (persists via the splits API)
  * - 'template': a standalone saved workout (persists via the session-templates API)
  * - 'wizard': an in-memory workout being placed on a split-wizard day (no API call)
  */
@@ -105,7 +103,6 @@ export default function WorkoutEditor(props: WorkoutEditorProps) {
     if (props.mode === 'template') return workoutDraftFromTemplate(props.template);
     return workoutDraftFromWizard(props.initialWorkout);
   });
-  const [dayText, setDayText] = useState(() => String(draft.dayNumber));
   const [search, setSearch] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [exerciseSearch, setExerciseSearch] = useState<{ key: string; query: string } | null>(
@@ -479,25 +476,15 @@ export default function WorkoutEditor(props: WorkoutEditorProps) {
                 />
               </Glass>
               {props.mode === 'session' && (
-                <Glass style={styles.dayField}>
-                  <Text style={styles.dayPrefix}>Day</Text>
-                  <TextInput
-                    accessibilityLabel="Workout day"
-                    value={dayText}
-                    onChangeText={(value) => {
-                      const parsed = parseWorkoutDayInput(value);
-                      setDayText(parsed.text);
-                      setDraft((previous) => ({
-                        ...previous,
-                        dayNumber: parsed.dayNumber,
-                      }));
-                    }}
-                    keyboardType="number-pad"
-                    maxLength={splitDayLimit(props.split) > 9 ? 2 : 1}
-                    selectTextOnFocus
-                    style={styles.dayInput}
-                  />
-                </Glass>
+                <View
+                  accessible
+                  accessibilityRole="text"
+                  accessibilityLabel={`Workout day, Day ${draft.dayNumber}. Read only.`}
+                  style={styles.dayReadOnly}
+                >
+                  <Text style={styles.dayReadOnlyLabel}>Workout day</Text>
+                  <Text style={styles.dayReadOnlyValue}>Day {draft.dayNumber}</Text>
+                </View>
               )}
             </View>
 
@@ -640,15 +627,20 @@ const styles = StyleSheet.create({
   error: { color: '#E27878', fontSize: 12, lineHeight: 17, marginBottom: 12 },
   fieldRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
   nameField: { flex: 1, borderRadius: 16, paddingHorizontal: 14 },
-  dayField: {
-    width: 88,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
+  dayReadOnly: {
+    minWidth: 82,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    paddingHorizontal: 4,
   },
-  dayPrefix: { color: theme.textDim, fontSize: 12, marginRight: 6 },
-  dayInput: { color: theme.text, fontSize: 16, fontWeight: '700', flex: 1, paddingVertical: 14 },
+  dayReadOnlyLabel: {
+    color: theme.textDim,
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  dayReadOnlyValue: { color: theme.text, fontSize: 16, fontWeight: '700', marginTop: 3 },
   input: { color: theme.text, fontSize: 15, paddingVertical: 14 },
   sectionLabel: {
     color: theme.textDim,

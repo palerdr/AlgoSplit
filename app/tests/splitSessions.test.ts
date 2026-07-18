@@ -10,6 +10,7 @@ import {
   resolveSavedExercise,
   templateWorkoutPlans,
 } from '../src/workout/splitSessions';
+import { MAX_SPLIT_DAYS } from '../src/workout/splitEditing';
 
 function exercise(
   overrides: Partial<ExerciseResponse> & Pick<ExerciseResponse, 'id' | 'exercise_name'>
@@ -118,7 +119,7 @@ describe('account workout plans', () => {
     });
   });
 
-  it('adds only interior rest sentinels and excludes them from the start registry', () => {
+  it('adds every missing cycle day as rest and excludes them from the start registry', () => {
     const source = split();
     source.cycle_length = 4;
     source.sessions.find((session) => session.day_number === 4)!.day_number = 3;
@@ -128,9 +129,14 @@ describe('account workout plans', () => {
       [1, 'workout'],
       [2, 'rest'],
       [3, 'workout'],
+      [4, 'rest'],
     ]);
-    expect(editorDays.some((entry) => entry.dayNumber === 4)).toBe(false);
     expect(editorDays[1]).toMatchObject({
+      sessionId: null,
+      name: 'Rest',
+      synthetic: true,
+    });
+    expect(editorDays[3]).toMatchObject({
       sessionId: null,
       name: 'Rest',
       synthetic: true,
@@ -139,6 +145,67 @@ describe('account workout plans', () => {
     expect(accountWorkoutGroups([source])[0].sessions.map((entry) => entry.dayNumber)).toEqual([
       1,
       3,
+    ]);
+  });
+
+  it('renders a complete rest schedule for a split with no saved sessions', () => {
+    const source = split();
+    source.cycle_length = 5;
+    source.sessions = [];
+
+    const editorDays = accountWorkoutEditorGroups([source])[0].sessions;
+
+    expect(editorDays.map((entry) => [entry.dayNumber, entry.kind])).toEqual([
+      [1, 'rest'],
+      [2, 'rest'],
+      [3, 'rest'],
+      [4, 'rest'],
+      [5, 'rest'],
+    ]);
+    expect(editorDays.every((entry) => entry.kind === 'rest' && entry.synthetic)).toBe(true);
+    expect(accountWorkoutGroups([source])[0].sessions).toEqual([]);
+  });
+
+  it('fills trailing days through Day 7 for a legacy split without a cycle length', () => {
+    const source = split();
+    source.cycle_length = null;
+
+    expect(
+      accountWorkoutEditorGroups([source])[0].sessions.map((entry) => [
+        entry.dayNumber,
+        entry.kind,
+      ])
+    ).toEqual([
+      [1, 'workout'],
+      [2, 'rest'],
+      [3, 'rest'],
+      [4, 'workout'],
+      [5, 'rest'],
+      [6, 'rest'],
+      [7, 'rest'],
+    ]);
+    expect(accountWorkoutGroups([source])[0].sessions.map((entry) => entry.dayNumber)).toEqual([
+      1,
+      4,
+    ]);
+  });
+
+  it('caps generated editor days at the authoritative maximum for oversized cycles', () => {
+    const source = split();
+    source.cycle_length = 99;
+
+    const editorDays = accountWorkoutEditorGroups([source])[0].sessions;
+
+    expect(editorDays.map((entry) => entry.dayNumber)).toEqual(
+      Array.from({ length: MAX_SPLIT_DAYS }, (_, index) => index + 1)
+    );
+    expect(editorDays[MAX_SPLIT_DAYS - 1]).toMatchObject({
+      kind: 'rest',
+      synthetic: true,
+    });
+    expect(accountWorkoutGroups([source])[0].sessions.map((entry) => entry.dayNumber)).toEqual([
+      1,
+      4,
     ]);
   });
 

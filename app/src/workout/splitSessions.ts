@@ -4,6 +4,7 @@ import type {
   SplitResponse,
 } from '../api/backend';
 import { EXERCISES, type Exercise } from '../data/exercises';
+import { splitDayLimit } from './splitEditing';
 
 export interface PlannedExercise {
   exercise: Exercise;
@@ -26,7 +27,7 @@ export interface AccountRestSentinel {
   id: string;
   splitId: string;
   splitName: string;
-  /** Null only for an automatic interior-gap sentinel that is not persisted. */
+  /** Null only for an automatically generated schedule day that is not persisted. */
   sessionId: string | null;
   name: string;
   dayNumber: number;
@@ -134,12 +135,12 @@ function splitPlans(split: SplitResponse): AccountWorkoutPlan[] {
 
 function splitEditorEntries(split: SplitResponse): AccountWorkoutEditorEntry[] {
   const entries = persistedEntries(split);
-  if (entries.length < 2) return entries;
-
   const occupied = new Set(entries.map((entry) => entry.dayNumber));
-  const firstDay = Math.min(...occupied);
-  const lastDay = Math.max(...occupied);
-  for (let dayNumber = firstDay + 1; dayNumber < lastDay; dayNumber += 1) {
+  // Keep row generation identical to editor validation: legacy splits are
+  // seven-day cycles and malformed oversized cycles stop at the engine limit.
+  const lastCycleDay = splitDayLimit(split);
+
+  for (let dayNumber = 1; dayNumber <= lastCycleDay; dayNumber += 1) {
     if (occupied.has(dayNumber)) continue;
     entries.push({
       kind: 'rest',
@@ -168,7 +169,7 @@ export function accountWorkoutGroups(
   }));
 }
 
-/** Include manual and interior-gap rest sentinels for schedule editing only. */
+/** Include persisted and synthetic rest sentinels for schedule editing only. */
 export function accountWorkoutEditorGroups(
   splits: readonly SplitResponse[]
 ): AccountWorkoutEditorGroup[] {

@@ -33,7 +33,7 @@ interface PopupLayerProps {
 }
 
 const OPEN_MS = 220;
-const CLOSE_MS = 140;
+const CLOSE_MS = 100;
 
 /**
  * Shared entrance/exit for glass popups (confirm dialogs, pickers). Native
@@ -46,11 +46,11 @@ const CLOSE_MS = 140;
  * literal dark rectangle over an almost-transparent backdrop — the reported
  * black-square flash.
  *
- * Native Liquid Glass now stays at full opacity, animates its own material,
- * and uses only a short settle transform while the plain backdrop fades.
- * Every BlurView fallback can use a normal alpha transition. Liquid Glass is
- * never under an opacity-animated ancestor, so there is no masking rectangle
- * or stale timer frame.
+ * Native Liquid Glass now stays at full opacity and animates its own material
+ * while its inner content and the plain backdrop fade. Every BlurView fallback
+ * can use a normal alpha transition. Liquid Glass is never under an
+ * opacity-animated ancestor, so there is no masking rectangle or stale timer
+ * frame.
  */
 export default function PopupLayer({
   visible,
@@ -72,9 +72,19 @@ export default function PopupLayer({
   const layerRef = useRef<View>(null);
   const frameRef = useRef<View>(null);
   const focusTargetRef = useRef<View>(null);
+  const visibleChildrenRef = useRef(children);
   visibleRef.current = visible;
   onDismissRef.current = onDismiss;
   dismissDisabledRef.current = dismissDisabled;
+
+  // Keep the last committed visible contents mounted for the entire exit.
+  // Parent state often changes in the same batch that dismisses a popup (for
+  // example, selecting the first active split makes the clear action become
+  // available). Rendering those new children during the fade causes a
+  // one-frame flash. The next open still renders fresh children immediately.
+  useLayoutEffect(() => {
+    if (visible) visibleChildrenRef.current = children;
+  }, [children, visible]);
 
   useEffect(() => {
     animationRef.current?.stop();
@@ -89,7 +99,7 @@ export default function PopupLayer({
     const animation = Animated.timing(progress, {
       toValue: visible ? 1 : 0,
       duration: visible ? OPEN_MS : CLOSE_MS,
-      easing: visible ? Easing.out(Easing.cubic) : Easing.in(Easing.quad),
+      easing: visible ? Easing.out(Easing.cubic) : Easing.linear,
       useNativeDriver: true,
     });
     animationRef.current = animation;
@@ -231,11 +241,9 @@ export default function PopupLayer({
     // Every BlurView fallback can use an ordinary alpha transition. Native
     // Liquid Glass stays fully opaque and animates its material via context.
     ...(!liquidGlassAvailable ? { opacity: progress } : null),
-    transform: [
-      { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) },
-      { scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.975, 1] }) },
-    ],
   };
+
+  const renderedChildren = visible ? children : visibleChildrenRef.current;
 
   const layer = (
     <View
@@ -281,7 +289,7 @@ export default function PopupLayer({
         style={[styles.frame, { maxWidth, borderRadius: cardRadius }, frameMotion]}
       >
         <PopupGlassTransitionContext.Provider value={glassTransition}>
-          {children}
+          {renderedChildren}
         </PopupGlassTransitionContext.Provider>
       </Animated.View>
     </View>

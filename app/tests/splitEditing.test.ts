@@ -7,7 +7,6 @@ import type {
 import {
   newWorkoutDraft,
   normalizeResistanceProfile,
-  parseWorkoutDayInput,
   reorderWorkoutDraftExercises,
   replaceWorkoutDraftExercise,
   splitDayLimit,
@@ -66,18 +65,6 @@ function split(): SplitResponse {
 }
 
 describe('workout split editing', () => {
-  it('allows the day field to be cleared and entered again', () => {
-    const cleared = parseWorkoutDayInput('');
-    expect(cleared.text).toBe('');
-    expect(Number.isNaN(cleared.dayNumber)).toBe(true);
-    expect(parseWorkoutDayInput('Day 4')).toEqual({ text: '4', dayNumber: 4 });
-  });
-
-  it('accepts two-digit days for long cycles', () => {
-    expect(parseWorkoutDayInput('Day 12')).toEqual({ text: '12', dayNumber: 12 });
-    expect(parseWorkoutDayInput('123')).toEqual({ text: '12', dayNumber: 12 });
-  });
-
   it('derives the day limit from the cycle length', () => {
     expect(splitDayLimit(split())).toBe(4);
     expect(splitDayLimit({ ...split(), cycle_length: null })).toBe(7);
@@ -158,7 +145,7 @@ describe('workout split editing', () => {
     expect(payload.sessions[1]).toMatchObject({ name: 'Lower', day_number: 3 });
   });
 
-  it('adds a new workout on the first open day', () => {
+  it('adds a new workout on the first open day and preserves that day in the payload', () => {
     const source = split();
     const draft = newWorkoutDraft(source);
     draft.name = 'Arms';
@@ -172,11 +159,13 @@ describe('workout split editing', () => {
       },
     ];
 
+    const payload = splitWithWorkoutDraft(source, draft);
+
     expect(draft.dayNumber).toBe(2);
-    expect(splitWithWorkoutDraft(source, draft).sessions.map((item) => item.name)).toEqual([
-      'Upper',
-      'Arms',
-      'Lower',
+    expect(payload.sessions.map((item) => [item.name, item.day_number])).toEqual([
+      ['Upper', 1],
+      ['Arms', 2],
+      ['Lower', 3],
     ]);
   });
 

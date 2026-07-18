@@ -23,7 +23,14 @@ import { recoveryTokenFromUrl } from './src/auth/recoveryLink';
 // are never opacity-animated — iOS glass effects (GlassView) break, sometimes
 // permanently, when any ancestor view animates opacity. The fade lives on a
 // sibling overlay instead.
-type Screen = 'home' | 'session' | 'details' | 'workouts' | 'account' | 'privacy';
+type Screen =
+  | 'home'
+  | 'session'
+  | 'details'
+  | 'workouts'
+  | 'workouts-new-split'
+  | 'account'
+  | 'privacy';
 
 function Root() {
   const account = useAccountState();
@@ -33,6 +40,11 @@ function Root() {
   // A one-shot flag (cleared by Home once handled) — NOT a persistent key, so
   // ordinary navigation back to Home never replays the celebration.
   const [celebratePending, setCelebratePending] = useState(false);
+  const [activeSplitLanding, setActiveSplitLanding] = useState<{
+    splitId: string;
+    token: number;
+  } | null>(null);
+  const activeSplitLandingTokenRef = useRef(0);
   const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
   const pendingRef = useRef<Screen | null>(null);
   const anim = useRef(new Animated.Value(1)).current;
@@ -70,6 +82,7 @@ function Root() {
       pendingRef.current = null;
       setShown('home');
       setCelebratePending(false);
+      setActiveSplitLanding(null);
       return;
     }
     if (account.authReturnScreen) {
@@ -95,6 +108,14 @@ function Root() {
 
   if (account.status !== 'authenticated') return <AuthScreen />;
 
+  const landNewActiveSplit = (splitId: string) => {
+    setActiveSplitLanding({
+      splitId,
+      token: ++activeSplitLandingTokenRef.current,
+    });
+    go('home');
+  };
+
   const screen = (() => {
     switch (shown) {
       case 'home':
@@ -105,7 +126,10 @@ function Root() {
             onStartSession={() => go('session')}
             onDetails={() => go('details')}
             onWorkouts={() => go('workouts')}
+            onCreateSplit={() => go('workouts-new-split')}
             onAccount={() => go('account')}
+            activeSplitLanding={activeSplitLanding}
+            onActiveSplitLandingHandled={() => setActiveSplitLanding(null)}
           />
         );
       case 'session':
@@ -124,6 +148,15 @@ function Root() {
         return (
           <WorkoutsScreen
             onBack={() => go('home')}
+            onActiveSplitSet={landNewActiveSplit}
+          />
+        );
+      case 'workouts-new-split':
+        return (
+          <WorkoutsScreen
+            onBack={() => go('home')}
+            startInSplitCreation
+            onActiveSplitSet={landNewActiveSplit}
           />
         );
       case 'account':

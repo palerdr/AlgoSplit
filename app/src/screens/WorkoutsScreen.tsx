@@ -1,6 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
+  Animated,
+  Easing,
   FlatList,
+  PanResponder,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -24,6 +29,8 @@ import WorkoutEditor from '../components/workouts/WorkoutEditor';
 
 interface WorkoutsScreenProps {
   onBack: () => void;
+  startInSplitCreation?: boolean;
+  onActiveSplitSet?: (splitId: string) => void;
 }
 
 type DeleteTarget = { splitId: string; name: string };
@@ -31,8 +38,317 @@ type Mode = 'browse' | 'newSplit' | 'sessionEditor' | 'templateEditor';
 
 const tick = () => Haptics.selectionAsync().catch(() => {});
 
+const ACTIVE_TRACK_HEIGHT = 68;
+const ACTIVE_TRACK_PADDING = 6;
+const ACTIVE_THUMB_SIZE = ACTIVE_TRACK_HEIGHT - ACTIVE_TRACK_PADDING * 2;
+const ACTIVE_SLIDE_THRESHOLD = 0.88;
+
+function useReduceMotionEnabled(): boolean {
+  const [reduceMotionEnabled, setReduceMotionEnabled] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((enabled) => {
+        if (live) setReduceMotionEnabled(enabled);
+      })
+      .catch(() => {});
+    const subscription = AccessibilityInfo.addEventListener(
+      'reduceMotionChanged',
+      setReduceMotionEnabled
+    );
+    return () => {
+      live = false;
+      subscription.remove();
+    };
+  }, []);
+
+  return reduceMotionEnabled;
+}
+
+/**
+ * A deliberate slide gesture keeps active-split changes from being accidental.
+ * The two Glass views are siblings: only their inner color/text layers animate,
+ * while the thumb's glass moves without ever receiving animated opacity.
+ */
+function SlideToSetActive({
+  splitId,
+  splitName,
+  onComplete,
+}: {
+  splitId: string;
+  splitName: string;
+  onComplete: () => void;
+}) {
+  const reduceMotionEnabled = useReduceMotionEnabled();
+  const reduceMotionRef = useRef(reduceMotionEnabled);
+  const onCompleteRef = useRef(onComplete);
+  const [trackWidth, setTrackWidth] = useState(0);
+  const progress = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
+  const maxX = Math.max(
+    0,
+    trackWidth - ACTIVE_THUMB_SIZE - ACTIVE_TRACK_PADDING * 2
+  );
+  const maxXRef = useRef(maxX);
+  const dragStartXRef = useRef(0);
+  const completingRef = useRef(false);
+  const armedRef = useRef(false);
+  const completeSlideRef = useRef<() => void>(() => {});
+
+  reduceMotionRef.current = reduceMotionEnabled;
+  onCompleteRef.current = onComplete;
+  maxXRef.current = maxX;
+
+  useEffect(() => {
+    completingRef.current = false;
+    armedRef.current = false;
+    progress.setValue(0);
+  }, [progress, splitId]);
+
+  useEffect(() => {
+    pulse.stopAnimation();
+    if (reduceMotionEnabled) {
+      pulse.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 950,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 0,
+          duration: 950,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse, reduceMotionEnabled]);
+
+  const resetSlide = () => {
+    armedRef.current = false;
+    if (reduceMotionRef.current) {
+      progress.setValue(0);
+      return;
+    }
+    Animated.spring(progress, {
+      toValue: 0,
+      stiffness: 320,
+      damping: 24,
+      mass: 0.75,
+      useNativeDriver: false,
+    }).start();
+  };
+
+  completeSlideRef.current = () => {
+    if (completingRef.current) return;
+    completingRef.current = true;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+
+    const commit = () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      AccessibilityInfo.announceForAccessibility(
+        `${splitName} is now your active split`
+      );
+      onCompleteRef.current();
+    };
+
+    if (reduceMotionRef.current) {
+      progress.setValue(1);
+      commit();
+      return;
+    }
+    Animated.timing(progress, {
+      toValue: 1,
+      duration: 110,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: false,
+    }).start(({ finished }) => {
+      if (finished) commit();
+      else completingRef.current = false;
+    });
+  };
+
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () =>
+        !completingRef.current && maxXRef.current > 0,
+      onMoveShouldSetPanResponder: (_, gesture) =>
+        !completingRef.current &&
+        maxXRef.current > 0 &&
+        Math.abs(gesture.dx) > 3,
+      onPanResponderGrant: () => {
+        progress.stopAnimation((value) => {
+          dragStartXRef.current = value * maxXRef.current;
+        });
+      },
+      onPanResponderMove: (_, gesture) => {
+        if (completingRef.current || maxXRef.current <= 0) return;
+        const x = Math.min(
+          Math.max(dragStartXRef.current + gesture.dx, 0),
+          maxXRef.current
+        );
+        progress.setValue(x / maxXRef.current);
+        const armed = x >= maxXRef.current * ACTIVE_SLIDE_THRESHOLD;
+        if (armed !== armedRef.current) {
+          armedRef.current = armed;
+          tick();
+        }
+      },
+      onPanResponderRelease: (_, gesture) => {
+        if (completingRef.current || maxXRef.current <= 0) return;
+        const x = Math.min(
+          Math.max(dragStartXRef.current + gesture.dx, 0),
+          maxXRef.current
+        );
+        if (x >= maxXRef.current * ACTIVE_SLIDE_THRESHOLD) {
+          completeSlideRef.current();
+        } else {
+          resetSlide();
+        }
+      },
+      onPanResponderTerminate: resetSlide,
+      onPanResponderTerminationRequest: () => false,
+    })
+  ).current;
+
+  const translateX = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, maxX],
+  });
+  const webActivationProps =
+    Platform.OS === 'web'
+      ? {
+          tabIndex: 0 as const,
+          onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
+            const isSpace = event.key === ' ' || event.key === 'Spacebar';
+            if (isSpace) event.preventDefault();
+            if ((event.key === 'Enter' || isSpace) && !event.repeat) {
+              completeSlideRef.current();
+            }
+          },
+          // Screen readers commonly invoke a semantic button with a synthetic
+          // zero-detail click. Accept that AT path while ignoring real pointer
+          // clicks, which must still use the deliberate drag gesture.
+          onClick: (event: React.MouseEvent<HTMLElement>) => {
+            if (event.detail === 0) completeSlideRef.current();
+          },
+        }
+      : {};
+
+  return (
+    <View
+      {...webActivationProps}
+      style={styles.activeSlider}
+      onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+      accessible
+      accessibilityRole="button"
+      accessibilityLabel={`Set ${splitName} as active split`}
+      accessibilityHint="Slide the round control to the right. Screen reader users can activate this button."
+      accessibilityActions={[{ name: 'activate', label: 'Set active split' }]}
+      onAccessibilityAction={(event) => {
+        if (event.nativeEvent.actionName === 'activate') completeSlideRef.current();
+      }}
+    >
+      <Glass style={styles.activeSliderTrack}>
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.activeSliderFill,
+            {
+              width: progress.interpolate({
+                inputRange: [0, 1],
+                outputRange: [ACTIVE_TRACK_HEIGHT, Math.max(ACTIVE_TRACK_HEIGHT, trackWidth)],
+              }),
+              opacity: progress.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, 0.28],
+              }),
+            },
+          ]}
+        />
+        <Animated.Text
+          pointerEvents="none"
+          style={[
+            styles.activeSliderLabel,
+            {
+              opacity: progress.interpolate({
+                inputRange: [0, 0.7],
+                outputRange: [0.82, 0],
+                extrapolate: 'clamp',
+              }),
+            },
+          ]}
+        >
+          slide to set active
+        </Animated.Text>
+        <Animated.Text
+          pointerEvents="none"
+          style={[
+            styles.activeSliderReadyLabel,
+            {
+              opacity: progress.interpolate({
+                inputRange: [0.55, 0.9],
+                outputRange: [0, 1],
+                extrapolate: 'clamp',
+              }),
+            },
+          ]}
+        >
+          release to activate
+        </Animated.Text>
+      </Glass>
+      <Animated.View
+        accessible={false}
+        importantForAccessibility="no-hide-descendants"
+        style={[styles.activeSliderThumbWrap, { transform: [{ translateX }] }]}
+        {...pan.panHandlers}
+      >
+        <Glass style={styles.activeSliderThumb} interactive>
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.activeSliderThumbGlow,
+              {
+                opacity: progress.interpolate({
+                  inputRange: [0.65, 1],
+                  outputRange: [0, 0.48],
+                  extrapolate: 'clamp',
+                }),
+              },
+            ]}
+          />
+          <Animated.Text
+            pointerEvents="none"
+            style={[
+              styles.activeSliderChevron,
+              {
+                opacity: pulse.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.52, 1],
+                }),
+              },
+            ]}
+          >
+            ›
+          </Animated.Text>
+        </Glass>
+      </Animated.View>
+    </View>
+  );
+}
+
 export default function WorkoutsScreen({
   onBack,
+  startInSplitCreation = false,
+  onActiveSplitSet,
 }: WorkoutsScreenProps) {
   const account = useAccountState();
   const groups = useMemo(
@@ -40,7 +356,7 @@ export default function WorkoutsScreen({
     [account.splits.data]
   );
   const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>('browse');
+  const [mode, setMode] = useState<Mode>(startInSplitCreation ? 'newSplit' : 'browse');
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingRestDay, setEditingRestDay] = useState<number | undefined>(undefined);
   // Snapshot rather than a live cache lookup: a background refresh must not
@@ -115,7 +431,11 @@ export default function WorkoutsScreen({
     return (
       <SplitWizard
         onCancel={() => setMode('browse')}
-        onSaved={(saved) => {
+        onSaved={(saved, setAsActive) => {
+          if (setAsActive && onActiveSplitSet) {
+            onActiveSplitSet(saved.id);
+            return;
+          }
           setSelectedSplitId(saved.id);
           setMode('browse');
         }}
@@ -184,10 +504,13 @@ export default function WorkoutsScreen({
   }
 
   if (selectedGroup) {
+    const selectedIsActive = selectedGroup.id === account.activeSplitId;
     return (
       <View style={styles.container}>
         <View style={styles.topRow}>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Back to Workouts and Splits"
             onPress={() => {
               tick();
               setDeleteTarget(null);
@@ -198,7 +521,10 @@ export default function WorkoutsScreen({
             style={styles.backWrap}
           >
             <Glass style={styles.backChip} interactive>
-              <Text style={styles.backText}>‹ Workouts</Text>
+              <View style={styles.detailBackContent}>
+                <Text style={styles.detailBackChevron}>‹</Text>
+                <Text style={styles.backText}>Workouts and Splits</Text>
+              </View>
             </Glass>
           </Pressable>
           <Pressable
@@ -219,6 +545,7 @@ export default function WorkoutsScreen({
         <Text style={styles.title}>{selectedGroup.name}</Text>
 
         <FlatList
+          style={styles.detailDayList}
           data={selectedGroup.sessions}
           keyExtractor={(item) => item.id}
           refreshControl={
@@ -228,30 +555,17 @@ export default function WorkoutsScreen({
               tintColor={theme.textDim}
             />
           }
-          ListHeaderComponent={
-            <View>
-              <FadeIn>
-                <Pressable onPress={() => openSessionEditor(selectedGroup.id, null)}>
-                  <Glass style={styles.newBtn} interactive>
-                    <Text style={styles.newBtnText}>+ New workout</Text>
-                  </Glass>
-                </Pressable>
-              </FadeIn>
-              {account.splits.loaded &&
-                !account.splits.error &&
-                selectedGroup.sessions.length === 0 && (
-                  <Glass style={styles.notice}>
-                    <Text style={styles.noticeText}>This split has no workout days yet.</Text>
-                  </Glass>
-                )}
-            </View>
-          }
           renderItem={({ item, index }) => (
             <FadeIn delay={(index + 1) * 45}>
               <Glass style={styles.nameRow} interactive>
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={`Edit ${item.name}`}
+                  accessibilityLabel={
+                    item.kind === 'rest' && item.synthetic
+                      ? `Add a workout to Day ${item.dayNumber}, currently rest`
+                      : `Edit Day ${item.dayNumber}, ${item.name}`
+                  }
+                  accessibilityHint="Opens this day in the workout editor"
                   onPress={() =>
                     openSessionEditor(
                       item.splitId,
@@ -266,10 +580,16 @@ export default function WorkoutsScreen({
                       <Text style={styles.dayLabel}>Day {item.dayNumber}</Text>
                       <Text style={styles.nameRowText}>{item.name}</Text>
                     </View>
-                    {item.kind === 'workout' && (
+                    {item.kind === 'workout' ? (
                       <Text style={styles.rowMeta}>
                         {item.exercises.length}{' '}
                         {item.exercises.length === 1 ? 'exercise' : 'exercises'}
+                      </Text>
+                    ) : (
+                      <Text style={styles.rowMeta}>
+                        {item.synthetic
+                          ? 'Rest day · Tap to add a workout'
+                          : 'Rest day · Tap to edit'}
                       </Text>
                     )}
                   </View>
@@ -278,8 +598,32 @@ export default function WorkoutsScreen({
               </Glass>
             </FadeIn>
           )}
-          contentContainerStyle={{ paddingBottom: 40 }}
+          contentContainerStyle={styles.detailDayListContent}
         />
+        <View style={styles.activeControlSection}>
+          <Text style={styles.activeControlEyebrow}>ACTIVE SPLIT</Text>
+          {selectedIsActive ? (
+            <Glass style={styles.activeStatus}>
+              <Text style={styles.activeStatusCheck}>✓</Text>
+              <View style={styles.activeStatusCopy}>
+                <Text style={styles.activeStatusTitle}>Currently active</Text>
+                <Text style={styles.activeStatusHint}>
+                  This split is ready for one-tap starts from Home.
+                </Text>
+              </View>
+            </Glass>
+          ) : (
+            <SlideToSetActive
+              splitId={selectedGroup.id}
+              splitName={selectedGroup.name}
+              onComplete={() => {
+                account.setActiveSplit(selectedGroup.id);
+                if (onActiveSplitSet) onActiveSplitSet(selectedGroup.id);
+                else onBack();
+              }}
+            />
+          )}
+        </View>
         <DeleteConfirmationModal
           visible={deleteTarget !== null}
           title="Delete split?"
@@ -507,6 +851,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  detailBackContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  detailBackChevron: {
+    color: theme.text,
+    fontSize: 19,
+    lineHeight: 19,
+    fontWeight: '500',
+  },
   title: {
     color: theme.text,
     fontSize: 28,
@@ -634,5 +989,126 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     lineHeight: 17,
     marginTop: 5,
+  },
+  detailDayList: {
+    flex: 1,
+  },
+  detailDayListContent: {
+    paddingBottom: 12,
+  },
+  activeControlSection: {
+    flexShrink: 0,
+    paddingTop: 10,
+    paddingBottom: 24,
+  },
+  activeControlEyebrow: {
+    color: theme.textDim,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginBottom: 9,
+    marginLeft: 4,
+  },
+  activeSlider: {
+    height: ACTIVE_TRACK_HEIGHT,
+    position: 'relative',
+  },
+  activeSliderTrack: {
+    height: ACTIVE_TRACK_HEIGHT,
+    borderRadius: ACTIVE_TRACK_HEIGHT / 2,
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.16)',
+  },
+  activeSliderFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: ACTIVE_TRACK_HEIGHT / 2,
+    backgroundColor: theme.accent,
+  },
+  activeSliderLabel: {
+    color: theme.text,
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    letterSpacing: 0.25,
+    paddingLeft: ACTIVE_THUMB_SIZE / 2,
+  },
+  activeSliderReadyLabel: {
+    ...StyleSheet.absoluteFillObject,
+    color: theme.accent,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    paddingTop: (ACTIVE_TRACK_HEIGHT - 18) / 2,
+    paddingLeft: ACTIVE_THUMB_SIZE / 2,
+  },
+  activeSliderThumbWrap: {
+    position: 'absolute',
+    left: ACTIVE_TRACK_PADDING,
+    top: ACTIVE_TRACK_PADDING,
+  },
+  activeSliderThumb: {
+    width: ACTIVE_THUMB_SIZE,
+    height: ACTIVE_THUMB_SIZE,
+    borderRadius: ACTIVE_THUMB_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.28)',
+  },
+  activeSliderThumbGlow: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: ACTIVE_THUMB_SIZE / 2,
+    backgroundColor: theme.accent,
+  },
+  activeSliderChevron: {
+    color: theme.text,
+    fontSize: 31,
+    fontWeight: '300',
+    lineHeight: 34,
+    marginTop: -2,
+  },
+  activeStatus: {
+    minHeight: ACTIVE_TRACK_HEIGHT,
+    borderRadius: ACTIVE_TRACK_HEIGHT / 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(63,209,139,0.3)',
+  },
+  activeStatusCheck: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    paddingTop: 8,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(63,209,139,0.14)',
+    color: theme.accent,
+    fontSize: 17,
+    fontWeight: '800',
+    marginRight: 12,
+  },
+  activeStatusCopy: {
+    flex: 1,
+  },
+  activeStatusTitle: {
+    color: theme.accent,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  activeStatusHint: {
+    color: theme.textDim,
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 2,
   },
 });

@@ -1,6 +1,6 @@
 {
   "name": "algosplit",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "index.ts",
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",

@@ -2,7 +2,7 @@
   "expo": {
     "name": "AlgoSplit",
     "slug": "algosplit",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -10,10 +10,11 @@
     "newArchEnabled": true,
     "scheme": "algosplit",
     "ios": {
+      "icon": "./assets/algosplit-ios-icon.png",
       "supportsTablet": true,
       "usesAppleSignIn": true,
       "bundleIdentifier": "com.algosplit.app",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       },

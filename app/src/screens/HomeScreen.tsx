@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Animated,
   Easing,
@@ -20,6 +21,7 @@ import Glass from '../ui/Glass';
 import PopupLayer from '../ui/PopupLayer';
 import PopupContent from '../ui/PopupContent';
 import Tooltip from '../ui/Tooltip';
+import WorkoutLaunchSplash from '../ui/WorkoutLaunchSplash';
 import { levelsFromNet, stimulusScore } from '../analysis/stimulus';
 import { useAppState } from '../state/AppState';
 import { useAccountState } from '../state/AccountState';
@@ -44,8 +46,15 @@ interface HomeScreenProps {
   onStartSession: () => void;
   onDetails: () => void;
   onWorkouts: () => void;
+  onCreateSplit: () => void;
   onAccount: () => void;
+  activeSplitLanding: { splitId: string; token: number } | null;
+  onActiveSplitLandingHandled: () => void;
 }
+
+type PendingWorkoutLaunch =
+  | { key: number; kind: 'planned'; plan: AccountWorkoutPlan; name: string }
+  | { key: number; kind: 'freestyle'; name: string };
 
 // Sheet progress (0 pill → 1 open sheet) past which releasing opens it.
 const ARM_AT = 0.42;
@@ -54,6 +63,33 @@ const RADIUS = 32;
 
 const tick = () => Haptics.selectionAsync().catch(() => {});
 const thump = () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+
+let SymbolView: React.ComponentType<any> | null = null;
+try {
+  // SF Symbols on supported Apple platforms, with a text fallback everywhere else.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  SymbolView = require('expo-symbols').SymbolView;
+} catch {
+  SymbolView = null;
+}
+
+function NextChevron() {
+  return (
+    <View
+      pointerEvents="none"
+      accessible={false}
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={styles.nextChevronWrap}
+    >
+      {SymbolView ? (
+        <SymbolView name="chevron.right" size={21} tintColor={theme.textDim} />
+      ) : (
+        <Text style={styles.nextChevronFallback}>›</Text>
+      )}
+    </View>
+  );
+}
 
 // Diminishing returns for dragging past the end of the track.
 const rubber = (x: number) => x / (1 + x * 1.6);
@@ -138,7 +174,10 @@ export default function HomeScreen({
   onStartSession,
   onDetails,
   onWorkouts,
+  onCreateSplit,
   onAccount,
+  activeSplitLanding,
+  onActiveSplitLandingHandled,
 }: HomeScreenProps) {
   const {
     recentStimulus,
@@ -201,6 +240,73 @@ export default function HomeScreen({
     () => (activeSplit ? splitDoneToday(activeSplit, splitLogs, Date.now()) : false),
     [activeSplit, splitLogs]
   );
+  const activeZoneLanding = useRef(new Animated.Value(1)).current;
+  const activeZoneLandingAnimationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const landingHandledRef = useRef(onActiveSplitLandingHandled);
+  landingHandledRef.current = onActiveSplitLandingHandled;
+
+  // When a split is made active from the Workouts screen, its Home control
+  // visibly settles into place. Only descendants of Glass animate, preserving
+  // the native Liquid Glass material.
+  useEffect(() => {
+    if (!activeSplitLanding || activeSplit?.id !== activeSplitLanding.splitId) return;
+    let alive = true;
+    activeZoneLandingAnimationRef.current?.stop();
+
+    const complete = () => {
+      if (alive) landingHandledRef.current();
+    };
+
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((reduceMotion) => {
+        if (!alive) return;
+        if (reduceMotion) {
+          activeZoneLanding.setValue(1);
+          complete();
+          return;
+        }
+
+        activeZoneLanding.setValue(0);
+        const animation = Animated.sequence([
+          Animated.timing(activeZoneLanding, {
+            toValue: 0.68,
+            duration: 280,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+          Animated.spring(activeZoneLanding, {
+            toValue: 1,
+            stiffness: 210,
+            damping: 17,
+            mass: 0.72,
+            useNativeDriver: true,
+          }),
+        ]);
+        activeZoneLandingAnimationRef.current = animation;
+        animation.start(({ finished }) => {
+          if (activeZoneLandingAnimationRef.current === animation) {
+            activeZoneLandingAnimationRef.current = null;
+          }
+          if (finished) complete();
+        });
+      })
+      .catch(() => {
+        if (!alive) return;
+        activeZoneLanding.setValue(1);
+        complete();
+      });
+
+    return () => {
+      alive = false;
+      activeZoneLandingAnimationRef.current?.stop();
+      activeZoneLandingAnimationRef.current = null;
+    };
+  }, [
+    activeSplit?.id,
+    activeSplitLanding?.splitId,
+    activeSplitLanding?.token,
+    activeZoneLanding,
+  ]);
   const orderedGroups = React.useMemo(() => {
     if (!activeSplit) return workoutGroups;
     const active = workoutGroups.find((group) => group.id === activeSplit.id);
@@ -408,15 +514,41 @@ export default function HomeScreen({
     })
   ).current;
 
-  const pick = (plan: AccountWorkoutPlan) => {
+  const [pendingLaunch, setPendingLaunch] = useState<PendingWorkoutLaunch | null>(null);
+  const pendingLaunchRef = useRef<PendingWorkoutLaunch | null>(null);
+  const launchKeyRef = useRef(0);
+
+  const queueLaunch = (
+    launch:
+      | { kind: 'planned'; plan: AccountWorkoutPlan; name: string }
+      | { kind: 'freestyle'; name: string }
+  ) => {
+    // The full-screen splash blocks follow-up taps, while the ref closes the
+    // tiny window before React commits that overlay.
+    if (pendingLaunchRef.current) return;
     thump();
-    startPlannedSession(plan);
-    onStartSession();
+    const pending = { ...launch, key: ++launchKeyRef.current } as PendingWorkoutLaunch;
+    pendingLaunchRef.current = pending;
+    setPendingLaunch(pending);
+  };
+
+  const pick = (plan: AccountWorkoutPlan) => {
+    queueLaunch({ kind: 'planned', plan, name: plan.name });
   };
 
   const pickFreestyle = () => {
-    thump();
-    startFreeSession();
+    queueLaunch({ kind: 'freestyle', name: 'Freeball' });
+  };
+
+  const finishPendingLaunch = () => {
+    const launch = pendingLaunchRef.current;
+    if (!launch) return;
+    pendingLaunchRef.current = null;
+    if (launch.kind === 'planned') startPlannedSession(launch.plan);
+    else startFreeSession();
+    // Commit the session and navigation in the same callback. The splash stays
+    // mounted over Home until the route swap, avoiding an exposed intermediate
+    // state after its one-second sequence.
     onStartSession();
   };
 
@@ -478,7 +610,7 @@ export default function HomeScreen({
             text="Weekly training stimulus, scored 0–100"
             pointer="top"
             caretOffset={DIAL_SIZE / 2}
-            maxWidth={150}
+            maxWidth={220}
             style={styles.dialTipPosition}
           />
         </View>
@@ -491,6 +623,14 @@ export default function HomeScreen({
             style={styles.activeZonePress}
             onPress={() => {
               tick();
+              if (
+                account.splits.loaded &&
+                !account.splits.error &&
+                account.splits.data.length === 0
+              ) {
+                onCreateSplit();
+                return;
+              }
               setSplitPickerOpen(true);
             }}
           >
@@ -499,22 +639,66 @@ export default function HomeScreen({
               tintColor={HOME_CONTROL_TINT}
               interactive
             >
-              {activeSplit ? (
-                <View style={styles.activeZoneRow}>
-                  <Text style={styles.activeZoneName} numberOfLines={1}>
-                    {activeSplit.name}
-                  </Text>
-                  <View style={styles.activeStreakRow}>
-                    <FireIcon size={15} lit={activeStreak > 0} />
-                    {activeStreak > 0 && <Text style={styles.activeTag}>{activeStreak}</Text>}
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  styles.activeLandingGlow,
+                  {
+                    opacity: activeZoneLanding.interpolate({
+                      inputRange: [0, 0.55, 1],
+                      outputRange: [0, 0.34, 0],
+                    }),
+                    transform: [
+                      {
+                        scaleX: activeZoneLanding.interpolate({
+                          inputRange: [0, 0.68, 1],
+                          outputRange: [0.55, 1.04, 1.08],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              />
+              <Animated.View
+                pointerEvents="none"
+                style={{
+                  opacity: activeZoneLanding.interpolate({
+                    inputRange: [0, 0.28, 1],
+                    outputRange: [0, 1, 1],
+                  }),
+                  transform: [
+                    {
+                      translateY: activeZoneLanding.interpolate({
+                        inputRange: [0, 0.68, 1],
+                        outputRange: [13, -2, 0],
+                      }),
+                    },
+                    {
+                      scale: activeZoneLanding.interpolate({
+                        inputRange: [0, 0.68, 1],
+                        outputRange: [0.94, 1.025, 1],
+                      }),
+                    },
+                  ],
+                }}
+              >
+                {activeSplit ? (
+                  <View style={styles.activeZoneRow}>
+                    <Text style={styles.activeZoneName} numberOfLines={1}>
+                      {activeSplit.name}
+                    </Text>
+                    <View style={styles.activeStreakRow}>
+                      <FireIcon size={15} lit={activeStreak > 0} />
+                      {activeStreak > 0 && <Text style={styles.activeTag}>{activeStreak}</Text>}
+                    </View>
                   </View>
-                </View>
-              ) : (
-                <View style={styles.activeZoneRow}>
-                  <Text style={styles.activeZoneEmpty}>No active split</Text>
-                  <Text style={styles.activeZonePlus}>+</Text>
-                </View>
-              )}
+                ) : (
+                  <View style={styles.activeZoneRow}>
+                    <Text style={styles.activeZoneEmpty}>No active split</Text>
+                    <Text style={styles.activeZonePlus}>+</Text>
+                  </View>
+                )}
+              </Animated.View>
             </Glass>
           </Pressable>
         )}
@@ -746,68 +930,99 @@ export default function HomeScreen({
                   ) : (
                     orderedGroups.map((group) => {
                       const isActive = group.id === activeSplit?.id;
-                      const quickStart = isActive && !activeDoneToday ? activeNextPlan : null;
+                      const openSplitDays = () => {
+                        tick();
+                        setSelectedSplitId(group.id);
+                      };
+                      const openActiveWorkout = () => {
+                        if (!activeNextPlan) {
+                          openSplitDays();
+                          return;
+                        }
+                        if (activeDoneToday) {
+                          tick();
+                          setForceStartPlan(activeNextPlan);
+                          return;
+                        }
+                        pick(activeNextPlan);
+                      };
+                      const activeCardStyle =
+                        isActive && !activeDoneToday
+                          ? styles.sheetSplitCardActive
+                          : isActive && activeDoneToday
+                            ? styles.sheetSplitCardDone
+                            : null;
                       return (
-                        <Pressable
-                          key={group.id}
-                          onPress={() => {
-                            // The active split starts its next workout on the
-                            // spot; other splits open their day list. Once
-                            // today's assigned workout is done, tapping asks
-                            // before starting another — no silent double.
-                            if (quickStart) {
-                              pick(quickStart);
-                              return;
-                            }
-                            if (isActive && activeDoneToday && activeNextPlan) {
-                              tick();
-                              setForceStartPlan(activeNextPlan);
-                              return;
-                            }
-                            tick();
-                            setSelectedSplitId(group.id);
-                          }}
-                        >
-                          {({ pressed }) => (
-                            <View
-                              style={[
-                                styles.sheetCard,
-                                isActive && styles.sheetCardActive,
-                                isActive && activeDoneToday && styles.sheetCardDone,
-                                pressed && styles.cardPressed,
-                              ]}
-                            >
-                              <View style={styles.planTitleRow}>
-                                <Text style={styles.cardTitle}>{group.name}</Text>
-                                {isActive ? (
-                                  activeStreak > 0 ? (
-                                    <View style={styles.activeStreakRow}>
-                                      <FireIcon size={13} />
-                                      <Text style={styles.activeTag}>{activeStreak}</Text>
-                                    </View>
-                                  ) : (
-                                    <Text style={styles.activeTag}>ACTIVE</Text>
-                                  )
-                                ) : (
-                                  <Text style={styles.planSplit}>›</Text>
-                                )}
+                        <View key={group.id} style={styles.splitButtonPair}>
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Open ${group.name} workout days`}
+                            onPress={openSplitDays}
+                            style={styles.splitChoicePress}
+                          >
+                            {({ pressed }) => (
+                              <View
+                                style={[
+                                  styles.sheetSplitCard,
+                                  activeCardStyle,
+                                  pressed && styles.cardPressed,
+                                ]}
+                              >
+                                <View style={styles.splitChoiceCopy}>
+                                  <Text style={styles.splitChoiceKicker}>Split</Text>
+                                  <Text style={styles.splitChoiceTitle} numberOfLines={2}>
+                                    {group.name}
+                                  </Text>
+                                </View>
+                                <NextChevron />
                               </View>
-                              <Text style={styles.cardSub} numberOfLines={1}>
-                                {quickStart
-                                  ? `Starts Day ${quickStart.dayNumber} ${quickStart.name} · ${
-                                      quickStart.exercises.length
-                                    } ${quickStart.exercises.length === 1 ? 'exercise' : 'exercises'}`
-                                  : `${group.sessions.length} workout ${
-                                        group.sessions.length === 1 ? 'day' : 'days'
-                                      }${group.cycleLength ? ` · ${group.cycleLength}-day cycle` : ''}${
-                                        group.sessions.length > 0
-                                          ? ` · ${group.sessions.map((session) => session.name).join(' · ')}`
-                                          : ''
-                                      }`}
-                              </Text>
-                            </View>
-                          )}
-                        </Pressable>
+                            )}
+                          </Pressable>
+
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={
+                              isActive && activeNextPlan
+                                ? activeDoneToday
+                                  ? `Start ${activeNextPlan.name} again`
+                                  : `Start today's workout, ${activeNextPlan.name}`
+                                : `Open ${group.name}, ${group.sessions.length} workouts`
+                            }
+                            onPress={isActive ? openActiveWorkout : openSplitDays}
+                            style={styles.splitChoicePress}
+                          >
+                            {({ pressed }) => (
+                              <View
+                                style={[
+                                  styles.sheetSplitCard,
+                                  activeCardStyle,
+                                  pressed && styles.cardPressed,
+                                ]}
+                              >
+                                {isActive ? (
+                                  <View style={styles.splitChoiceCopy}>
+                                    <Text style={styles.splitChoiceKicker}>
+                                      {activeDoneToday ? 'Done today' : "Today's workout"}
+                                    </Text>
+                                    <Text style={styles.splitChoiceTitle} numberOfLines={2}>
+                                      {activeNextPlan?.name ?? 'Choose workout'}
+                                    </Text>
+                                  </View>
+                                ) : (
+                                  <View style={styles.splitChoiceCopy}>
+                                    <Text style={styles.splitWorkoutCount}>
+                                      {group.sessions.length}
+                                    </Text>
+                                    <Text style={styles.splitChoiceKicker}>
+                                      {group.sessions.length === 1 ? 'Workout' : 'Workouts'}
+                                    </Text>
+                                  </View>
+                                )}
+                                {(!isActive || !activeNextPlan) && <NextChevron />}
+                              </View>
+                            )}
+                          </Pressable>
+                        </View>
                       );
                     })
                   )}
@@ -1003,6 +1218,14 @@ export default function HomeScreen({
           </Pressable>
         </Glass>
       </PopupLayer>
+
+      {pendingLaunch && (
+        <WorkoutLaunchSplash
+          key={pendingLaunch.key}
+          workoutName={pendingLaunch.name}
+          onFinished={finishPendingLaunch}
+        />
+      )}
     </View>
   );
 }
@@ -1147,6 +1370,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  activeLandingGlow: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: DIAL_SIZE / 2,
+    backgroundColor: theme.accent,
+  },
   activeZoneRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1226,15 +1454,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     paddingTop: 14,
-  },
-  sheetCardActive: {
-    borderColor: 'rgba(65,196,110,0.5)',
-    backgroundColor: 'rgba(65,196,110,0.10)',
-  },
-  // Passive signal that today's assigned workout is already logged — the
-  // explanation lives in the force-start confirm popup, not inline text.
-  sheetCardDone: {
-    opacity: 0.55,
   },
   forceStartButton: {
     borderRadius: 16,
@@ -1330,6 +1549,75 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.22)',
   },
+  splitButtonPair: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 8,
+    marginBottom: 10,
+  },
+  splitChoicePress: {
+    flex: 1,
+  },
+  sheetSplitCard: {
+    flex: 1,
+    minHeight: 76,
+    borderRadius: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 13,
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.22)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 7,
+  },
+  sheetSplitCardActive: {
+    borderColor: 'rgba(65,196,110,0.52)',
+    backgroundColor: 'rgba(65,196,110,0.11)',
+  },
+  // Once today's assignment is logged, both halves return to a neutral card.
+  sheetSplitCardDone: {
+    opacity: 0.58,
+  },
+  splitChoiceCopy: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: 'center',
+  },
+  splitChoiceKicker: {
+    color: theme.textDim,
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  splitChoiceTitle: {
+    color: theme.text,
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  splitWorkoutCount: {
+    color: theme.text,
+    fontSize: 23,
+    lineHeight: 25,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  nextChevronFallback: {
+    color: theme.textDim,
+    fontSize: 29,
+    lineHeight: 30,
+    fontWeight: '300',
+  },
+  nextChevronWrap: {
+    width: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   cardPressed: {
     transform: [{ scale: 0.97 }],
   },
@@ -1371,12 +1659,6 @@ const styles = StyleSheet.create({
     color: theme.accent,
     fontSize: 12,
     fontWeight: '800',
-  },
-  planSplit: {
-    color: theme.accent,
-    fontSize: 11,
-    fontWeight: '600',
-    flexShrink: 1,
   },
   freeCard: {
     opacity: 0.85,

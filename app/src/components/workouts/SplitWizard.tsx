@@ -42,7 +42,7 @@ import WorkoutEditor from './WorkoutEditor';
 
 interface SplitWizardProps {
   onCancel: () => void;
-  onSaved: (split: SplitResponse) => void;
+  onSaved: (split: SplitResponse, setAsActive: boolean) => void;
 }
 
 const tick = () => Haptics.selectionAsync().catch(() => {});
@@ -198,7 +198,7 @@ export default function SplitWizard({ onCancel, onSaved }: SplitWizardProps) {
       const saved = await account.createSplit(wizardDraftToSplitCreate(draft));
       if (setAsActive) account.setActiveSplit(saved.id);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      onSaved(saved);
+      onSaved(saved, setAsActive);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Split could not be saved.');
     } finally {
