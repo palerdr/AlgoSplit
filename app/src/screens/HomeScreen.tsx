@@ -99,6 +99,12 @@ const DIAL_SIZE = 74;
 const DIAL_STROKE = 5;
 const DIAL_R = (DIAL_SIZE - DIAL_STROKE) / 2;
 const DIAL_C = 2 * Math.PI * DIAL_R;
+const TOP_ROW_TOP = 64;
+const TOP_ZONE_TOP = 132;
+// Native glass can composite a few pixels beyond its React Native bounds.
+// These exits include the full controls, the dial tooltip, and extra bleed room.
+const TOP_ROW_CELEBRATION_EXIT_Y = -190;
+const TOP_ZONE_CELEBRATION_EXIT_Y = -310;
 const HOME_CONTROL_TINT = 'rgba(255,255,255,0.025)';
 const ACTIVE_ZONE_RADIUS = 22;
 const ACTIVE_DAY_OFFSETS = [-10, -9, -8, -7, -6, -5, -4, -3, -2, -1, 0] as const;
@@ -402,12 +408,17 @@ export default function HomeScreen({
   }, [account.status, account.activeSplitId]);
 
   // ── Post-workout celebration ────────────────────────────────────
-  // The SAME body model that lives on this screen plays the ending: zoomed in
-  // and spinning with the session's stimulus while a check pops, then it lands
-  // facing front, zooms back out, and the normal controls settle in. All
-  // JS-driven and transform-only (no opacity over glass).
-  const [celebrating, setCelebrating] = useState(false);
-  const [bodySource, setBodySource] = useState<'recent' | 'session'>('recent');
+  // The SAME positioned body model that lives on this screen plays the ending:
+  // zoomed and spinning with the session's stimulus while a check pops, then
+  // its colors crossfade back to recent stimulus as it returns to normal scale.
+  // Keeping position inside BodyHeatmap prevents a session/recent handoff jump.
+  // Seed from the one-shot prop so the first Home frame is already in its
+  // celebration state behind the root transition cover. This prevents native
+  // glass from flashing before the effect below gets its first turn.
+  const [celebrating, setCelebrating] = useState(celebrate);
+  const [bodySource, setBodySource] = useState<'recent' | 'session'>(
+    celebrate ? 'session' : 'recent'
+  );
   const accountStimulusPending =
     bodySource === 'recent' &&
     (account.status === 'checking' ||
@@ -415,8 +426,8 @@ export default function HomeScreen({
         !account.recentStimulus.loaded &&
         !account.recentStimulus.error));
   const [spinNonce, setSpinNonce] = useState(0);
-  const uiAnim = useRef(new Animated.Value(1)).current; // 0 = controls offscreen
-  const zoomAnim = useRef(new Animated.Value(1)).current; // body scale
+  const uiAnim = useRef(new Animated.Value(celebrate ? 0 : 1)).current; // 0 = controls offscreen
+  const zoomAnim = useRef(new Animated.Value(celebrate ? 0.9 : 1)).current; // body scale
   const checkAnim = useRef(new Animated.Value(0)).current;
   const handoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -426,6 +437,12 @@ export default function HomeScreen({
     // must live in a ref (cleared on unmount only), NOT in this effect's
     // cleanup, or it gets cancelled instantly and the controls never return.
     onCelebrateHandled();
+    if (dialTipTimerRef.current) {
+      clearTimeout(dialTipTimerRef.current);
+      dialTipTimerRef.current = null;
+    }
+    setDialTipVisible(false);
+    setSplitPickerOpen(false);
     setSpinNonce((n) => n + 1);
     setCelebrating(true);
     setBodySource('session');
@@ -588,12 +605,19 @@ export default function HomeScreen({
 
       {/* Stimulus dial + active-split zone, floating beside the body model */}
       <Animated.View
-        pointerEvents="box-none"
+        pointerEvents={celebrating ? 'none' : 'box-none'}
+        accessibilityElementsHidden={celebrating}
+        importantForAccessibility={celebrating ? 'no-hide-descendants' : 'auto'}
         style={[
           styles.topZoneWrap,
           {
             transform: [
-              { translateY: uiAnim.interpolate({ inputRange: [0, 1], outputRange: [-180, 0] }) },
+              {
+                translateY: uiAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [TOP_ZONE_CELEBRATION_EXIT_Y, 0],
+                }),
+              },
             ],
           },
         ]}
@@ -717,38 +741,46 @@ export default function HomeScreen({
         )}
       </Animated.View>
 
-      {failedSyncCount > 0 ? (
-        <StatusHud
-          kind="error"
-          label={`${failedSyncCount} upload${failedSyncCount === 1 ? '' : 's'} failed`}
-          onPress={() => {
-            tick();
-            retryFailedWorkouts();
-          }}
-        />
-      ) : account.recentStimulus.error ? (
-        <StatusHud
-          kind="error"
-          label="Stimulus unavailable"
-          onPress={() => {
-            tick();
-            account.refreshStimulus();
-          }}
-        />
-      ) : accountStimulusPending ? (
-        <StatusHud kind="loading" label="Syncing stimulus" />
-      ) : null}
+      {!celebrating &&
+        (failedSyncCount > 0 ? (
+          <StatusHud
+            kind="error"
+            label={`${failedSyncCount} upload${failedSyncCount === 1 ? '' : 's'} failed`}
+            onPress={() => {
+              tick();
+              retryFailedWorkouts();
+            }}
+          />
+        ) : account.recentStimulus.error ? (
+          <StatusHud
+            kind="error"
+            label="Stimulus unavailable"
+            onPress={() => {
+              tick();
+              account.refreshStimulus();
+            }}
+          />
+        ) : accountStimulusPending ? (
+          <StatusHud kind="loading" label="Syncing stimulus" />
+        ) : null)}
 
       <Animated.View
+        pointerEvents={celebrating ? 'none' : 'box-none'}
+        accessibilityElementsHidden={celebrating}
+        importantForAccessibility={celebrating ? 'no-hide-descendants' : 'auto'}
         style={[
           styles.topRow,
           {
             transform: [
-              { translateY: uiAnim.interpolate({ inputRange: [0, 1], outputRange: [-130, 0] }) },
+              {
+                translateY: uiAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [TOP_ROW_CELEBRATION_EXIT_Y, 0],
+                }),
+              },
             ],
           },
         ]}
-        pointerEvents="box-none"
       >
         <Pressable onPress={() => { tick(); onDetails(); }}>
           <Glass style={styles.smallButton} interactive>
@@ -782,6 +814,9 @@ export default function HomeScreen({
 
       {/* The morphing glass: pill when closed, stretches into the sheet */}
       <Animated.View
+        pointerEvents={celebrating ? 'none' : 'auto'}
+        accessibilityElementsHidden={celebrating}
+        importantForAccessibility={celebrating ? 'no-hide-descendants' : 'auto'}
         style={[
           styles.morphWrap,
           {
@@ -1122,10 +1157,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.bg,
+    overflow: 'hidden',
   },
   topRow: {
     position: 'absolute',
-    top: 64,
+    top: TOP_ROW_TOP,
     left: 20,
     right: 20,
     flexDirection: 'row',
@@ -1153,7 +1189,7 @@ const styles = StyleSheet.create({
   },
   topZoneWrap: {
     position: 'absolute',
-    top: 132,
+    top: TOP_ZONE_TOP,
     left: 20,
     right: 20,
     flexDirection: 'row',

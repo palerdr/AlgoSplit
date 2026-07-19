@@ -7,11 +7,15 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { Asset } from 'expo-asset';
 import {
   buildSegmentedBody,
+  interpolateStimulusLevels,
   type BodyPartGeometry,
   type SegmentedBodyData,
-  updateSegmentedBodyColors,
-  updateSegmentedBodyColorsBlended,
+  updateSegmentedBodyHeatLevels,
 } from './buildBodyMeshes';
+import {
+  createBodyHeatFieldPipeline,
+  type BodyHeatFieldPipeline,
+} from './bodyHeatField';
 import { BODY_3D_CONFIG } from './threeConfig';
 
 interface BodyHeatmapProps {
@@ -27,7 +31,7 @@ interface BodyHeatmapProps {
 }
 
 const SPIN_DURATION_MS = 1700;
-const COLOR_TWEEN_MS = 650;
+const HEAT_TWEEN_MS = 650;
 
 function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -193,8 +197,8 @@ function BodyHeatmap({ width, height, stimulusLevels, onRegionPress, spinTrigger
   const spinPendingRef = useRef(false);
   const lastSpinTriggerRef = useRef(0);
   const sceneReadyRef = useRef(false);
-  // Crossfade between stimulus states instead of snapping colors.
-  const colorTweenRef = useRef<{
+  // Crossfade numeric stimulus before field blur and palette mapping.
+  const heatTweenRef = useRef<{
     startTime: number;
     from: Record<string, number>;
     to: Record<string, number>;
@@ -221,6 +225,7 @@ function BodyHeatmap({ width, height, stimulusLevels, onRegionPress, spinTrigger
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const raycasterRef = useRef(new THREE.Raycaster());
   const bodyDataRef = useRef<SegmentedBodyData | null>(null);
+  const heatPipelineRef = useRef<BodyHeatFieldPipeline | null>(null);
   const rafRef = useRef<number | null>(null);
   // Skip renderer.render() when nothing visible changed so an idle body
   // doesn't repaint at 60fps.
@@ -347,6 +352,13 @@ function BodyHeatmap({ width, height, stimulusLevels, onRegionPress, spinTrigger
         const bodyData = buildSegmentedBody(parts, stimulusRef.current);
         bodyDataRef.current = bodyData;
         displayedLevelsRef.current = stimulusRef.current;
+        const heatPipeline = createBodyHeatFieldPipeline(
+          renderer,
+          bodyData.heatUniforms,
+          gl.drawingBufferWidth,
+          gl.drawingBufferHeight
+        );
+        heatPipelineRef.current = heatPipeline;
 
         const group = bodyData.group;
         group.position.x = BODY_3D_CONFIG.model.offsetX;
@@ -389,14 +401,22 @@ function BodyHeatmap({ width, height, stimulusLevels, onRegionPress, spinTrigger
             needsRender = true;
           }
 
-          // Color crossfade between stimulus states.
-          if (colorTweenRef.current && bodyDataRef.current) {
-            const { startTime, from, to } = colorTweenRef.current;
-            const t = Math.min(1, (Date.now() - startTime) / COLOR_TWEEN_MS);
-            updateSegmentedBodyColorsBlended(bodyDataRef.current, from, to, easeInOutCubic(t));
+          // Tween the scalar field first; Gaussian blending and palette mapping
+          // happen later in the render pipeline, just like a conventional map.
+          if (heatTweenRef.current && bodyDataRef.current) {
+            const { startTime, from, to } = heatTweenRef.current;
+            const t = Math.min(1, (Date.now() - startTime) / HEAT_TWEEN_MS);
+            const displayedLevels = interpolateStimulusLevels(
+              from,
+              to,
+              easeInOutCubic(t)
+            );
+            updateSegmentedBodyHeatLevels(bodyDataRef.current, displayedLevels);
+            displayedLevelsRef.current = displayedLevels;
             if (t >= 1) {
-              updateSegmentedBodyColors(bodyDataRef.current, to);
-              colorTweenRef.current = null;
+              updateSegmentedBodyHeatLevels(bodyDataRef.current, to);
+              displayedLevelsRef.current = { ...to };
+              heatTweenRef.current = null;
             }
             needsRender = true;
           }
@@ -411,12 +431,15 @@ function BodyHeatmap({ width, height, stimulusLevels, onRegionPress, spinTrigger
             groupRef.current.rotation.y = rotationRef.current;
           }
 
-          renderer.render(scene, camera);
+          heatPipeline.resize(gl.drawingBufferWidth, gl.drawingBufferHeight);
+          heatPipeline.render(scene, camera);
           gl.endFrameEXP();
         };
         animate();
         setIsInitializing(false);
       } catch (err) {
+        heatPipelineRef.current?.dispose();
+        heatPipelineRef.current = null;
         if (__DEV__) {
           console.warn(
             'BodyHeatmap GL error, falling back:',
@@ -434,14 +457,13 @@ function BodyHeatmap({ width, height, stimulusLevels, onRegionPress, spinTrigger
   useEffect(() => {
     if (bodyDataRef.current) {
       // Start (or retarget) a crossfade toward the new levels.
-      colorTweenRef.current = {
+      heatTweenRef.current = {
         startTime: Date.now(),
         from: { ...displayedLevelsRef.current },
         to: { ...stimulusLevels },
       };
       needsRenderRef.current = true;
     }
-    displayedLevelsRef.current = stimulusLevels;
   }, [stimulusLevels]);
 
   // One full turn from wherever the body currently faces, landing at front.
@@ -469,6 +491,8 @@ function BodyHeatmap({ width, height, stimulusLevels, onRegionPress, spinTrigger
     return () => {
       aliveRef.current = false;
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      heatPipelineRef.current?.dispose();
+      heatPipelineRef.current = null;
       groupRef.current = null;
       cameraRef.current = null;
     };

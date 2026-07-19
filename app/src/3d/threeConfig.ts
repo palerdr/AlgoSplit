@@ -17,7 +17,9 @@ export const BODY_3D_CONFIG = {
     maxDimension: 1.6,
     tiltX: 0.08,
     offsetX: -0.03,
-    offsetY: 0.03,
+    // Shared by the weekly body and post-workout session/recent handoff, so
+    // every color state spins, scales, and crossfades at the same lower seat.
+    offsetY: -0.06,
   },
   render: {
     clearColorHex: 0x0d0d0d,
