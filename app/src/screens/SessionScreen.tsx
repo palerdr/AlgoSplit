@@ -42,6 +42,12 @@ import {
   restSecondsBeforeSessionStep,
   type SessionStep,
 } from '../workout/sessionChain';
+import {
+  moveSessionBrowseStep,
+  sameSessionBrowseStep,
+  sessionBrowseSteps,
+  type SessionBrowseStep,
+} from '../workout/sessionBrowse';
 
 // Real SF Symbols pencil on iOS; falls back to a text glyph elsewhere.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -103,7 +109,6 @@ function Wheel({
   format = String,
   onChange,
   compact = false,
-  disabled = false,
 }: {
   label: string;
   values: number[];
@@ -114,7 +119,6 @@ function Wheel({
   format?: (value: number) => string;
   onChange: (v: number) => void;
   compact?: boolean;
-  disabled?: boolean;
 }) {
   // Start the animated offset AT the initial row so the selected value renders
   // solid white immediately — no dimmed state until first touch. Off-grid
@@ -158,8 +162,6 @@ function Wheel({
           style={[styles.wheelLens, { top: (wheelHeight - ITEM_H) / 2 - 2 }]}
         />
         <Animated.ScrollView
-          accessibilityState={{ disabled }}
-          scrollEnabled={!disabled}
           showsVerticalScrollIndicator={false}
           snapToInterval={ITEM_H}
           decelerationRate="fast"
@@ -170,9 +172,16 @@ function Wheel({
             {
               useNativeDriver: true,
               listener: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-                const idx = Math.round(e.nativeEvent.contentOffset.y / ITEM_H);
+                const idx = Math.min(
+                  values.length - 1,
+                  Math.max(0, Math.round(e.nativeEvent.contentOffset.y / ITEM_H))
+                );
                 if (idx !== lastIdxRef.current) {
                   lastIdxRef.current = idx;
+                  // Persist each visibly selected row as it crosses the lens.
+                  // If an arrow immediately unmounts this wheel, the last
+                  // value the user saw has already reached its draft/record.
+                  onChange(values[idx]);
                   tick();
                 }
               },
@@ -441,12 +450,14 @@ function SlideToComplete({
 function SetSegment({
   status,
   liveFrac,
+  focused,
 }: {
   status: 'done' | 'current' | 'todo';
   liveFrac: Animated.Value;
+  focused: boolean;
 }) {
   return (
-    <View style={styles.segmentTrack}>
+    <View style={[styles.segmentTrack, focused && styles.segmentTrackFocused]}>
       {status === 'done' && <View style={[styles.segmentFill, { width: '100%' }]} />}
       {status === 'current' && (
         <Animated.View
@@ -462,6 +473,7 @@ function SetSegment({
           ]}
         />
       )}
+      {focused && <View pointerEvents="none" style={styles.segmentFocusRing} />}
     </View>
   );
 }
@@ -482,8 +494,8 @@ function ExerciseNavButton({
     destinationName === 'Workout summary'
       ? 'Return to workout summary'
       : destinationName
-        ? `${action} exercise, ${destinationName}`
-        : `${action} exercise`;
+        ? `${action}, ${destinationName}`
+        : action;
   return (
     <Pressable
       accessibilityRole="button"
@@ -517,7 +529,8 @@ function ExerciseNavigator({
   exerciseNames,
   currentIndex,
   primaryLabel,
-  allowCompleteState,
+  previousDestinationName,
+  nextDestinationName,
   compact,
   disabled,
   onMove,
@@ -526,34 +539,31 @@ function ExerciseNavigator({
   exerciseNames: string[];
   currentIndex: number;
   primaryLabel: string;
-  allowCompleteState: boolean;
+  previousDestinationName?: string;
+  nextDestinationName?: string;
   compact: boolean;
   disabled: boolean;
   onMove: (direction: -1 | 1) => void;
   onOpenOrder: () => void;
 }) {
   const count = exerciseNames.length;
-  const previousIndex =
-    count > 0 && currentIndex > 0 ? Math.min(currentIndex - 1, count - 1) : -1;
-  const nextIndex =
-    currentIndex >= 0 && currentIndex < count - 1
-      ? currentIndex + 1
-      : allowCompleteState && currentIndex === count - 1
-        ? count
-        : -1;
   const atCompleteState = count > 0 && currentIndex >= count;
 
   return (
     <View style={[styles.exerciseNavigator, compact && styles.exerciseNavigatorCompact]}>
       <ExerciseNavButton
         direction={-1}
-        disabled={disabled || previousIndex < 0}
-        destinationName={previousIndex >= 0 ? exerciseNames[previousIndex] : undefined}
+        disabled={disabled || !previousDestinationName}
+        destinationName={previousDestinationName}
         onPress={() => onMove(-1)}
       />
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Open workout order"
+        accessibilityLabel={`${primaryLabel}. ${
+          atCompleteState
+            ? `${count} ${count === 1 ? 'exercise' : 'exercises'}`
+            : `Exercise ${currentIndex + 1} of ${count}`
+        }. Open workout order`}
         accessibilityHint="Reorder exercises or jump to another exercise"
         accessibilityState={{ disabled }}
         disabled={disabled}
@@ -575,14 +585,8 @@ function ExerciseNavigator({
       </Pressable>
       <ExerciseNavButton
         direction={1}
-        disabled={disabled || nextIndex < 0}
-        destinationName={
-          nextIndex === count
-            ? 'Workout summary'
-            : nextIndex >= 0
-              ? exerciseNames[nextIndex]
-              : undefined
-        }
+        disabled={disabled || !nextDestinationName}
+        destinationName={nextDestinationName}
         onPress={() => onMove(1)}
       />
     </View>
@@ -595,10 +599,10 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     history,
     session,
     completeSet,
+    updateCompletedSet,
     finishSession,
     addExercise,
     editExercise,
-    navigateSessionExercise,
     jumpToSessionExercise,
     reorderSessionExercises,
     setSessionExerciseWarmupEnabled,
@@ -616,6 +620,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [orderOpen, setOrderOpen] = useState(false);
   const [orderDragging, setOrderDragging] = useState(false);
+  const [browseStep, setBrowseStep] = useState<SessionBrowseStep | null>(null);
 
   // Shared slide progress: drives the slider AND the live top-bar segment.
   const slideFrac = useRef(new Animated.Value(0)).current;
@@ -633,20 +638,83 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   if (session) lastSessionRef.current = session;
   const view = session ?? lastSessionRef.current;
 
-  const current = view ? view.exercises[view.currentIndex] : undefined;
+  const browseSteps = view ? sessionBrowseSteps(view.exercises) : [];
+  const defaultExercise = view?.exercises[view.currentIndex];
+  const defaultExerciseHasSets = Boolean(
+    defaultExercise &&
+      Number.isInteger(defaultExercise.targetSets) &&
+      defaultExercise.targetSets > 0
+  );
+  const defaultBrowseStep: SessionBrowseStep | null =
+    defaultExercise && defaultExerciseHasSets
+      ? chainWarmupPending(defaultExercise)
+        ? {
+            sessionExerciseId: defaultExercise.sessionExerciseId,
+            kind: 'warmup',
+          }
+        : {
+            sessionExerciseId: defaultExercise.sessionExerciseId,
+            kind: 'working',
+            setIndex: Math.min(
+              defaultExercise.completedSets.length,
+              Math.max(0, defaultExercise.targetSets - 1)
+            ),
+          }
+      : null;
+  const selectedBrowseStep =
+    browseStep && browseSteps.some((step) => sameSessionBrowseStep(step, browseStep))
+      ? browseStep
+      : defaultBrowseStep;
+  const displayIndex = selectedBrowseStep
+    ? view?.exercises.findIndex(
+        (exercise) => exercise.sessionExerciseId === selectedBrowseStep.sessionExerciseId
+      ) ?? -1
+    : view?.currentIndex ?? 0;
+  const current = view && displayIndex >= 0 ? view.exercises[displayIndex] : undefined;
   const currentId = current?.exercise.id;
-  const warmupActive = Boolean(current && chainWarmupPending(current));
-  const setNumber = current ? current.completedSets.length + 1 : 1;
-  const currentComplete = Boolean(
+  const currentWarmupPending = Boolean(current && chainWarmupPending(current));
+  const warmupActive = Boolean(
+    currentWarmupPending && selectedBrowseStep?.kind === 'warmup'
+  );
+  const warmupRequiredBeforeWork = Boolean(
+    currentWarmupPending && selectedBrowseStep?.kind === 'working'
+  );
+  const selectedWorkingSetIndex =
+    selectedBrowseStep?.kind === 'working' ? selectedBrowseStep.setIndex : null;
+  const setNumber = selectedWorkingSetIndex === null ? 1 : selectedWorkingSetIndex + 1;
+  const selectedSetComplete = Boolean(
+    current &&
+      selectedWorkingSetIndex !== null &&
+      selectedWorkingSetIndex < current.completedSets.length
+  );
+  const selectedSetIsCurrent = Boolean(
+    current &&
+      selectedWorkingSetIndex !== null &&
+      selectedWorkingSetIndex === current.completedSets.length &&
+      selectedWorkingSetIndex < current.targetSets &&
+      !currentWarmupPending
+  );
+  const selectedSetIsFuture = Boolean(
+    current &&
+      selectedWorkingSetIndex !== null &&
+      selectedWorkingSetIndex > current.completedSets.length
+  );
+  const exerciseComplete = Boolean(
     current && current.completedSets.length >= current.targetSets
   );
   const exerciseNames = view?.exercises.map((exercise) => exercise.exercise.name) ?? [];
-  const allExercisesComplete = Boolean(
-    view?.exercises.length &&
-      view.exercises.every(
-        (exercise) => exercise.completedSets.length >= exercise.targetSets
-      )
-  );
+  const previousBrowseStep = moveSessionBrowseStep(browseSteps, selectedBrowseStep, -1);
+  const nextBrowseStep = moveSessionBrowseStep(browseSteps, selectedBrowseStep, 1);
+  const browseDestinationName = (step: SessionBrowseStep | null): string | undefined => {
+    if (!step || !view) return undefined;
+    const exercise = view.exercises.find(
+      (candidate) => candidate.sessionExerciseId === step.sessionExerciseId
+    );
+    if (!exercise) return undefined;
+    return step.kind === 'warmup'
+      ? `${exercise.exercise.name} warm-up`
+      : `${exercise.exercise.name}, set ${step.setIndex + 1}`;
+  };
   const remoteHistory = account.workoutRanges.all;
 
   useEffect(() => {
@@ -677,7 +745,14 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   }, [account.status, current, history, remoteHistory?.data, view, warmupActive]);
 
   const currentSessionLast = current?.completedSets[current.completedSets.length - 1];
-  const shadow = warmupActive ? undefined : previous?.records[setNumber - 1];
+  const selectedCompletedRecord =
+    selectedWorkingSetIndex === null
+      ? undefined
+      : current?.completedSets[selectedWorkingSetIndex];
+  const shadow =
+    warmupActive || selectedWorkingSetIndex === null
+      ? undefined
+      : previous?.records[selectedWorkingSetIndex];
   // Once this workout has a logged set, its newest values become the dial
   // markers immediately. Prior-session history is only the opening fallback.
   const markedRecord = warmupActive ? undefined : currentSessionLast ?? shadow;
@@ -686,19 +761,21 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   const remoteShadowLoading =
     account.status === 'authenticated' && Boolean(remoteHistory?.loading) && !currentSessionLast;
 
-  // The wheels remount when the exercise changes or when previous-set data
-  // first arrives (async account history) — NOT between sets, so the user's
-  // tweaks carry from set to set exactly like the original wheel UI.
+  // Each browsable set owns its wheel instance and draft. Moving backward
+  // restores that set's committed record; moving forward restores any draft
+  // already prepared for that exact pill.
+  const browseStepKey =
+    selectedBrowseStep?.kind === 'working'
+      ? `working-${selectedBrowseStep.setIndex}`
+      : selectedBrowseStep?.kind ?? 'none';
   const wheelEpoch = `${current?.sessionExerciseId ?? 'none'}-${
     previous ? 'shadowed' : 'bare'
-  }-${warmupActive ? 'warmup' : 'working'}-${currentComplete ? 'complete' : 'entry'}`;
+  }-${browseStepKey}-${selectedSetComplete ? 'complete' : 'entry'}`;
   const initialRecord: SetRecord = (() => {
     const fallback = (currentId ? lastUsed[currentId] : undefined) ?? DEFAULT_SET;
-    const base =
-      previous?.records[setNumber - 1] ??
-      currentSessionLast ??
-      previous?.records[0] ??
-      fallback;
+    const base = selectedSetComplete
+      ? selectedCompletedRecord ?? currentSessionLast ?? previous?.records[0] ?? fallback
+      : currentSessionLast ?? shadow ?? previous?.records[0] ?? fallback;
     return {
       weight: snapTo(WEIGHT_VALUES, base.weight),
       reps: snapTo(REP_VALUES, base.reps),
@@ -710,10 +787,8 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   const [rir, setRir] = useState(initialRecord.rir ?? 0);
   const wheelDraftsRef = useRef<Record<string, SetRecord>>({});
   const wheelDraftKey =
-    view && current
-      ? `${view.startedAt}-${current.sessionExerciseId}-${
-          warmupActive ? 'warmup' : 'working'
-        }-${setNumber}`
+    view && current && selectedWorkingSetIndex !== null && !selectedSetComplete
+      ? `${view.startedAt}-${current.sessionExerciseId}-working-${setNumber}`
       : null;
   const effectiveInitialRecord =
     (wheelDraftKey ? wheelDraftsRef.current[wheelDraftKey] : undefined) ?? initialRecord;
@@ -721,7 +796,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     setWeight(effectiveInitialRecord.weight);
     setReps(effectiveInitialRecord.reps);
     setRir(effectiveInitialRecord.rir ?? 0);
-    // Only when the wheels remount — keep the user's tweaks between sets.
+    // Only when the exact exercise/set page changes or its initial shadow arrives.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wheelEpoch]);
 
@@ -733,16 +808,27 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
       ...update,
     };
   };
+  const updateSelectedCompletedRecord = (update: Partial<SetRecord>): boolean => {
+    if (!selectedSetComplete || !current || selectedWorkingSetIndex === null) return false;
+    return updateCompletedSet(
+      current.sessionExerciseId,
+      selectedWorkingSetIndex,
+      update
+    );
+  };
   const changeWeight = (value: number) => {
     setWeight(value);
+    if (updateSelectedCompletedRecord({ weight: value })) return;
     updateWheelDraft({ weight: value });
   };
   const changeReps = (value: number) => {
     setReps(value);
+    if (updateSelectedCompletedRecord({ reps: value })) return;
     updateWheelDraft({ reps: value });
   };
   const changeRir = (value: number) => {
     setRir(value);
+    if (updateSelectedCompletedRecord({ rir: value })) return;
     updateWheelDraft({ rir: value });
   };
 
@@ -769,6 +855,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   const openNotes = () => {
     if (sliderSettlingRef.current) return;
     tick();
+    notesAnim.stopAnimation();
     setNotesDraft(current?.notes ?? '');
     setNotesOpen(true);
     Animated.spring(notesAnim, {
@@ -790,6 +877,39 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
       if (finished) setNotesOpen(false);
     });
   };
+  const closeNotesImmediately = React.useCallback(() => {
+    Keyboard.dismiss();
+    notesAnim.stopAnimation();
+    notesAnim.setValue(0);
+    setNotesDraft('');
+    setNotesOpen(false);
+  }, [notesAnim]);
+  const notesContextKey = `${current?.sessionExerciseId ?? 'none'}-${browseStepKey}`;
+  const notesContextRef = useRef(notesContextKey);
+  useEffect(() => {
+    const workoutStepChanged = notesContextRef.current !== notesContextKey;
+    notesContextRef.current = notesContextKey;
+    if (
+      notesOpen &&
+      (workoutStepChanged ||
+        picker !== null ||
+        orderOpen ||
+        confirmDiscard ||
+        resting ||
+        sliderSettling)
+    ) {
+      closeNotesImmediately();
+    }
+  }, [
+    closeNotesImmediately,
+    confirmDiscard,
+    notesContextKey,
+    notesOpen,
+    orderOpen,
+    picker,
+    resting,
+    sliderSettling,
+  ]);
   const saveNotes = () => {
     if (currentId) updateExerciseNotes(currentId, notesDraft);
     closeNotes();
@@ -808,24 +928,20 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   // uses the same projection as the rest timer, so injected warmups and the
   // final set cannot disagree with the slider copy.
   const completionActionLabel = (() => {
-    if (!current) return 'complete workout';
+    if (!current) return 'Next: Finish workout';
     const nextStep = nextSessionStepAfterCompletion(
       view.exercises,
       current.sessionExerciseId,
       warmupActive ? 'warmup' : 'working'
     );
-    if (!nextStep) return 'complete workout';
+    if (!nextStep) return 'Next: Finish workout';
 
     const destination = view.exercises[nextStep.exerciseIndex];
-    if (!destination) return 'continue workout';
+    if (!destination) return 'Next: Continue workout';
     if (nextStep.kind === 'warmup') {
-      return `continue to ${destination.exercise.name} warm-up`;
+      return `Next: ${destination.exercise.name} warm-up`;
     }
-    if (destination.sessionExerciseId === current.sessionExerciseId) {
-      const nextSetNumber = current.completedSets.length + (warmupActive ? 1 : 2);
-      return `continue to set ${nextSetNumber}`;
-    }
-    return `continue to ${destination.exercise.name}`;
+    return `Next: ${destination.exercise.name}`;
   })();
 
   const anyWork = view.exercises.some((se) => se.completedSets.length > 0);
@@ -839,10 +955,19 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   const navigationBlocked = baseInteractionBlocked || orderOpen;
   const moveExercise = (direction: -1 | 1) => {
     if (navigationBlocked || sliderSettlingRef.current) return;
+    const destination = moveSessionBrowseStep(
+      browseSteps,
+      selectedBrowseStep,
+      direction
+    );
+    if (!destination) return;
     tick();
     slideFrac.stopAnimation();
     slideFrac.setValue(0);
-    navigateSessionExercise(direction);
+    setBrowseStep(destination);
+    // Keep the persisted exercise cursor aligned with the locally browsed
+    // warmup/working page. This does not complete or bypass either step.
+    jumpToSessionExercise(destination.sessionExerciseId);
   };
   const jumpExercise = (sessionExerciseId: string) => {
     if (baseInteractionBlocked || sliderSettlingRef.current) return;
@@ -852,22 +977,29 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     // Choosing a row from the live order menu is an explicit request to work
     // on it now. It is the sole manual override for that row's pending warmup;
     // arrows and automatic advancement continue to enforce warmups normally.
+    setBrowseStep(null);
     jumpToSessionExercise(sessionExerciseId, { bypassWarmup: true });
     setOrderOpen(false);
   };
 
   // One segment per set, across the whole workout.
-  const segments = view.exercises.flatMap((se, ei) =>
-    Array.from({ length: se.targetSets }, (_, si) => ({
+  const segments = view.exercises.flatMap((se, ei) => {
+    return Array.from({ length: se.targetSets }, (_, si) => ({
       key: `${se.sessionExerciseId}-${si}`,
+      // Warmups never receive a segment. A neutral focus appears only when
+      // the user is explicitly looking at this exact working set.
+      focused:
+        selectedBrowseStep?.kind === 'working' &&
+        ei === displayIndex &&
+        si === selectedBrowseStep.setIndex,
       status:
         si < se.completedSets.length
           ? ('done' as const)
-          : !warmupActive && ei === view.currentIndex && si === se.completedSets.length
+          : selectedSetIsCurrent && ei === displayIndex && si === selectedWorkingSetIndex
             ? ('current' as const)
             : ('todo' as const),
-    }))
-  );
+    }));
+  });
 
   // Count the not-yet-committed set so the label is stable across the commit:
   // once the pending set lands, `current` itself is whatever comes after rest.
@@ -896,9 +1028,13 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   };
 
   const handleSetComplete = () => {
-    if (!current || currentComplete || pendingSetRef.current) return;
+    if (
+      !current ||
+      (!warmupActive && !selectedSetIsCurrent) ||
+      pendingSetRef.current
+    ) return;
     const source: SetCompletionSource = {
-      exerciseIndex: view.currentIndex,
+      exerciseIndex: displayIndex,
       exerciseId: current.exercise.id,
       sessionExerciseId: current.sessionExerciseId,
       kind: warmupActive ? 'warmup' : 'working',
@@ -912,9 +1048,11 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
       );
       if (!nextStep) {
         completeWarmupSet(source);
+        setBrowseStep(null);
         slideFrac.setValue(0);
         return;
       }
+      setBrowseStep(null);
       pendingSetRef.current = { kind: 'warmup', source, nextStep };
       // Rest belongs to the destination. A working set always receives the
       // standard rest, even when the outgoing step happened to be a warmup.
@@ -931,12 +1069,16 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     );
 
     if (!nextStep) {
-      // Keep the completed workout open for review. The user can move back
-      // through its completed exercises or use the header Finish.
+      // The final drag is the finish action. completeSet updates the shared
+      // session ref synchronously, so finishSession includes this last record
+      // even though React batches both state updates from the gesture.
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      setBrowseStep(null);
       completeSet(record, source);
       slideFrac.setValue(0);
+      if (finishSession()) onComplete();
     } else {
+      setBrowseStep(null);
       pendingSetRef.current = { kind: 'working', record, source, nextStep };
       // The next automatic step determines the wait: half-rest before a
       // warmup, standard rest before every working set.
@@ -954,6 +1096,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
       slideFrac.setValue(0);
       // Finish cannot silently discard a checked warmup. Bring the first
       // unresolved one into view without applying the popup-jump override.
+      setBrowseStep(null);
       jumpToSessionExercise(requiredWarmup.sessionExerciseId);
       return;
     }
@@ -1010,7 +1153,14 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
       {/* One segment per set — the current one fills live with the slide */}
       <View style={styles.progressRow}>
         {segments.length > 0 ? (
-          segments.map((s) => <SetSegment key={s.key} status={s.status} liveFrac={slideFrac} />)
+          segments.map((s) => (
+            <SetSegment
+              key={s.key}
+              status={s.status}
+              focused={s.focused}
+              liveFrac={slideFrac}
+            />
+          ))
         ) : (
           <View style={styles.segmentTrack} />
         )}
@@ -1046,17 +1196,16 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
             </View>
             <ExerciseNavigator
               exerciseNames={exerciseNames}
-              currentIndex={view.currentIndex}
+              currentIndex={displayIndex}
               primaryLabel={
                 warmupActive
                   ? 'Warm-up'
-                  : currentComplete
-                  ? `${current.completedSets.length} ${
-                      current.completedSets.length === 1 ? 'set' : 'sets'
-                    } complete`
+                  : selectedSetComplete
+                  ? `Set ${setNumber} complete`
                   : `Set ${setNumber} of ${current.targetSets}`
               }
-              allowCompleteState={allExercisesComplete}
+              previousDestinationName={browseDestinationName(previousBrowseStep)}
+              nextDestinationName={browseDestinationName(nextBrowseStep)}
               compact={compactLayout}
               disabled={navigationBlocked}
               onMove={moveExercise}
@@ -1068,15 +1217,19 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
           </View>
 
           {warmupActive ? (
-            // Warmups are intentionally data-free: no wheels, shadows,
-            // volume, RIR, or notes compete with the exercise name. A quiet
-            // neutral target gives the otherwise empty middle some balance.
-            <View style={styles.warmupSpace} pointerEvents="none" accessible={false}>
-              <View style={styles.warmupMark}>
-                <View style={styles.warmupRingOuter} />
-                <View style={styles.warmupRingInner} />
-                <View style={styles.warmupDot} />
-              </View>
+            // Warmups remain data-free; the center only offers a restrained
+            // load suggestion instead of decorative or trackable metrics.
+            <View
+              style={styles.warmupSpace}
+              pointerEvents="none"
+              accessible
+              accessibilityRole="text"
+              accessibilityLabel="Warm up. It’s suggested to use half the weight of a working set for a warm up."
+            >
+              <Text style={styles.warmupTitle}>Warm up</Text>
+              <Text style={styles.warmupGuidance}>
+                It’s suggested to use half the weight of a working set for a warm up.
+              </Text>
             </View>
           ) : (
             <View style={styles.entryArea}>
@@ -1091,7 +1244,6 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   }
                   onChange={changeWeight}
                   compact={compactLayout}
-                  disabled={currentComplete}
                 />
                 <Wheel
                   key={`${wheelEpoch}-r`}
@@ -1103,7 +1255,6 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   }
                   onChange={changeReps}
                   compact={compactLayout}
-                  disabled={currentComplete}
                 />
                 <Wheel
                   key={`${wheelEpoch}-i`}
@@ -1118,7 +1269,6 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   format={(v) => (v === 0 ? 'Failure' : String(v))}
                   onChange={changeRir}
                   compact={compactLayout}
-                  disabled={currentComplete}
                 />
               </View>
               {remoteShadowError ? (
@@ -1189,18 +1339,53 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
             </Animated.View>
           )}
 
-          {currentComplete ? (
+          {selectedSetComplete ? (
             <View
               accessible
               accessibilityRole="text"
-              accessibilityLabel={`${current.exercise.name}, exercise complete`}
-              style={[
-                styles.completedExerciseState,
-                compactLayout && styles.completedExerciseStateCompact,
-              ]}
+              accessibilityLabel={`${current.exercise.name}, set ${setNumber} complete`}
+              style={[styles.sliderZone, compactLayout && styles.sliderZoneCompact]}
             >
-              <View style={styles.completedExerciseDot} />
-              <Text style={styles.completedExerciseStateText}>Exercise complete</Text>
+              <Glass
+                style={[styles.sliderTrack, styles.completedExerciseState]}
+                tintColor="rgba(62,85,69,0.18)"
+              >
+                <Text style={styles.completedExerciseStateText}>
+                  {exerciseComplete ? 'Exercise complete' : 'Set complete'}
+                </Text>
+              </Glass>
+            </View>
+          ) : warmupRequiredBeforeWork ? (
+            <View
+              accessible
+              accessibilityRole="text"
+              accessibilityLabel={`${current.exercise.name}, complete its warm-up before logging a working set`}
+              style={[styles.sliderZone, compactLayout && styles.sliderZoneCompact]}
+            >
+              <Glass
+                style={[styles.sliderTrack, styles.warmupRequiredState]}
+                tintColor="rgba(255,255,255,0.025)"
+              >
+                <Text style={styles.warmupRequiredStateText}>Complete warm-up first</Text>
+              </Glass>
+            </View>
+          ) : selectedSetIsFuture ? (
+            <View
+              accessible
+              accessibilityRole="text"
+              accessibilityLabel={`${current.exercise.name}, complete set ${
+                current.completedSets.length + 1
+              } before set ${setNumber}`}
+              style={[styles.sliderZone, compactLayout && styles.sliderZoneCompact]}
+            >
+              <Glass
+                style={[styles.sliderTrack, styles.warmupRequiredState]}
+                tintColor="rgba(255,255,255,0.025)"
+              >
+                <Text style={styles.warmupRequiredStateText}>
+                  Complete Set {current.completedSets.length + 1} first
+                </Text>
+              </Glass>
             </View>
           ) : (
             <View style={[styles.sliderZone, compactLayout && styles.sliderZoneCompact]}>
@@ -1232,7 +1417,8 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
               exerciseNames={exerciseNames}
               currentIndex={view.currentIndex}
               primaryLabel="Ready to finish"
-              allowCompleteState={allExercisesComplete}
+              previousDestinationName={browseDestinationName(previousBrowseStep)}
+              nextDestinationName={browseDestinationName(nextBrowseStep)}
               compact={compactLayout}
               disabled={navigationBlocked}
               onMove={moveExercise}
@@ -1263,10 +1449,11 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                 style={styles.pickerRow}
                 onPress={() => {
                   if (picker === 'edit') {
-                    editExercise(view.currentIndex, item);
+                    editExercise(displayIndex, item);
                   } else {
                     addExercise(item);
                   }
+                  setBrowseStep(null);
                   setPicker(null);
                 }}
               >
@@ -1302,10 +1489,10 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                 exercise.warmupCompleted ||
                 exercise.warmupBypassed ||
                 exercise.completedSets.length > 0,
-              current: index === view.currentIndex,
+              current: index === displayIndex,
               // The current row stays anchored and completed work never shifts.
               // Everything upcoming remains one direct, draggable queue.
-              draggable: index !== view.currentIndex && !complete,
+              draggable: index !== displayIndex && !complete,
             };
           })}
           onReorder={(items) =>
@@ -1550,6 +1737,15 @@ const styles = StyleSheet.create({
     backgroundColor: theme.surfaceHigh,
     overflow: 'hidden',
   },
+  segmentTrackFocused: {
+    backgroundColor: 'rgba(241,236,228,0.18)',
+  },
+  segmentFocusRing: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(241,236,228,0.48)',
+  },
   segmentFill: {
     height: '100%',
     borderRadius: 2,
@@ -1659,34 +1855,22 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 24,
   },
-  warmupMark: {
-    width: 84,
-    height: 84,
-    alignItems: 'center',
-    justifyContent: 'center',
+  warmupTitle: {
+    color: theme.text,
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: '600',
   },
-  warmupRingOuter: {
-    position: 'absolute',
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(241,236,228,0.13)',
-  },
-  warmupRingInner: {
-    position: 'absolute',
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(241,236,228,0.19)',
-  },
-  warmupDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(241,236,228,0.32)',
+  warmupGuidance: {
+    maxWidth: 290,
+    marginTop: 8,
+    color: theme.textDim,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '400',
+    textAlign: 'center',
   },
   wheelsRow: {
     flexDirection: 'row',
@@ -1834,31 +2018,26 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
   },
   completedExerciseState: {
-    height: TRACK_H,
-    borderRadius: 24,
     alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 9,
     paddingHorizontal: 20,
-    backgroundColor: 'rgba(57, 156, 91, 0.2)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(109, 211, 143, 0.48)',
-  },
-  completedExerciseStateCompact: {
-    height: 60,
-  },
-  completedExerciseDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: theme.accent,
+    backgroundColor: 'rgba(65,196,110,0.055)',
   },
   completedExerciseStateText: {
-    color: theme.accent,
+    color: 'rgba(241,236,228,0.58)',
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
     letterSpacing: 0.2,
+  },
+  warmupRequiredState: {
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    backgroundColor: 'rgba(255,255,255,0.025)',
+  },
+  warmupRequiredStateText: {
+    color: 'rgba(241,236,228,0.48)',
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 0.15,
   },
   sliderZone: {
     marginTop: 16,

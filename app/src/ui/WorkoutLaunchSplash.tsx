@@ -168,9 +168,9 @@ export default function WorkoutLaunchSplash({
     };
   }, [fill, reviewCover]);
 
-  // Mount the review at full opacity behind an opaque green sibling, then lift
-  // that sibling away. The result is a fade onto the same green pool without
-  // ever opacity-animating native Liquid Glass or changing the background.
+  // Mount the dark review surface at full opacity behind an opaque green
+  // sibling, then lift that sibling away. This fades green into the review
+  // without ever opacity-animating native Liquid Glass.
   useEffect(() => {
     if (!covered || phase !== 'reviewing') return;
     setReviewReady(true);
@@ -357,6 +357,7 @@ const styles = StyleSheet.create({
   reviewLayer: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 2,
+    backgroundColor: theme.bg,
   },
   reviewFadeCover: {
     ...StyleSheet.absoluteFillObject,

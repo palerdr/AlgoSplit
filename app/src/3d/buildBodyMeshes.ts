@@ -1,5 +1,14 @@
 import * as THREE from 'three';
 import { getRegionHex, NEUTRAL_HEX, VISIBLE_REGION_IDS } from './regionColors';
+import {
+  NEUTRAL_BODY_REGION_KEY,
+  attachBoundaryFeatherAttributes,
+  computeBodyPartBoundaryData,
+  configureBoundaryFeatherMaterial,
+  updateBoundaryFeatherColors,
+  type BodyPartBoundaryData,
+  type BoundaryColorResolver,
+} from './bodyBoundaryFeather';
 
 export interface BodyPartGeometry {
   name: string;
@@ -22,30 +31,42 @@ const BODY_MATERIAL_BASE = {
 } as const;
 
 function createBodyMaterial(): THREE.MeshPhongMaterial {
-  return new THREE.MeshPhongMaterial({
+  const material = new THREE.MeshPhongMaterial({
     ...BODY_MATERIAL_BASE,
     color: new THREE.Color(NEUTRAL_HEX),
     vertexColors: true,
     transparent: false,
     opacity: 1,
   });
+  configureBoundaryFeatherMaterial(material);
+  return material;
 }
 
-function applyMeshColor(mesh: THREE.Mesh, hex: string): void {
+function applyMeshColor(
+  mesh: THREE.Mesh,
+  boundaryData: BodyPartBoundaryData,
+  resolveColor: BoundaryColorResolver
+): void {
   const geometry = mesh.geometry;
   const position = geometry.getAttribute('position') as THREE.BufferAttribute;
-  const colors = new Float32Array(position.count * 3);
-  const color = new THREE.Color(hex);
+  const color = resolveColor(boundaryData.regionKey);
+  let colorAttribute = geometry.getAttribute('color') as THREE.BufferAttribute | undefined;
 
-  for (let i = 0; i < position.count; i++) {
-    colors[i * 3] = color.r;
-    colors[i * 3 + 1] = color.g;
-    colors[i * 3 + 2] = color.b;
+  if (!colorAttribute || colorAttribute.count !== position.count) {
+    colorAttribute = new THREE.Float32BufferAttribute(
+      new Float32Array(position.count * 3),
+      3
+    );
+    colorAttribute.setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute('color', colorAttribute);
   }
 
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  const colorAttribute = geometry.getAttribute('color') as THREE.BufferAttribute;
+  for (let i = 0; i < position.count; i++) {
+    colorAttribute.setXYZ(i, color.r, color.g, color.b);
+  }
+
   colorAttribute.needsUpdate = true;
+  updateBoundaryFeatherColors(geometry, boundaryData, resolveColor);
 }
 
 // GLB object names carry export suffixes like "biceps_brachii.001" — strip
@@ -70,17 +91,30 @@ export function buildSegmentedBody(
   const group = new THREE.Group();
   const regionMeshes: Record<string, THREE.Mesh[]> = {};
   const neutralMeshes: THREE.Mesh[] = [];
+  const renderParts = parts.map((part) => ({
+    name: part.name,
+    geometry: part.geometry.index ? part.geometry.toNonIndexed() : part.geometry,
+  }));
+  const boundaryDataByPart = computeBodyPartBoundaryData(renderParts, (part) => {
+    const regionId = normalizeRegionObjectName(part.name);
+    return VISIBLE_REGION_ID_SET.has(regionId) ? regionId : NEUTRAL_BODY_REGION_KEY;
+  });
+  const resolveColor = createStimulusColorResolver(stimulusLevels);
 
-  for (const part of parts) {
+  for (let partIndex = 0; partIndex < renderParts.length; partIndex++) {
+    const part = renderParts[partIndex];
+    const boundaryData = boundaryDataByPart[partIndex];
     const regionId = normalizeRegionObjectName(part.name);
     const isRegion = VISIBLE_REGION_ID_SET.has(regionId);
     const material = createBodyMaterial();
 
+    attachBoundaryFeatherAttributes(part.geometry);
     const mesh = new THREE.Mesh(part.geometry, material);
     mesh.name = part.name;
     mesh.frustumCulled = false;
     mesh.userData.regionId = isRegion ? regionId : null;
-    applyMeshColor(mesh, isRegion ? getRegionHex(regionId, stimulusLevels) : NEUTRAL_HEX);
+    mesh.userData.boundaryData = boundaryData;
+    applyMeshColor(mesh, boundaryData, resolveColor);
 
     if (isRegion) {
       regionMeshes[regionId] ??= [];
@@ -99,16 +133,41 @@ export function updateSegmentedBodyColors(
   data: SegmentedBodyData,
   stimulusLevels: Record<string, number>
 ): void {
-  for (const [regionId, meshes] of Object.entries(data.regionMeshes)) {
-    const hex = getRegionHex(regionId, stimulusLevels);
+  const resolveColor = createStimulusColorResolver(stimulusLevels);
+  for (const meshes of Object.values(data.regionMeshes)) {
     for (const mesh of meshes) {
-      applyMeshColor(mesh, hex);
+      applyMeshColor(
+        mesh,
+        mesh.userData.boundaryData as BodyPartBoundaryData,
+        resolveColor
+      );
     }
   }
 
   for (const mesh of data.neutralMeshes) {
-    applyMeshColor(mesh, NEUTRAL_HEX);
+    applyMeshColor(
+      mesh,
+      mesh.userData.boundaryData as BodyPartBoundaryData,
+      resolveColor
+    );
   }
+}
+
+function createStimulusColorResolver(
+  stimulusLevels: Record<string, number>
+): BoundaryColorResolver {
+  const cache = new Map<string, THREE.Color>();
+  return (regionKey) => {
+    const cached = cache.get(regionKey);
+    if (cached) return cached;
+    const color = new THREE.Color(
+      regionKey === NEUTRAL_BODY_REGION_KEY
+        ? NEUTRAL_HEX
+        : getRegionHex(regionKey, stimulusLevels)
+    );
+    cache.set(regionKey, color);
+    return color;
+  };
 }
 
 function lerpHex(a: string, b: string, t: number): string {
@@ -135,14 +194,40 @@ export function updateSegmentedBodyColorsBlended(
   t: number
 ): void {
   const clamped = Math.min(1, Math.max(0, t));
-  for (const [regionId, meshes] of Object.entries(data.regionMeshes)) {
-    const hex = lerpHex(
-      getRegionHex(regionId, fromLevels),
-      getRegionHex(regionId, toLevels),
-      clamped
+  const cache = new Map<string, THREE.Color>();
+  const resolveColor: BoundaryColorResolver = (regionKey) => {
+    const cached = cache.get(regionKey);
+    if (cached) return cached;
+    const color = new THREE.Color(
+      regionKey === NEUTRAL_BODY_REGION_KEY
+        ? NEUTRAL_HEX
+        : lerpHex(
+            getRegionHex(regionKey, fromLevels),
+            getRegionHex(regionKey, toLevels),
+            clamped
+          )
     );
+    cache.set(regionKey, color);
+    return color;
+  };
+
+  for (const meshes of Object.values(data.regionMeshes)) {
     for (const mesh of meshes) {
-      applyMeshColor(mesh, hex);
+      applyMeshColor(
+        mesh,
+        mesh.userData.boundaryData as BodyPartBoundaryData,
+        resolveColor
+      );
     }
+  }
+
+  // The neutral body's own color is static, but its shared edge colors must
+  // follow trained neighbors throughout the temporal crossfade.
+  for (const mesh of data.neutralMeshes) {
+    applyMeshColor(
+      mesh,
+      mesh.userData.boundaryData as BodyPartBoundaryData,
+      resolveColor
+    );
   }
 }

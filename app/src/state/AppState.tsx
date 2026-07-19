@@ -19,6 +19,11 @@ import {
   nextSessionExerciseOrdinal,
   restoreActiveSession,
 } from './activeSessionPersistence';
+import {
+  editCompletedSetInSession,
+  lastUsedAfterCompletedSetEdit,
+  type CompletedSetUpdate,
+} from './completedSetEditing';
 import { Exercise, getExercise } from '../data/exercises';
 import { TEMPLATES as SEED_TEMPLATES, TemplateExercise, WorkoutTemplate } from '../data/templates';
 import {
@@ -43,6 +48,7 @@ import {
 } from '../workout/sessionState';
 
 export type { PlannedSessionPreparation } from '../workout/sessionState';
+export type { CompletedSetUpdate } from './completedSetEditing';
 
 // Rest duration between sets. Fixed at 3 minutes for now — will be tuned /
 // made adaptive later.
@@ -159,6 +165,12 @@ interface AppState {
   updateExerciseNotes: (exerciseId: string, notes: string) => void;
   /** Records one set against its originating exercise and advances safely. */
   completeSet: (record: SetRecord, source?: SetCompletionSource) => void;
+  /** Edit one committed working set without changing session shape or identity. */
+  updateCompletedSet: (
+    sessionExerciseId: string,
+    setIndex: number,
+    update: CompletedSetUpdate
+  ) => boolean;
   /** Marks the optional warmup done without recording load, reps, or RIR. */
   completeWarmupSet: (source?: SetCompletionSource) => void;
   /** Finish using only working sets that were already committed safely. */
@@ -307,7 +319,22 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setSessionState(next);
   };
   const [lastCompleted, setLastCompleted] = useState<CompletedWorkout | null>(null);
-  const [lastUsed, setLastUsed] = useState<Record<string, SetRecord>>({});
+  const [lastUsed, setLastUsedState] = useState<Record<string, SetRecord>>({});
+  // Set completion and an immediate completed-set edit may share one event
+  // batch. Keep their prefill shadow synchronous just like the live session.
+  const lastUsedRef = React.useRef<Record<string, SetRecord>>(lastUsed);
+  lastUsedRef.current = lastUsed;
+  const setLastUsed = (
+    update:
+      | Record<string, SetRecord>
+      | ((previous: Record<string, SetRecord>) => Record<string, SetRecord>)
+  ) => {
+    const previous = lastUsedRef.current;
+    const next = typeof update === 'function' ? update(previous) : update;
+    if (next === previous) return;
+    lastUsedRef.current = next;
+    setLastUsedState(next);
+  };
   const [exerciseNotes, setExerciseNotes] = useState<Record<string, string>>({});
   const [templates, setTemplates] = useState<WorkoutTemplate[]>(SEED_TEMPLATES);
   const [hydrated, setHydrated] = useState(false);
@@ -783,6 +810,21 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           : activeSession.currentIndex;
       setSession({ ...activeSession, exercises, currentIndex });
       setLastUsed((previous) => ({ ...previous, [target.exercise.id]: record }));
+    },
+
+    updateCompletedSet: (sessionExerciseId, setIndex, update) => {
+      const activeSession = sessionRef.current;
+      if (!activeSession) return false;
+      const edit = editCompletedSetInSession(
+        activeSession,
+        sessionExerciseId,
+        setIndex,
+        update
+      );
+      if (!edit) return false;
+      if (edit.changed) setSession(edit.session);
+      setLastUsed((previous) => lastUsedAfterCompletedSetEdit(previous, edit));
+      return true;
     },
 
     completeWarmupSet: (source) => {
