@@ -1,15 +1,5 @@
 import * as THREE from 'three';
-import {
-  NEUTRAL_HEX,
-  UNTRAINED_BODY_HEX,
-  VISIBLE_REGION_IDS,
-} from './regionColors';
-import {
-  configureBodyHeatFieldMaterial,
-  createBodyHeatCompositeUniforms,
-  setBodyHeatLevelAttribute,
-  type BodyHeatCompositeUniforms,
-} from './bodyHeatField';
+import { getRegionHex, NEUTRAL_HEX, VISIBLE_REGION_IDS } from './regionColors';
 
 export interface BodyPartGeometry {
   name: string;
@@ -20,8 +10,9 @@ export interface SegmentedBodyData {
   group: THREE.Group;
   regionMeshes: Record<string, THREE.Mesh[]>;
   neutralMeshes: THREE.Mesh[];
-  heatUniforms: BodyHeatCompositeUniforms;
 }
+
+export type SegmentedBodyColorSnapshot = Record<string, THREE.Color>;
 
 const VISIBLE_REGION_ID_SET = new Set<string>(VISIBLE_REGION_IDS);
 
@@ -32,38 +23,31 @@ const BODY_MATERIAL_BASE = {
   side: THREE.DoubleSide,
 } as const;
 
-function createBodyMaterial(
-  isRegion: boolean,
-  heatUniforms: BodyHeatCompositeUniforms
-): THREE.MeshPhongMaterial {
-  const material = new THREE.MeshPhongMaterial({
+function createBodyMaterial(hex: string): THREE.MeshPhongMaterial {
+  return new THREE.MeshPhongMaterial({
     ...BODY_MATERIAL_BASE,
-    color: new THREE.Color(isRegion ? UNTRAINED_BODY_HEX : NEUTRAL_HEX),
+    color: new THREE.Color(hex),
     vertexColors: false,
     transparent: false,
     opacity: 1,
   });
-  configureBodyHeatFieldMaterial(material, heatUniforms);
+}
+
+function getBodyMaterial(mesh: THREE.Mesh): THREE.MeshPhongMaterial {
+  const material = mesh.material;
+  if (Array.isArray(material) || !(material instanceof THREE.MeshPhongMaterial)) {
+    throw new Error('Segmented body mesh must use one Phong material');
+  }
   return material;
 }
 
-function normalizedStimulusLevel(
-  regionId: string,
-  stimulusLevels: Record<string, number>
-): number {
-  const raw = stimulusLevels[regionId];
-  return Number.isFinite(raw) ? Math.min(7, Math.max(0, raw)) / 7 : 0;
-}
-
-function applyMeshHeatLevel(
-  mesh: THREE.Mesh,
-  regionId: string | null,
-  stimulusLevels: Record<string, number>
-): void {
-  setBodyHeatLevelAttribute(
-    mesh.geometry,
-    regionId ? normalizedStimulusLevel(regionId, stimulusLevels) : 0
-  );
+function applyMeshColor(mesh: THREE.Mesh, color: string | THREE.Color): void {
+  const material = getBodyMaterial(mesh);
+  if (color instanceof THREE.Color) {
+    material.color.copy(color);
+  } else {
+    material.color.set(color);
+  }
 }
 
 // GLB object names carry export suffixes like "biceps_brachii.001" — strip
@@ -88,23 +72,18 @@ export function buildSegmentedBody(
   const group = new THREE.Group();
   const regionMeshes: Record<string, THREE.Mesh[]> = {};
   const neutralMeshes: THREE.Mesh[] = [];
-  const heatUniforms = createBodyHeatCompositeUniforms();
-  const renderParts = parts.map((part) => ({
-    name: part.name,
-    geometry: part.geometry.index ? part.geometry.toNonIndexed() : part.geometry,
-  }));
 
-  for (let partIndex = 0; partIndex < renderParts.length; partIndex++) {
-    const part = renderParts[partIndex];
+  for (const part of parts) {
     const regionId = normalizeRegionObjectName(part.name);
     const isRegion = VISIBLE_REGION_ID_SET.has(regionId);
-    const material = createBodyMaterial(isRegion, heatUniforms);
+    const material = createBodyMaterial(
+      isRegion ? getRegionHex(regionId, stimulusLevels) : NEUTRAL_HEX
+    );
 
     const mesh = new THREE.Mesh(part.geometry, material);
     mesh.name = part.name;
     mesh.frustumCulled = false;
     mesh.userData.regionId = isRegion ? regionId : null;
-    applyMeshHeatLevel(mesh, isRegion ? regionId : null, stimulusLevels);
 
     if (isRegion) {
       regionMeshes[regionId] ??= [];
@@ -116,40 +95,63 @@ export function buildSegmentedBody(
     group.add(mesh);
   }
 
-  return { group, regionMeshes, neutralMeshes, heatUniforms };
+  return { group, regionMeshes, neutralMeshes };
 }
 
-export function updateSegmentedBodyHeatLevels(
+export function updateSegmentedBodyColors(
   data: SegmentedBodyData,
   stimulusLevels: Record<string, number>
 ): void {
   for (const [regionId, meshes] of Object.entries(data.regionMeshes)) {
+    const hex = getRegionHex(regionId, stimulusLevels);
     for (const mesh of meshes) {
-      applyMeshHeatLevel(mesh, regionId, stimulusLevels);
+      applyMeshColor(mesh, hex);
     }
   }
 
   for (const mesh of data.neutralMeshes) {
-    applyMeshHeatLevel(mesh, null, stimulusLevels);
+    applyMeshColor(mesh, NEUTRAL_HEX);
   }
 }
 
+/** Captures the exact colors currently displayed so retargeted tweens do not jump. */
+export function snapshotSegmentedBodyColors(
+  data: SegmentedBodyData
+): SegmentedBodyColorSnapshot {
+  const snapshot: SegmentedBodyColorSnapshot = {};
+  for (const [regionId, meshes] of Object.entries(data.regionMeshes)) {
+    const firstMesh = meshes[0];
+    if (firstMesh) snapshot[regionId] = getBodyMaterial(firstMesh).color.clone();
+  }
+  return snapshot;
+}
+
 /**
- * Interpolates numeric stimulus first. The Gaussian field and continuous color
- * ramp are applied afterward, matching a conventional heat-map pipeline.
+ * Animates each muscle as one solid Phong color. This keeps every anatomical
+ * border pixel-sharp throughout the post-workout data handoff.
  */
-export function interpolateStimulusLevels(
-  fromLevels: Record<string, number>,
+export function updateSegmentedBodyColorTransition(
+  data: SegmentedBodyData,
+  fromColors: SegmentedBodyColorSnapshot,
   toLevels: Record<string, number>,
   t: number
-): Record<string, number> {
+): void {
   const clamped = Math.min(1, Math.max(0, t));
-  const keys = new Set([...Object.keys(fromLevels), ...Object.keys(toLevels)]);
-  const result: Record<string, number> = {};
-  for (const key of keys) {
-    const from = Number.isFinite(fromLevels[key]) ? fromLevels[key] : 0;
-    const to = Number.isFinite(toLevels[key]) ? toLevels[key] : 0;
-    result[key] = from + (to - from) * clamped;
+  const target = new THREE.Color();
+  const displayed = new THREE.Color();
+
+  for (const [regionId, meshes] of Object.entries(data.regionMeshes)) {
+    const firstMesh = meshes[0];
+    if (!firstMesh) continue;
+    const from = fromColors[regionId] ?? getBodyMaterial(firstMesh).color;
+    target.set(getRegionHex(regionId, toLevels));
+    displayed.copy(from).lerp(target, clamped);
+    for (const mesh of meshes) {
+      applyMeshColor(mesh, displayed);
+    }
   }
-  return result;
+
+  for (const mesh of data.neutralMeshes) {
+    applyMeshColor(mesh, NEUTRAL_HEX);
+  }
 }
