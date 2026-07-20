@@ -9,19 +9,27 @@ jest.mock('@use-voltra/ios-client', () => ({
 
 jest.mock(
   '../src/workout/restCompletionAlert',
-  () => ({ presentRestCompletionAlert: jest.fn(async () => undefined) }),
+  () => ({
+    cancelScheduledRestCompletionAlert: jest.fn(async () => true),
+    presentRestCompletionAlert: jest.fn(async () => undefined),
+    scheduleRestCompletionAlert: jest.fn(async () => false),
+  }),
   { virtual: true }
 );
 
 import { Platform } from 'react-native';
-import { renderLiveActivityToString } from '@use-voltra/ios';
+import { Voltra, renderLiveActivityToString } from '@use-voltra/ios';
 import {
   isLiveActivityActive as nativeIsLiveActivityActive,
   startLiveActivity as nativeStartLiveActivity,
   stopLiveActivity as nativeStopLiveActivity,
   updateLiveActivity as nativeUpdateLiveActivity,
 } from '@use-voltra/ios-client';
-import { presentRestCompletionAlert } from '../src/workout/restCompletionAlert';
+import {
+  cancelScheduledRestCompletionAlert,
+  presentRestCompletionAlert,
+  scheduleRestCompletionAlert,
+} from '../src/workout/restCompletionAlert';
 import {
   completeRestLiveActivity,
   createRestCompletionLiveActivityVariants,
@@ -39,7 +47,11 @@ const mockIsLiveActivityActive = jest.mocked(nativeIsLiveActivityActive);
 const mockStartLiveActivity = jest.mocked(nativeStartLiveActivity);
 const mockStopLiveActivity = jest.mocked(nativeStopLiveActivity);
 const mockUpdateLiveActivity = jest.mocked(nativeUpdateLiveActivity);
+const mockCancelScheduledRestCompletionAlert = jest.mocked(
+  cancelScheduledRestCompletionAlert
+);
 const mockPresentRestCompletionAlert = jest.mocked(presentRestCompletionAlert);
+const mockScheduleRestCompletionAlert = jest.mocked(scheduleRestCompletionAlert);
 
 type TimerElement = ReactElement<{ startAtMs: number; endAtMs: number }>;
 
@@ -48,6 +60,8 @@ describe('rest Live Activity', () => {
     expect(Platform.OS).toBe('ios');
     jest.clearAllMocks();
     mockIsLiveActivityActive.mockReturnValue(true);
+    mockCancelScheduledRestCompletionAlert.mockResolvedValue(true);
+    mockScheduleRestCompletionAlert.mockResolvedValue(false);
   });
 
   it('uses one native deadline across the Lock Screen and Dynamic Island', async () => {
@@ -62,28 +76,41 @@ describe('rest Live Activity', () => {
     await startRestLiveActivity({ startedAtMs, endsAtMs, nextUp: 'Romanian deadlift' });
 
     expect(mockStartLiveActivity).toHaveBeenCalledTimes(1);
+    expect(mockCancelScheduledRestCompletionAlert).toHaveBeenCalledTimes(1);
+    expect(mockScheduleRestCompletionAlert).toHaveBeenCalledWith(
+      endsAtMs,
+      expect.stringContaining('Time for your set')
+    );
     const [, options] = mockStartLiveActivity.mock.calls[0];
     expect(options).toEqual({
       activityName: 'algosplit-rest-timer',
       deepLinkUrl: 'algosplit://',
       staleDate: endsAtMs,
-      relevanceScore: 1,
+      relevanceScore: 0.8,
     });
-    const compactLeading = variants.island?.compact?.leading as ReactElement<{
-      name: string;
-      tintColor: string;
+    expect(variants.island?.compact?.leading).toBeUndefined();
+    const compactGroup = variants.island?.compact?.trailing as ReactElement<{
+      children: React.ReactNode;
     }>;
-    expect(compactLeading.props).toMatchObject({
+    const compactChildren = React.Children.toArray(compactGroup.props.children);
+    expect(
+      (compactChildren[0] as ReactElement<{ name: string; tintColor: string }>).props
+    ).toMatchObject({
       name: 'timer',
       tintColor: '#41C46E',
     });
-    expect((variants.island?.compact?.trailing as TimerElement).props).toMatchObject({
+    expect((compactChildren[1] as TimerElement).props).toMatchObject({
       startAtMs: startedAtMs,
       endAtMs: endsAtMs,
     });
-    expect((variants.island?.minimal as TimerElement).props).toMatchObject({
-      startAtMs: startedAtMs,
-      endAtMs: endsAtMs,
+    const minimal = variants.island?.minimal as ReactElement<{
+      name: string;
+      tintColor: string;
+    }>;
+    expect(minimal.type).toBe(Voltra.Symbol);
+    expect(minimal.props).toMatchObject({
+      name: 'timer',
+      tintColor: '#41C46E',
     });
     const lockScreen = variants.lockScreen as {
       content: ReactElement<{ children: React.ReactNode }>;
@@ -112,7 +139,7 @@ describe('rest Live Activity', () => {
     expect(variants.island?.compact?.leading).toBeUndefined();
     expect(variants.island?.compact?.trailing).toBeDefined();
     expect(variants.island?.minimal).toBeDefined();
-    expect(payload).toContain('Rest complete');
+    expect(payload).toContain('Time for your set');
     expect(payload).toContain('Back to workout');
     expect(payload).toContain('algosplit://');
     expect(Buffer.byteLength(payload, 'utf8')).toBeLessThan(4_096);
@@ -129,6 +156,30 @@ describe('rest Live Activity', () => {
     expect(mockUpdateLiveActivity.mock.invocationCallOrder[0]).toBeLessThan(
       mockPresentRestCompletionAlert.mock.invocationCallOrder[0]
     );
+  });
+
+  it('cancels the scheduled fallback when the foreground timer completes', async () => {
+    mockScheduleRestCompletionAlert.mockResolvedValueOnce(true);
+    await startRestLiveActivity({
+      startedAtMs: 1_000,
+      endsAtMs: 181_000,
+      nextUp: 'Cable row',
+    });
+
+    await completeRestLiveActivity();
+
+    expect(mockUpdateLiveActivity).toHaveBeenCalledTimes(1);
+    expect(mockCancelScheduledRestCompletionAlert).toHaveBeenCalledTimes(2);
+    expect(mockPresentRestCompletionAlert).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not present a duplicate alert after the scheduled activity already started', async () => {
+    mockCancelScheduledRestCompletionAlert.mockResolvedValueOnce(false);
+
+    await completeRestLiveActivity();
+
+    expect(mockUpdateLiveActivity).toHaveBeenCalledTimes(1);
+    expect(mockPresentRestCompletionAlert).not.toHaveBeenCalled();
   });
 
   it('uses a useful Lock Screen fallback when there is no next exercise', () => {
@@ -162,6 +213,7 @@ describe('rest Live Activity', () => {
   it('dismisses the named activity immediately', async () => {
     await endRestLiveActivity();
 
+    expect(mockCancelScheduledRestCompletionAlert).toHaveBeenCalledTimes(1);
     expect(mockIsLiveActivityActive).toHaveBeenCalledWith('algosplit-rest-timer');
     expect(mockStopLiveActivity).toHaveBeenCalledWith('algosplit-rest-timer', {
       dismissalPolicy: 'immediate',

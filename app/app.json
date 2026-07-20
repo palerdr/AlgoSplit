@@ -124,6 +124,12 @@
         }
       ],
       [
+        "./plugins/withRestLiveActivity",
+        {
+          "targetName": "AlgoSplitLiveActivity"
+        }
+      ],
+      [
         "@use-voltra/ios-client",
         {
           "deploymentTarget": "16.4",
