@@ -127,6 +127,46 @@ describe('completed-set editing', () => {
     });
   });
 
+  it('keeps the star on the truly latest duplicate block after editing older work', () => {
+    const original = activeSession();
+    const first = {
+      ...original.exercises[0],
+      sessionExerciseId: 'pushdown-set-1',
+      exercise: { ...original.exercises[0].exercise, id: 'pushdown', name: 'Pushdown' },
+      targetSets: 1,
+      completedSets: [{ weight: 100, reps: 12 }],
+      lastCompletedAt: 1000,
+    };
+    const second = {
+      ...first,
+      sessionExerciseId: 'pushdown-set-2',
+      completedSets: [{ weight: 120, reps: 10 }],
+      lastCompletedAt: 2000,
+    };
+    // Reordering cannot change which accepted set was recorded most recently.
+    const session: ActiveSession = {
+      ...original,
+      exercises: [second, first],
+    };
+    const shadows: Record<string, SetRecord> = {
+      pushdown: { weight: 120, reps: 10 },
+    };
+
+    const older = editCompletedSetInSession(session, 'pushdown-set-1', 0, {
+      weight: 105,
+    });
+    expect(older?.updatesLastUsed).toBe(false);
+    expect(lastUsedAfterCompletedSetEdit(shadows, older!)).toBe(shadows);
+
+    const latest = editCompletedSetInSession(session, 'pushdown-set-2', 0, {
+      weight: 125,
+    });
+    expect(latest?.updatesLastUsed).toBe(true);
+    expect(lastUsedAfterCompletedSetEdit(shadows, latest!)).toEqual({
+      pushdown: { weight: 125, reps: 10 },
+    });
+  });
+
   it('can explicitly clear RIR and accepts an unchanged latest set', () => {
     const original = activeSession();
     const cleared = editCompletedSetInSession(

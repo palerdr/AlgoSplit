@@ -24,6 +24,10 @@ import {
   lastUsedAfterCompletedSetEdit,
   type CompletedSetUpdate,
 } from './completedSetEditing';
+import {
+  aggregateCompletedSessionExercises,
+  createSessionSetBlocks,
+} from './sessionSetBlocks';
 import { Exercise, getExercise } from '../data/exercises';
 import { TEMPLATES as SEED_TEMPLATES, TemplateExercise, WorkoutTemplate } from '../data/templates';
 import {
@@ -32,10 +36,8 @@ import {
   rollingNet,
 } from '../analysis/stimulus';
 import type { AccountWorkoutPlan } from '../workout/splitSessions';
-import {
-  moveSessionExerciseIndex,
-  nextIncompleteExerciseIndex,
-} from '../workout/sessionNavigation';
+import { moveSessionExerciseIndex } from '../workout/sessionNavigation';
+import { nextSessionStepAfterCompletion } from '../workout/sessionChain';
 import {
   completeSessionWarmupById,
   jumpToSessionExerciseById,
@@ -64,6 +66,12 @@ export interface SetRecord {
 export interface SessionExercise {
   /** Stable for this live session even while the exercise order changes. */
   sessionExerciseId: string;
+  /** Stable grouping for the saved/add action that requested this set. */
+  sourceOccurrenceId?: string;
+  /** One-based position within the source occurrence's requested sets. */
+  setOrdinal?: number;
+  /** Original number of independently reorderable sets in that occurrence. */
+  setCount?: number;
   exercise: Exercise;
   targetSets: number;
   /** One optional, session-only warmup that never contributes to work metrics. */
@@ -72,6 +80,8 @@ export interface SessionExercise {
   /** True when a direct live-order jump intentionally opens working sets. */
   warmupBypassed: boolean;
   completedSets: SetRecord[];
+  /** Time of this block's newest accepted working set; survives reordering. */
+  lastCompletedAt?: number;
   /** Exercise cue carried into the next session for this exercise. */
   notes: string;
 }
@@ -155,7 +165,7 @@ interface AppState {
   ) => void;
   /** Apply an exact stable-ID permutation while keeping the same row in view. */
   reorderSessionExercises: (orderedSessionExerciseIds: readonly string[]) => void;
-  /** Warmup choice is editable only until that exercise records any set. */
+  /** Toggle a session-only warmup for any valid working-set block. */
   setSessionExerciseWarmupEnabled: (
     sessionExerciseId: string,
     enabled: boolean
@@ -343,6 +353,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const activeStorageKeyRef = React.useRef(storageKey);
   const syncInFlightRef = React.useRef<Set<string>>(new Set());
   const nextSessionExerciseOrdinalRef = React.useRef(0);
+  const completionClockRef = React.useRef(0);
   const persistenceQueueRef = React.useRef<Promise<void>>(Promise.resolve());
   activeStorageKeyRef.current = storageKey;
 
@@ -359,6 +370,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     setLastCompleted(null);
     setLastUsed({});
     setExerciseNotes({});
+    completionClockRef.current = 0;
     setHistory(authenticatedUserId ? [] : SEED_HISTORY);
     setTemplates(authenticatedUserId ? [] : SEED_TEMPLATES);
 
@@ -407,6 +419,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
           const restoredSession = restoreActiveSession(stored.activeSession);
           if (restoredSession) {
             nextSessionExerciseOrdinalRef.current = nextSessionExerciseOrdinal(restoredSession);
+            completionClockRef.current = restoredSession.exercises.reduce(
+              (latest, exercise) => Math.max(latest, exercise.lastCompletedAt ?? 0),
+              0
+            );
             setSession(restoredSession);
           }
         }
@@ -539,24 +555,22 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
     startTemplateSession: (template) => {
       const startedAt = Date.now();
+      let nextOrdinal = 0;
       const exercises: SessionExercise[] = template.exercises
-        .map((te, sourceIndex): SessionExercise | null => {
+        .flatMap((te): SessionExercise[] => {
           const exercise = getExercise(te.exerciseId);
-          return exercise
-            ? {
-                sessionExerciseId: liveSessionExerciseId(startedAt, sourceIndex),
-                exercise,
-                targetSets: te.sets,
-                warmupEnabled: false,
-                warmupCompleted: false,
-                warmupBypassed: false,
-                completedSets: [],
-                notes: exerciseNotes[exercise.id] ?? '',
-              }
-            : null;
-        })
-        .filter((se): se is SessionExercise => se !== null);
-      nextSessionExerciseOrdinalRef.current = template.exercises.length;
+          if (!exercise) return [];
+          const blocks = createSessionSetBlocks({
+            startedAt,
+            firstOrdinal: nextOrdinal,
+            exercise,
+            requestedSets: te.sets,
+            notes: exerciseNotes[exercise.id] ?? '',
+          });
+          nextOrdinal += blocks.length;
+          return blocks;
+        });
+      nextSessionExerciseOrdinalRef.current = nextOrdinal;
       setSession({
         name: template.name,
         planned: true,
@@ -569,20 +583,23 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
     startPlannedSession: (plan, preparation) => {
       const startedAt = Date.now();
+      let nextOrdinal = 0;
       const exercises: SessionExercise[] = preparePlannedSessionExercises(
         plan.exercises,
         preparation
-      ).map(({ sourceIndex, value: { exercise, sets }, warmupEnabled }) => ({
-        sessionExerciseId: liveSessionExerciseId(startedAt, sourceIndex),
-        exercise,
-        targetSets: sets,
-        warmupEnabled,
-        warmupCompleted: false,
-        warmupBypassed: false,
-        completedSets: [],
-        notes: exerciseNotes[exercise.id] ?? '',
-      }));
-      nextSessionExerciseOrdinalRef.current = plan.exercises.length;
+      ).flatMap(({ value: { exercise, sets }, warmupEnabled }) => {
+        const blocks = createSessionSetBlocks({
+          startedAt,
+          firstOrdinal: nextOrdinal,
+          exercise,
+          requestedSets: sets,
+          warmupEnabled,
+          notes: exerciseNotes[exercise.id] ?? '',
+        });
+        nextOrdinal += blocks.length;
+        return blocks;
+      });
+      nextSessionExerciseOrdinalRef.current = nextOrdinal;
       setSession({
         name: plan.name,
         planned: true,
@@ -609,26 +626,22 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     },
 
     addExercise: (exercise, sets = 3) => {
-      const ordinal = nextSessionExerciseOrdinalRef.current++;
+      const ordinal = nextSessionExerciseOrdinalRef.current;
+      const blocks = createSessionSetBlocks({
+        startedAt: sessionRef.current?.startedAt ?? Date.now(),
+        firstOrdinal: ordinal,
+        exercise,
+        requestedSets: sets,
+        notes: exerciseNotes[exercise.id] ?? '',
+      });
+      nextSessionExerciseOrdinalRef.current += blocks.length;
       setSession((prev) => {
         if (!prev) return prev;
         return {
           ...prev,
           // Adding to a planned split is an edit; add-as-you-go is the norm.
           edited: prev.edited || prev.planned,
-          exercises: [
-            ...prev.exercises,
-            {
-              sessionExerciseId: liveSessionExerciseId(prev.startedAt, ordinal),
-              exercise,
-              targetSets: sets,
-              warmupEnabled: false,
-              warmupCompleted: false,
-              warmupBypassed: false,
-              completedSets: [],
-              notes: exerciseNotes[exercise.id] ?? '',
-            },
-          ],
+          exercises: [...prev.exercises, ...blocks],
         };
       });
     },
@@ -639,9 +652,32 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         if (!prev) return prev;
         const target = prev.exercises[index];
         if (!target) return prev;
+        if (target.exercise.id === exercise.id) return prev;
         const edited = prev.edited || prev.planned;
         if (target.completedSets.length === 0) {
           // Nothing logged yet — swap in place.
+          const sourceOccurrenceId = target.sourceOccurrenceId;
+          const siblingIndexes = sourceOccurrenceId
+            ? prev.exercises
+                .map((candidate, candidateIndex) => ({ candidate, candidateIndex }))
+                .filter(
+                  ({ candidate, candidateIndex }) =>
+                    candidateIndex !== index &&
+                    candidate.sourceOccurrenceId === sourceOccurrenceId &&
+                    candidate.exercise.id === target.exercise.id
+                )
+                .sort(
+                  (left, right) =>
+                    (left.candidate.setOrdinal ?? left.candidateIndex) -
+                    (right.candidate.setOrdinal ?? right.candidateIndex)
+                )
+            : [];
+          const siblingPosition = new Map(
+            siblingIndexes.map(({ candidateIndex }, siblingIndex) => [
+              candidateIndex,
+              siblingIndex + 1,
+            ])
+          );
           return {
             ...prev,
             edited,
@@ -649,12 +685,26 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
               i === index
                 ? {
                     ...se,
+                    ...(sourceOccurrenceId
+                      ? {
+                          sourceOccurrenceId:
+                            `session-${prev.startedAt}-occurrence-${replacementOrdinal}`,
+                          setOrdinal: 1,
+                          setCount: 1,
+                        }
+                      : {}),
                     exercise,
                     warmupCompleted: false,
                     warmupBypassed: false,
                     notes: exerciseNotes[exercise.id] ?? '',
                   }
-                : se
+                : siblingPosition.has(i)
+                  ? {
+                      ...se,
+                      setOrdinal: siblingPosition.get(i),
+                      setCount: siblingIndexes.length,
+                    }
+                  : se
             ),
           };
         }
@@ -665,6 +715,10 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         const frozen = { ...target, targetSets: target.completedSets.length };
         const fresh = {
           sessionExerciseId: liveSessionExerciseId(prev.startedAt, replacementOrdinal),
+          sourceOccurrenceId:
+            `session-${prev.startedAt}-occurrence-${replacementOrdinal}`,
+          setOrdinal: 1,
+          setCount: 1,
           exercise,
           targetSets: remaining,
           warmupEnabled: false,
@@ -748,10 +802,65 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     },
 
     addSetToExercise: (index) => {
+      const ordinal = nextSessionExerciseOrdinalRef.current++;
       setSession((prev) => {
         if (!prev) return prev;
         const target = prev.exercises[index];
         if (!target) return prev;
+        const hasBlockMetadata =
+          typeof target.sourceOccurrenceId === 'string' &&
+          target.sourceOccurrenceId.length > 0 &&
+          Number.isInteger(target.setOrdinal) &&
+          Number.isInteger(target.setCount) &&
+          (target.setOrdinal ?? 0) >= 1 &&
+          (target.setCount ?? 0) >= (target.setOrdinal ?? 0);
+        if (hasBlockMetadata) {
+          const matchingBlocks = prev.exercises.filter(
+            (exercise) =>
+              exercise.sourceOccurrenceId === target.sourceOccurrenceId &&
+              exercise.exercise.id === target.exercise.id
+          );
+          const setCount =
+            Math.max(
+              target.setCount ?? 1,
+              ...matchingBlocks.map((exercise) => exercise.setOrdinal ?? 1)
+            ) + 1;
+          const updated = prev.exercises.map((exercise) =>
+            exercise.sourceOccurrenceId === target.sourceOccurrenceId &&
+            exercise.exercise.id === target.exercise.id
+              ? { ...exercise, setCount }
+              : exercise
+          );
+          let insertionIndex = index;
+          updated.forEach((exercise, exerciseIndex) => {
+            if (
+              exercise.sourceOccurrenceId === target.sourceOccurrenceId &&
+              exercise.exercise.id === target.exercise.id
+            ) {
+              insertionIndex = Math.max(insertionIndex, exerciseIndex);
+            }
+          });
+          const added: SessionExercise = {
+            sessionExerciseId: liveSessionExerciseId(prev.startedAt, ordinal),
+            sourceOccurrenceId: target.sourceOccurrenceId,
+            setOrdinal: setCount,
+            setCount,
+            exercise: target.exercise,
+            targetSets: 1,
+            warmupEnabled: false,
+            warmupCompleted: false,
+            warmupBypassed: false,
+            completedSets: [],
+            notes: target.notes,
+          };
+          updated.splice(insertionIndex + 1, 0, added);
+          return {
+            ...prev,
+            edited: prev.edited || prev.planned,
+            currentIndex: insertionIndex + 1,
+            exercises: updated,
+          };
+        }
         const targetSets = Math.max(target.targetSets, target.completedSets.length) + 1;
         return {
           ...prev,
@@ -797,16 +906,29 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       // Build the accepted transaction once, then batch the session and shadow
       // updates from that exact snapshot. A rejected set can no longer mutate
       // lastUsed independently of completedSets.
+      const completedAt = Math.max(Date.now(), completionClockRef.current + 1);
+      completionClockRef.current = completedAt;
       const exercises = activeSession.exercises.map((exercise, index) =>
         index === exerciseIndex
-          ? { ...exercise, completedSets: [...exercise.completedSets, record] }
+          ? {
+              ...exercise,
+              completedSets: [...exercise.completedSets, record],
+              lastCompletedAt: completedAt,
+            }
           : exercise
       );
       const completed = exercises[exerciseIndex];
       const exerciseDone = completed.completedSets.length >= completed.targetSets;
+      const projectedNext = nextSessionStepAfterCompletion(
+        activeSession.exercises,
+        target.sessionExerciseId,
+        'working'
+      );
       const currentIndex =
         activeSession.currentIndex === exerciseIndex && exerciseDone
-          ? nextIncompleteExerciseIndex(exercises, exerciseIndex)
+          ? projectedNext
+            ? sessionExerciseIndexById(exercises, projectedNext.sessionExerciseId)
+            : exercises.length
           : activeSession.currentIndex;
       setSession({ ...activeSession, exercises, currentIndex });
       setLastUsed((previous) => ({ ...previous, [target.exercise.id]: record }));
@@ -841,13 +963,25 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         const resolvedIndex = setCompletionExerciseIndex(prev, source);
         const target = prev.exercises[resolvedIndex];
         if (!target || (source && target.exercise.id !== source.exerciseId)) return prev;
+        const projectedNext = nextSessionStepAfterCompletion(
+          prev.exercises,
+          target.sessionExerciseId,
+          'warmup'
+        );
         const exercises = completeSessionWarmupById(
           prev.exercises,
           target.sessionExerciseId
         );
-        return exercises.every((exercise, index) => exercise === prev.exercises[index])
-          ? prev
-          : { ...prev, exercises };
+        if (exercises.every((exercise, index) => exercise === prev.exercises[index])) {
+          return prev;
+        }
+        const currentIndex =
+          prev.currentIndex === resolvedIndex
+            ? projectedNext
+              ? sessionExerciseIndexById(exercises, projectedNext.sessionExerciseId)
+              : exercises.length
+            : prev.currentIndex;
+        return { ...prev, exercises, currentIndex };
       });
     },
 
@@ -876,14 +1010,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
         localId: `workout-${prev.startedAt}-${Date.now()}`,
         date: new Date().toISOString(),
         name: prev.name,
-        exercises: exercises
-          .filter((se) => se.completedSets.length > 0)
-          .map((se) => ({
-            name: se.exercise.name,
-            sets: se.completedSets.length,
-            records: se.completedSets,
-            notes: se.notes,
-          })),
+        exercises: aggregateCompletedSessionExercises(exercises),
         stimulus: computeSessionStimulus(exercises, history),
         totalSets,
         volume,

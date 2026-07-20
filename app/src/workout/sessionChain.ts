@@ -1,4 +1,3 @@
-import { nextIncompleteExerciseIndex } from './sessionNavigation';
 import { sessionWarmupPending } from './sessionState';
 
 export type SessionStepKind = 'warmup' | 'working';
@@ -24,6 +23,32 @@ function normalizedTargetSets(value: number): number {
 
 export function chainWarmupPending(exercise: SessionChainExercise): boolean {
   return sessionWarmupPending(exercise);
+}
+
+function nextActionableExerciseIndex(
+  exercises: readonly SessionChainExercise[],
+  fromIndex: number,
+  options?: {
+    extraCompletedSetIndex?: number;
+    completedWarmupIndex?: number;
+  }
+): number {
+  const count = exercises.length;
+  if (count === 0) return 0;
+
+  for (let offset = 1; offset <= count; offset += 1) {
+    const index = (fromIndex + offset) % count;
+    const exercise = exercises[index];
+    const warmupPending =
+      index !== options?.completedWarmupIndex && chainWarmupPending(exercise);
+    const completedSets =
+      exercise.completedSets.length +
+      (index === options?.extraCompletedSetIndex ? 1 : 0);
+    const workingPending = completedSets < normalizedTargetSets(exercise.targetSets);
+    if (warmupPending || workingPending) return index;
+  }
+
+  return count;
 }
 
 export function currentSessionStep(
@@ -73,7 +98,17 @@ export function nextSessionStepAfterCompletion(
         sessionExerciseId: exercise.sessionExerciseId,
       };
     }
-    return null;
+
+    const nextIndex = nextActionableExerciseIndex(exercises, exerciseIndex, {
+      completedWarmupIndex: exerciseIndex,
+    });
+    if (nextIndex >= exercises.length) return null;
+    const next = exercises[nextIndex];
+    return {
+      kind: chainWarmupPending(next) ? 'warmup' : 'working',
+      exerciseIndex: nextIndex,
+      sessionExerciseId: next.sessionExerciseId,
+    };
   }
 
   const completedAfterCommit = exercise.completedSets.length + 1;
@@ -85,11 +120,9 @@ export function nextSessionStepAfterCompletion(
     };
   }
 
-  const nextIndex = nextIncompleteExerciseIndex(
-    exercises,
-    exerciseIndex,
-    exerciseIndex
-  );
+  const nextIndex = nextActionableExerciseIndex(exercises, exerciseIndex, {
+    extraCompletedSetIndex: exerciseIndex,
+  });
   if (nextIndex >= exercises.length) return null;
   const next = exercises[nextIndex];
   return {

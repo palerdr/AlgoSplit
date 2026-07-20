@@ -26,6 +26,9 @@ export interface WorkoutOrderDeckItem {
   name: string;
   targetSets: number;
   completedSets: number;
+  /** One-set block position when a saved N-set exercise is expanded live. */
+  setOrdinal?: number;
+  setCount?: number;
   warmupEnabled: boolean;
   warmupLocked: boolean;
   current: boolean;
@@ -104,7 +107,9 @@ export default function WorkoutOrderDeck({
   const { height } = useWindowDimensions();
   const compact = height < 740;
   const [dragging, setDragging] = useState(false);
+  const [listEpoch, setListEpoch] = useState(0);
   const onDragStateChangeRef = useRef(onDragStateChange);
+  const dragWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   onDragStateChangeRef.current = onDragStateChange;
   const data = useMemo(() => [...items], [items]);
   const actionsDisabled = disabled || dragging;
@@ -117,7 +122,22 @@ export default function WorkoutOrderDeck({
   const someWarmupsEnabled = warmupCount > 0 && !allWarmupsEnabled;
   const allWarmupsDisabled = actionsDisabled || items.length === 0;
 
-  useEffect(() => () => onDragStateChangeRef.current?.(false), []);
+  const clearDragWatchdog = () => {
+    if (!dragWatchdogRef.current) return;
+    clearTimeout(dragWatchdogRef.current);
+    dragWatchdogRef.current = null;
+  };
+
+  useEffect(
+    () => () => {
+      if (dragWatchdogRef.current) {
+        clearTimeout(dragWatchdogRef.current);
+        dragWatchdogRef.current = null;
+      }
+      onDragStateChangeRef.current?.(false);
+    },
+    []
+  );
 
   const applyMove = (from: number, requestedTo: number, announce = false) => {
     const item = items[from];
@@ -154,10 +174,12 @@ export default function WorkoutOrderDeck({
     const setCopy =
       variant === 'preflight'
         ? `${targetSets}×`
-        : `${completedSets}/${targetSets}`;
+        : item.setOrdinal && item.setCount && item.setCount > 1
+          ? `Set ${item.setOrdinal}/${item.setCount}`
+          : `${completedSets}/${targetSets}`;
 
     return (
-      <ScaleDecorator activeScale={1.015}>
+      <ScaleDecorator activeScale={1.006}>
         <View
           style={[
             styles.row,
@@ -191,7 +213,6 @@ export default function WorkoutOrderDeck({
             }}
             disabled={!dragEnabled}
             onPressIn={dragEnabled ? drag : undefined}
-            hitSlop={6}
             style={({ pressed }) => [
               styles.dragHandle,
               !dragEnabled && styles.controlDisabled,
@@ -251,7 +272,7 @@ export default function WorkoutOrderDeck({
             accessibilityRole="checkbox"
             accessibilityLabel={`Warm-up set for ${item.name}`}
             accessibilityHint={
-              item.warmupLocked ? 'Warm-up choice is locked after work has begun' : undefined
+              item.warmupLocked ? 'Warm-up is unavailable for this block' : undefined
             }
             accessibilityState={{ checked: item.warmupEnabled, disabled: warmupDisabled }}
             disabled={warmupDisabled || dragging}
@@ -278,6 +299,7 @@ export default function WorkoutOrderDeck({
 
   const list = (
     <DraggableFlatList
+      key={`workout-order-${listEpoch}`}
       data={data}
       keyExtractor={(item) => item.key}
       renderItem={renderItem}
@@ -290,14 +312,31 @@ export default function WorkoutOrderDeck({
         variant === 'live' && styles.liveListContent,
       ]}
       onDragBegin={() => {
+        clearDragWatchdog();
         setDragging(true);
         onDragStateChange?.(true);
         tick();
+        // Gesture Handler can omit onDragEnd when iOS cancels an interrupted
+        // pan. Never leave the menu permanently undismissable in that state.
+        dragWatchdogRef.current = setTimeout(() => {
+          dragWatchdogRef.current = null;
+          // Clear DraggableFlatList's private activeKey/shared gesture state,
+          // not only this wrapper's disabled state.
+          setListEpoch((epoch) => epoch + 1);
+          setDragging(false);
+          onDragStateChangeRef.current?.(false);
+        }, 8_000);
       }}
-      onDragEnd={({ from, to }) => {
+      onDragEnd={({ data: orderedData, from, to }) => {
+        clearDragWatchdog();
         setDragging(false);
         onDragStateChange?.(false);
-        applyMove(from, to);
+        if (from === to || disabled) return;
+        // DraggableFlatList owns the gesture projection. Rebuilding from the
+        // old props can disagree with its placeholder and make the lifted row
+        // spring back beneath the destination after release.
+        tick();
+        onReorder(orderedData, { from, to });
       }}
       ListEmptyComponent={<View style={styles.emptySpace} />}
       ListFooterComponent={
@@ -561,8 +600,10 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.24)',
   },
   dragHandle: {
-    paddingHorizontal: 2,
-    paddingVertical: 7,
+    width: 44,
+    minHeight: 44,
+    marginLeft: -9,
+    alignItems: 'center',
     justifyContent: 'center',
   },
   dragHandlePressed: {

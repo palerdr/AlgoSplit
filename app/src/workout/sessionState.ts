@@ -126,14 +126,11 @@ export interface WarmupSessionExercise extends StableSessionExercise {
   completedSets: readonly unknown[];
 }
 
-/** Warmup choice becomes immutable as soon as any set for the row has begun. */
+/** Every exercise block with working sets may change its session-only warmup. */
 export function canChangeSessionWarmup(exercise: WarmupSessionExercise): boolean {
   return (
     Number.isInteger(exercise.targetSets) &&
-    exercise.targetSets > 0 &&
-    !exercise.warmupCompleted &&
-    !exercise.warmupBypassed &&
-    exercise.completedSets.length === 0
+    exercise.targetSets > 0
   );
 }
 
@@ -144,8 +141,7 @@ export function sessionWarmupPending(exercise: WarmupSessionExercise): boolean {
     exercise.targetSets > 0 &&
     exercise.warmupEnabled &&
     !exercise.warmupCompleted &&
-    !exercise.warmupBypassed &&
-    exercise.completedSets.length === 0
+    !exercise.warmupBypassed
   );
 }
 
@@ -160,21 +156,37 @@ export function setSessionWarmupEnabledById<
   const next = exercises.map((exercise) => {
     if (
       exercise.sessionExerciseId !== sessionExerciseId ||
-      !canChangeSessionWarmup(exercise) ||
-      exercise.warmupEnabled === enabled
+      !canChangeSessionWarmup(exercise)
+    ) {
+      return exercise;
+    }
+
+    // Turning a warmup back on is an explicit request for a fresh pending
+    // warmup, even if this block's working sets or an earlier warmup are done.
+    const warmupCompleted = enabled ? false : exercise.warmupCompleted;
+    const warmupBypassed = enabled ? false : exercise.warmupBypassed;
+    if (
+      exercise.warmupEnabled === enabled &&
+      exercise.warmupCompleted === warmupCompleted &&
+      exercise.warmupBypassed === warmupBypassed
     ) {
       return exercise;
     }
     changed = true;
-    return { ...exercise, warmupEnabled: enabled } as TExercise;
+    return {
+      ...exercise,
+      warmupEnabled: enabled,
+      warmupCompleted,
+      warmupBypassed,
+    } as TExercise;
   });
   return changed ? next : [...exercises];
 }
 
 /**
  * Mark the one optional warmup complete without storing load/reps/RIR or
- * touching the working-set collection. A disabled, repeated, or late warmup
- * is deliberately a no-op.
+ * touching the working-set collection. A disabled or repeated warmup is a
+ * no-op; a newly enabled late warmup remains valid after working sets finish.
  */
 export function completeSessionWarmupById<
   TExercise extends WarmupSessionExercise,

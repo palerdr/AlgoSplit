@@ -38,6 +38,33 @@ describe('session step chain', () => {
     expect(restSecondsBeforeSessionStep(next!, 180)).toBe(180);
   });
 
+  it('treats a late warmup as actionable after all of its working sets are done', () => {
+    const late = row('bench', {
+      warmupEnabled: true,
+      completedSets: [{}, {}, {}],
+    });
+
+    expect(currentSessionStep([late], 0)).toEqual({
+      kind: 'warmup',
+      exerciseIndex: 0,
+      sessionExerciseId: 'bench',
+    });
+    expect(nextSessionStepAfterCompletion([late], 'bench', 'warmup')).toBeNull();
+  });
+
+  it('continues from a completed late warmup to the next actionable exercise', () => {
+    const exercises = [
+      row('late', { warmupEnabled: true, completedSets: [{}, {}, {}] }),
+      row('row', { completedSets: [{}] }),
+    ];
+
+    expect(nextSessionStepAfterCompletion(exercises, 'late', 'warmup')).toEqual({
+      kind: 'working',
+      exerciseIndex: 1,
+      sessionExerciseId: 'row',
+    });
+  });
+
   it('gives standard rest between working sets of the same exercise', () => {
     const exercises = [row('bench', { completedSets: [{}] })];
     const next = nextSessionStepAfterCompletion(exercises, 'bench', 'working');
@@ -55,6 +82,25 @@ describe('session step chain', () => {
       kind: 'warmup',
       exerciseIndex: 1,
       sessionExerciseId: 'row',
+    });
+    expect(restSecondsBeforeSessionStep(next!, 180)).toBe(90);
+  });
+
+  it('finds a pending late warmup on an otherwise completed exercise', () => {
+    const exercises = [
+      row('bench', { targetSets: 1 }),
+      row('late', {
+        targetSets: 1,
+        completedSets: [{}],
+        warmupEnabled: true,
+      }),
+    ];
+    const next = nextSessionStepAfterCompletion(exercises, 'bench', 'working');
+
+    expect(next).toEqual({
+      kind: 'warmup',
+      exerciseIndex: 1,
+      sessionExerciseId: 'late',
     });
     expect(restSecondsBeforeSessionStep(next!, 180)).toBe(90);
   });

@@ -29,8 +29,10 @@ import { theme } from '../theme';
 import Glass from '../ui/Glass';
 import PopupLayer from '../ui/PopupLayer';
 import PopupContent from '../ui/PopupContent';
-import WorkoutOrderDeck from '../ui/WorkoutOrderDeck';
+import WorkoutOrderDeck, { WorkoutOrderDeckItem } from '../ui/WorkoutOrderDeck';
 import {
+  latestAuthenticatedExerciseRecord,
+  latestLocalExerciseRecord,
   PreviousExerciseData,
   previousLocalExercise,
   previousRemoteExercise,
@@ -107,6 +109,8 @@ function Wheel({
   initial,
   markedValue,
   format = String,
+  onPreview,
+  onInteractionChange,
   onChange,
   compact = false,
 }: {
@@ -117,24 +121,39 @@ function Wheel({
   markedValue?: number;
   /** Row label override (e.g. the RIR unset sentinel renders as “—”) */
   format?: (value: number) => string;
+  /** Reports the row under the lens without causing a React render. */
+  onPreview?: (v: number) => void;
+  onInteractionChange?: (active: boolean) => void;
+  /** Commits only after native scrolling has actually settled. */
   onChange: (v: number) => void;
   compact?: boolean;
 }) {
   // Start the animated offset AT the initial row so the selected value renders
   // solid white immediately — no dimmed state until first touch. Off-grid
   // values (legacy/foreign data) snap to the nearest row instead of row 0.
-  const initialIdx = (() => {
+  const mountIdxRef = useRef<number | null>(null);
+  if (mountIdxRef.current === null) {
     const exact = values.indexOf(initial);
-    if (exact >= 0) return exact;
-    let best = 0;
-    for (let i = 1; i < values.length; i++) {
-      if (Math.abs(values[i] - initial) < Math.abs(values[best] - initial)) best = i;
+    let best = exact >= 0 ? exact : 0;
+    if (exact < 0) {
+      for (let i = 1; i < values.length; i++) {
+        if (Math.abs(values[i] - initial) < Math.abs(values[best] - initial)) best = i;
+      }
     }
-    return best;
-  })();
-  const scrollY = useRef(new Animated.Value(initialIdx * ITEM_H)).current;
+    mountIdxRef.current = best;
+  }
+  const mountIdx = mountIdxRef.current;
+  // `contentOffset` is a mount-only seed. Feeding a freshly selected value
+  // back into this prop while the finger is down makes Fabric fight the
+  // native gesture and visibly snap the wheel under the user's hand.
+  const mountOffsetRef = useRef({ x: 0, y: mountIdx * ITEM_H });
+  const scrollY = useRef(new Animated.Value(mountIdx * ITEM_H)).current;
   const wheelHeight = compact ? ITEM_H * 3 : WHEEL_H;
-  const lastIdxRef = useRef(initialIdx);
+  const lastIdxRef = useRef(mountIdx);
+  const movedDuringGestureRef = useRef(false);
+  const lastTickAtRef = useRef(0);
+  const onInteractionChangeRef = useRef(onInteractionChange);
+  onInteractionChangeRef.current = onInteractionChange;
   // A flick fires onScrollEndDrag with the UN-snapped offset, then momentum
   // carries on — settling there would record a value the wheel doesn't land
   // on. Delay the drag-settle a beat and cancel it if momentum starts.
@@ -142,12 +161,19 @@ function Wheel({
 
   const settle = (y: number) => {
     const idx = Math.min(values.length - 1, Math.max(0, Math.round(y / ITEM_H)));
-    onChange(values[idx]);
+    lastIdxRef.current = idx;
+    if (movedDuringGestureRef.current) {
+      onPreview?.(values[idx]);
+      onChange(values[idx]);
+    }
+    movedDuringGestureRef.current = false;
+    onInteractionChangeRef.current?.(false);
   };
 
   useEffect(() => {
     return () => {
       if (dragSettleRef.current) clearTimeout(dragSettleRef.current);
+      onInteractionChangeRef.current?.(false);
     };
   }, []);
 
@@ -165,7 +191,7 @@ function Wheel({
           showsVerticalScrollIndicator={false}
           snapToInterval={ITEM_H}
           decelerationRate="fast"
-          contentOffset={{ x: 0, y: initialIdx * ITEM_H }}
+          contentOffset={mountOffsetRef.current}
           contentContainerStyle={{ paddingVertical: (wheelHeight - ITEM_H) / 2 }}
           onScroll={Animated.event(
             [{ nativeEvent: { contentOffset: { y: scrollY } } }],
@@ -177,17 +203,38 @@ function Wheel({
                   Math.max(0, Math.round(e.nativeEvent.contentOffset.y / ITEM_H))
                 );
                 if (idx !== lastIdxRef.current) {
+                  movedDuringGestureRef.current = true;
                   lastIdxRef.current = idx;
-                  // Persist each visibly selected row as it crosses the lens.
-                  // If an arrow immediately unmounts this wheel, the last
-                  // value the user saw has already reached its draft/record.
-                  onChange(values[idx]);
-                  tick();
+                  // Keep the live value in refs only. React/AppState commits
+                  // during this callback used to rerender the entire glass
+                  // screen for every row and re-constrain this same scroll.
+                  onPreview?.(values[idx]);
+                  const now = Date.now();
+                  if (now - lastTickAtRef.current >= 45) {
+                    lastTickAtRef.current = now;
+                    tick();
+                  }
                 }
               },
             }
           )}
           scrollEventThrottle={16}
+          onScrollBeginDrag={() => {
+            movedDuringGestureRef.current = false;
+            onInteractionChangeRef.current?.(true);
+            if (dragSettleRef.current) {
+              clearTimeout(dragSettleRef.current);
+              dragSettleRef.current = null;
+            }
+          }}
+          onTouchCancel={() => {
+            if (dragSettleRef.current) {
+              clearTimeout(dragSettleRef.current);
+              dragSettleRef.current = null;
+            }
+            movedDuringGestureRef.current = false;
+            onInteractionChangeRef.current?.(false);
+          }}
           onMomentumScrollBegin={() => {
             if (dragSettleRef.current) {
               clearTimeout(dragSettleRef.current);
@@ -256,6 +303,7 @@ function SlideToComplete({
   revealLabel,
   actionLabel = 'slide to complete',
   compactActionLabel = false,
+  disabled = false,
 }: {
   frac: Animated.Value;
   onComplete: () => void;
@@ -265,6 +313,7 @@ function SlideToComplete({
   revealLabel?: string;
   actionLabel?: string;
   compactActionLabel?: boolean;
+  disabled?: boolean;
 }) {
   const [trackW, setTrackW] = useState(0);
   const maxX = Math.max(1, trackW - THUMB - TRACK_PAD * 2);
@@ -275,8 +324,10 @@ function SlideToComplete({
   const armedRef = useRef(false);
   const onCompleteRef = useRef(onComplete);
   const onSettlingChangeRef = useRef(onSettlingChange);
+  const disabledRef = useRef(disabled);
   onCompleteRef.current = onComplete;
   onSettlingChangeRef.current = onSettlingChange;
+  disabledRef.current = disabled;
 
   // New set → thumb back to the start.
   useEffect(() => {
@@ -301,10 +352,11 @@ function SlideToComplete({
 
   const pan = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 3,
+      onStartShouldSetPanResponder: () => !disabledRef.current,
+      onMoveShouldSetPanResponder: (_, g) =>
+        !disabledRef.current && Math.abs(g.dx) > 3,
       onPanResponderMove: (_, g) => {
-        if (doneRef.current) return;
+        if (doneRef.current || disabledRef.current) return;
         const nx = Math.min(Math.max(g.dx, 0), maxXRef.current);
         frac.setValue(nx / maxXRef.current);
         const armed = nx > maxXRef.current * 0.9;
@@ -314,7 +366,7 @@ function SlideToComplete({
         }
       },
       onPanResponderRelease: (_, g) => {
-        if (doneRef.current) return;
+        if (doneRef.current || disabledRef.current) return;
         if (g.dx >= maxXRef.current * 0.9) {
           doneRef.current = true;
           onSettlingChangeRef.current(true);
@@ -415,6 +467,8 @@ function SlideToComplete({
       {/* Liquid glass thumb — a SIBLING of the track glass (nesting glass
           inside glass renders unreliably), floating above it. */}
       <Animated.View
+        accessibilityState={{ disabled }}
+        pointerEvents={disabled ? 'none' : 'auto'}
         style={[styles.thumbWrap, { transform: [{ translateX }] }]}
         {...pan.panHandlers}
       >
@@ -621,6 +675,9 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   const [orderOpen, setOrderOpen] = useState(false);
   const [orderDragging, setOrderDragging] = useState(false);
   const [browseStep, setBrowseStep] = useState<SessionBrowseStep | null>(null);
+  const [wheelMoving, setWheelMoving] = useState(false);
+  const wheelMovingRef = useRef(false);
+  const activeWheelIdsRef = useRef<Set<string>>(new Set());
 
   // Shared slide progress: drives the slider AND the live top-bar segment.
   const slideFrac = useRef(new Animated.Value(0)).current;
@@ -682,6 +739,8 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   const selectedWorkingSetIndex =
     selectedBrowseStep?.kind === 'working' ? selectedBrowseStep.setIndex : null;
   const setNumber = selectedWorkingSetIndex === null ? 1 : selectedWorkingSetIndex + 1;
+  const displaySetNumber = current?.setOrdinal ?? setNumber;
+  const displaySetCount = current?.setCount ?? current?.targetSets ?? 1;
   const selectedSetComplete = Boolean(
     current &&
       selectedWorkingSetIndex !== null &&
@@ -703,6 +762,26 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     current && current.completedSets.length >= current.targetSets
   );
   const exerciseNames = view?.exercises.map((exercise) => exercise.exercise.name) ?? [];
+  const liveOrderItems = useMemo<WorkoutOrderDeckItem[]>(() => {
+    if (!view) return [];
+    return view.exercises.map((exercise, index) => ({
+      key: exercise.sessionExerciseId,
+      name: exercise.exercise.name,
+      targetSets: exercise.targetSets,
+      completedSets: exercise.completedSets.length,
+      setOrdinal: exercise.setOrdinal,
+      setCount: exercise.setCount,
+      warmupEnabled: exercise.warmupEnabled,
+      // A warmup is session-only and can be injected, removed, or repeated
+      // for any valid block, including one whose working set is complete.
+      warmupLocked: !(Number.isInteger(exercise.targetSets) && exercise.targetSets > 0),
+      current: index === displayIndex,
+      // Stable block IDs keep the viewport attached even when current or
+      // completed work is reordered. Locking those rows only made drops feel
+      // inconsistent and is unnecessary for data integrity.
+      draggable: view.exercises.length > 1,
+    }));
+  }, [displayIndex, view]);
   const previousBrowseStep = moveSessionBrowseStep(browseSteps, selectedBrowseStep, -1);
   const nextBrowseStep = moveSessionBrowseStep(browseSteps, selectedBrowseStep, 1);
   const browseDestinationName = (step: SessionBrowseStep | null): string | undefined => {
@@ -713,7 +792,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     if (!exercise) return undefined;
     return step.kind === 'warmup'
       ? `${exercise.exercise.name} warm-up`
-      : `${exercise.exercise.name}, set ${step.setIndex + 1}`;
+      : `${exercise.exercise.name}, set ${exercise.setOrdinal ?? step.setIndex + 1}`;
   };
   const remoteHistory = account.workoutRanges.all;
 
@@ -745,6 +824,26 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   }, [account.status, current, history, remoteHistory?.data, view, warmupActive]);
 
   const currentSessionLast = current?.completedSets[current.completedSets.length - 1];
+  const latestCurrentExerciseRecord = useMemo<SetRecord | undefined>(() => {
+    if (!view || !currentId) return undefined;
+    let latest: SetRecord | undefined;
+    let latestAt = Number.NEGATIVE_INFINITY;
+    let latestIndex = -1;
+    view.exercises.forEach((exercise, index) => {
+      if (exercise.exercise.id !== currentId || exercise.completedSets.length === 0) return;
+      const completedAt =
+        typeof exercise.lastCompletedAt === 'number' &&
+        Number.isFinite(exercise.lastCompletedAt)
+          ? exercise.lastCompletedAt
+          : Number.NEGATIVE_INFINITY;
+      if (completedAt > latestAt || (completedAt === latestAt && index > latestIndex)) {
+        latestAt = completedAt;
+        latestIndex = index;
+        latest = exercise.completedSets[exercise.completedSets.length - 1];
+      }
+    });
+    return latest;
+  }, [currentId, view]);
   const selectedCompletedRecord =
     selectedWorkingSetIndex === null
       ? undefined
@@ -752,14 +851,33 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   const shadow =
     warmupActive || selectedWorkingSetIndex === null
       ? undefined
-      : previous?.records[selectedWorkingSetIndex];
-  // Once this workout has a logged set, its newest values become the dial
-  // markers immediately. Prior-session history is only the opening fallback.
-  const markedRecord = warmupActive ? undefined : currentSessionLast ?? shadow;
+      : previous?.records[(current?.setOrdinal ?? selectedWorkingSetIndex + 1) - 1];
+  const latestHistoryRecord = useMemo<SetRecord | null>(() => {
+    if (!current) return null;
+    if (account.status === 'authenticated') {
+      return latestAuthenticatedExerciseRecord(
+        remoteHistory?.data ?? [],
+        history,
+        current.exercise.name
+      )?.record ?? null;
+    }
+    if (account.status === 'signedOut' || account.status === 'unconfigured') {
+      return latestLocalExerciseRecord(history, current.exercise.name);
+    }
+    return null;
+  }, [account.status, current, history, remoteHistory?.data]);
+  // The star is exercise-global, not workout-name/row/set-position scoped.
+  // Live-session provenance wins immediately; otherwise account history is
+  // authoritative over a possibly stale device-local prefill cache.
+  const markedRecord = warmupActive
+    ? undefined
+    : latestCurrentExerciseRecord ??
+      latestHistoryRecord ??
+      (currentId ? lastUsed[currentId] : undefined);
   const remoteShadowError =
-    account.status === 'authenticated' && Boolean(remoteHistory?.error) && !currentSessionLast;
+    account.status === 'authenticated' && Boolean(remoteHistory?.error) && !markedRecord;
   const remoteShadowLoading =
-    account.status === 'authenticated' && Boolean(remoteHistory?.loading) && !currentSessionLast;
+    account.status === 'authenticated' && Boolean(remoteHistory?.loading) && !markedRecord;
 
   // Each browsable set owns its wheel instance and draft. Moving backward
   // restores that set's committed record; moving forward restores any draft
@@ -768,14 +886,38 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     selectedBrowseStep?.kind === 'working'
       ? `working-${selectedBrowseStep.setIndex}`
       : selectedBrowseStep?.kind ?? 'none';
-  const wheelEpoch = `${current?.sessionExerciseId ?? 'none'}-${
-    previous ? 'shadowed' : 'bare'
-  }-${browseStepKey}-${selectedSetComplete ? 'complete' : 'entry'}`;
+  const wheelPageKey = `${current?.sessionExerciseId ?? 'none'}-${browseStepKey}-${
+    selectedSetComplete ? 'complete' : 'entry'
+  }`;
+  const previousSignature = previous
+    ? JSON.stringify([previous.records, previous.notes])
+    : 'none';
+  const [historyWheelRevision, setHistoryWheelRevision] = useState(0);
+  const wheelTouchedRef = useRef(false);
+  const wheelPageRef = useRef(wheelPageKey);
+  const adoptedPreviousSignatureRef = useRef(previousSignature);
+  if (wheelPageRef.current !== wheelPageKey) {
+    wheelPageRef.current = wheelPageKey;
+    wheelTouchedRef.current = false;
+    adoptedPreviousSignatureRef.current = previousSignature;
+  }
+  useEffect(() => {
+    if (
+      previousSignature === 'none' ||
+      wheelTouchedRef.current ||
+      adoptedPreviousSignatureRef.current === previousSignature
+    ) return;
+    adoptedPreviousSignatureRef.current = previousSignature;
+    setHistoryWheelRevision((revision) => revision + 1);
+  }, [previousSignature, wheelPageKey]);
+  // Async history may hydrate a wheel only while its page is untouched. Once
+  // the user engages a dial, neither history nor parent state can remount it.
+  const wheelEpoch = `${wheelPageKey}-history-${historyWheelRevision}`;
   const initialRecord: SetRecord = (() => {
     const fallback = (currentId ? lastUsed[currentId] : undefined) ?? DEFAULT_SET;
     const base = selectedSetComplete
       ? selectedCompletedRecord ?? currentSessionLast ?? previous?.records[0] ?? fallback
-      : currentSessionLast ?? shadow ?? previous?.records[0] ?? fallback;
+      : latestCurrentExerciseRecord ?? shadow ?? previous?.records[0] ?? fallback;
     return {
       weight: snapTo(WEIGHT_VALUES, base.weight),
       reps: snapTo(REP_VALUES, base.reps),
@@ -792,21 +934,32 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
       : null;
   const effectiveInitialRecord =
     (wheelDraftKey ? wheelDraftsRef.current[wheelDraftKey] : undefined) ?? initialRecord;
+  const wheelPreviewRef = useRef<SetRecord>(effectiveInitialRecord);
+  const wheelPreviewEpochRef = useRef(wheelEpoch);
+  const wheelDirtyFieldsRef = useRef<Set<keyof SetRecord>>(new Set());
+  if (wheelPreviewEpochRef.current !== wheelEpoch) {
+    wheelPreviewEpochRef.current = wheelEpoch;
+    wheelPreviewRef.current = effectiveInitialRecord;
+    wheelDirtyFieldsRef.current.clear();
+  }
   useEffect(() => {
+    wheelPreviewRef.current = effectiveInitialRecord;
+    wheelDirtyFieldsRef.current.clear();
     setWeight(effectiveInitialRecord.weight);
     setReps(effectiveInitialRecord.reps);
     setRir(effectiveInitialRecord.rir ?? 0);
-    // Only when the exact exercise/set page changes or its initial shadow arrives.
+    // Only when the exact exercise/set page changes. Async history does not
+    // get to replace a wheel that the user may already be touching.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wheelEpoch]);
 
-  const updateWheelDraft = (update: Partial<SetRecord>) => {
-    if (!wheelDraftKey) return;
-    const existing = wheelDraftsRef.current[wheelDraftKey] ?? { weight, reps, rir };
-    wheelDraftsRef.current[wheelDraftKey] = {
-      ...existing,
-      ...update,
-    };
+  const previewWheel = (update: Partial<SetRecord>) => {
+    const next = { ...wheelPreviewRef.current, ...update };
+    wheelPreviewRef.current = next;
+    (Object.keys(update) as (keyof SetRecord)[]).forEach((field) => {
+      wheelDirtyFieldsRef.current.add(field);
+    });
+    if (wheelDraftKey) wheelDraftsRef.current[wheelDraftKey] = next;
   };
   const updateSelectedCompletedRecord = (update: Partial<SetRecord>): boolean => {
     if (!selectedSetComplete || !current || selectedWorkingSetIndex === null) return false;
@@ -817,19 +970,60 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     );
   };
   const changeWeight = (value: number) => {
+    previewWheel({ weight: value });
     setWeight(value);
-    if (updateSelectedCompletedRecord({ weight: value })) return;
-    updateWheelDraft({ weight: value });
+    if (updateSelectedCompletedRecord({ weight: value })) {
+      wheelDirtyFieldsRef.current.delete('weight');
+      return;
+    }
   };
   const changeReps = (value: number) => {
+    previewWheel({ reps: value });
     setReps(value);
-    if (updateSelectedCompletedRecord({ reps: value })) return;
-    updateWheelDraft({ reps: value });
+    if (updateSelectedCompletedRecord({ reps: value })) {
+      wheelDirtyFieldsRef.current.delete('reps');
+      return;
+    }
   };
   const changeRir = (value: number) => {
+    previewWheel({ rir: value });
     setRir(value);
-    if (updateSelectedCompletedRecord({ rir: value })) return;
-    updateWheelDraft({ rir: value });
+    if (updateSelectedCompletedRecord({ rir: value })) {
+      wheelDirtyFieldsRef.current.delete('rir');
+      return;
+    }
+  };
+  const flushWheelPreview = () => {
+    if (warmupActive || !current || selectedWorkingSetIndex === null) return;
+    const record = wheelPreviewRef.current;
+    if (selectedSetComplete) {
+      const update: Partial<SetRecord> = {};
+      wheelDirtyFieldsRef.current.forEach((field) => {
+        if (field === 'weight') update.weight = record.weight;
+        if (field === 'reps') update.reps = record.reps;
+        if (field === 'rir') update.rir = record.rir;
+      });
+      if (
+        Object.keys(update).length > 0 &&
+        updateCompletedSet(current.sessionExerciseId, selectedWorkingSetIndex, update)
+      ) {
+        wheelDirtyFieldsRef.current.clear();
+      }
+    } else if (wheelDraftKey) {
+      wheelDraftsRef.current[wheelDraftKey] = record;
+    }
+  };
+  const updateWheelInteraction = (wheelId: string, active: boolean) => {
+    if (active) {
+      wheelTouchedRef.current = true;
+      activeWheelIdsRef.current.add(wheelId);
+    } else {
+      activeWheelIdsRef.current.delete(wheelId);
+    }
+    const moving = activeWheelIdsRef.current.size > 0;
+    if (moving === wheelMovingRef.current) return;
+    wheelMovingRef.current = moving;
+    setWheelMoving(moving);
   };
 
   const notesInitialized = useRef<Set<string>>(new Set());
@@ -961,6 +1155,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
       direction
     );
     if (!destination) return;
+    flushWheelPreview();
     tick();
     slideFrac.stopAnimation();
     slideFrac.setValue(0);
@@ -971,6 +1166,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   };
   const jumpExercise = (sessionExerciseId: string) => {
     if (baseInteractionBlocked || sliderSettlingRef.current) return;
+    flushWheelPreview();
     tick();
     slideFrac.stopAnimation();
     slideFrac.setValue(0);
@@ -1013,7 +1209,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   })();
 
   // Wheels only land on valid API values, so no draft validation is needed.
-  const wheelRecord = (): SetRecord => ({ weight, reps, rir });
+  const wheelRecord = (): SetRecord => wheelPreviewRef.current;
 
   const commitPendingSet = () => {
     const pending = pendingSetRef.current;
@@ -1024,6 +1220,10 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     } else {
       completeSet(pending.record, pending.source);
     }
+    // Keep the rendered page aligned with the exact destination that selected
+    // the rest duration. The state action normally advances there itself;
+    // this stable-ID jump is a safe guard against any legacy cursor shape.
+    jumpToSessionExercise(pending.nextStep.sessionExerciseId);
     slideFrac.setValue(0);
   };
 
@@ -1031,7 +1231,8 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     if (
       !current ||
       (!warmupActive && !selectedSetIsCurrent) ||
-      pendingSetRef.current
+      pendingSetRef.current ||
+      wheelMovingRef.current
     ) return;
     const source: SetCompletionSource = {
       exerciseIndex: displayIndex,
@@ -1088,7 +1289,13 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   };
 
   const finishNow = () => {
-    if (sliderSettlingRef.current || pendingSetRef.current || resting) return;
+    if (
+      sliderSettlingRef.current ||
+      wheelMovingRef.current ||
+      pendingSetRef.current ||
+      resting
+    ) return;
+    flushWheelPreview();
     const requiredWarmup = view.exercises.find(chainWarmupPending);
     if (requiredWarmup) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
@@ -1179,7 +1386,10 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
               {!warmupActive && (
                 <Pressable
                   onPress={() => {
-                    if (!sliderSettlingRef.current) setPicker('edit');
+                    if (!sliderSettlingRef.current) {
+                      flushWheelPreview();
+                      setPicker('edit');
+                    }
                   }}
                   disabled={navigationBlocked}
                   accessibilityState={{ disabled: navigationBlocked }}
@@ -1201,8 +1411,8 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                 warmupActive
                   ? 'Warm-up'
                   : selectedSetComplete
-                  ? `Set ${setNumber} complete`
-                  : `Set ${setNumber} of ${current.targetSets}`
+                  ? `Set ${displaySetNumber} complete`
+                  : `Set ${displaySetNumber} of ${displaySetCount}`
               }
               previousDestinationName={browseDestinationName(previousBrowseStep)}
               nextDestinationName={browseDestinationName(nextBrowseStep)}
@@ -1210,6 +1420,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
               disabled={navigationBlocked}
               onMove={moveExercise}
               onOpenOrder={() => {
+                flushWheelPreview();
                 tick();
                 setOrderOpen(true);
               }}
@@ -1242,6 +1453,10 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   markedValue={
                     markedRecord ? snapTo(WEIGHT_VALUES, markedRecord.weight) : undefined
                   }
+                  onPreview={(value) => previewWheel({ weight: value })}
+                  onInteractionChange={(active) =>
+                    updateWheelInteraction('weight', active)
+                  }
                   onChange={changeWeight}
                   compact={compactLayout}
                 />
@@ -1250,8 +1465,9 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   label="REPS"
                   values={REP_VALUES}
                   initial={effectiveInitialRecord.reps}
-                  markedValue={
-                    markedRecord ? snapTo(REP_VALUES, markedRecord.reps) : undefined
+                  onPreview={(value) => previewWheel({ reps: value })}
+                  onInteractionChange={(active) =>
+                    updateWheelInteraction('reps', active)
                   }
                   onChange={changeReps}
                   compact={compactLayout}
@@ -1261,12 +1477,11 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   label="RIR"
                   values={RIR_VALUES}
                   initial={effectiveInitialRecord.rir ?? 0}
-                  markedValue={
-                    markedRecord?.rir == null
-                      ? undefined
-                      : snapTo(RIR_VALUES, markedRecord.rir)
-                  }
                   format={(v) => (v === 0 ? 'Failure' : String(v))}
+                  onPreview={(value) => previewWheel({ rir: value })}
+                  onInteractionChange={(active) =>
+                    updateWheelInteraction('rir', active)
+                  }
                   onChange={changeRir}
                   compact={compactLayout}
                 />
@@ -1281,11 +1496,9 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
               ) : (
                 <Text style={styles.shadowHint}>
                   {remoteShadowLoading
-                    ? 'Loading last-session values…'
-                    : currentSessionLast
-                      ? '★ marks your most recently logged set'
-                      : shadow
-                        ? '★ marks your matching set from last time'
+                    ? 'Loading your last recorded weight…'
+                    : markedRecord
+                      ? '★ marks the last recorded weight for this exercise'
                       : '0 lb = bodyweight · Failure = no reps left'}
                 </Text>
               )}
@@ -1343,7 +1556,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
             <View
               accessible
               accessibilityRole="text"
-              accessibilityLabel={`${current.exercise.name}, set ${setNumber} complete`}
+              accessibilityLabel={`${current.exercise.name}, set ${displaySetNumber} complete`}
               style={[styles.sliderZone, compactLayout && styles.sliderZoneCompact]}
             >
               <Glass
@@ -1374,8 +1587,8 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
               accessible
               accessibilityRole="text"
               accessibilityLabel={`${current.exercise.name}, complete set ${
-                current.completedSets.length + 1
-              } before set ${setNumber}`}
+                current.setOrdinal ?? current.completedSets.length + 1
+              } before set ${displaySetNumber}`}
               style={[styles.sliderZone, compactLayout && styles.sliderZoneCompact]}
             >
               <Glass
@@ -1383,7 +1596,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                 tintColor="rgba(255,255,255,0.025)"
               >
                 <Text style={styles.warmupRequiredStateText}>
-                  Complete Set {current.completedSets.length + 1} first
+                  Complete Set {current.setOrdinal ?? current.completedSets.length + 1} first
                 </Text>
               </Glass>
             </View>
@@ -1396,6 +1609,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                 }-${setNumber}`}
                 onComplete={handleSetComplete}
                 onSettlingChange={updateSliderSettling}
+                disabled={wheelMoving}
                 actionLabel={completionActionLabel}
                 compactActionLabel={warmupActive}
                 revealLabel={
@@ -1477,24 +1691,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
       >
         <WorkoutOrderDeck
           variant="live"
-          items={view.exercises.map((exercise, index) => {
-            const complete = exercise.completedSets.length >= exercise.targetSets;
-            return {
-              key: exercise.sessionExerciseId,
-              name: exercise.exercise.name,
-              targetSets: exercise.targetSets,
-              completedSets: exercise.completedSets.length,
-              warmupEnabled: exercise.warmupEnabled,
-              warmupLocked:
-                exercise.warmupCompleted ||
-                exercise.warmupBypassed ||
-                exercise.completedSets.length > 0,
-              current: index === displayIndex,
-              // The current row stays anchored and completed work never shifts.
-              // Everything upcoming remains one direct, draggable queue.
-              draggable: index !== displayIndex && !complete,
-            };
-          })}
+          items={liveOrderItems}
           onReorder={(items) =>
             reorderSessionExercises(items.map((item) => item.key))
           }

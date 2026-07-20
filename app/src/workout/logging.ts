@@ -19,7 +19,134 @@ export interface PreviousExerciseData {
   notes: string;
 }
 
+export interface ExerciseRecordProvenance {
+  record: SetRecord;
+  completedAt: number;
+  source: 'local' | 'remote';
+}
+
 const normalized = (value: string) => value.trim().toLocaleLowerCase();
+
+const timestamp = (value: string): number => {
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
+};
+
+function remoteExerciseRecord(
+  workout: WorkoutLogResponse,
+  exerciseKey: string
+): SetRecord | null {
+  // `exercises` is normally returned in order_index order, but use the
+  // explicit field so a reordered API response cannot change provenance.
+  // The array position is a deterministic fallback for legacy duplicate rows
+  // that share the same order_index.
+  const matches = workout.exercises
+    .map((exercise, index) => ({ exercise, index }))
+    .filter(({ exercise }) => normalized(exercise.exercise_name) === exerciseKey)
+    .sort(
+      (a, b) =>
+        b.exercise.order_index - a.exercise.order_index || b.index - a.index
+    );
+
+  for (const { exercise } of matches) {
+    const count = Math.min(exercise.reps.length, exercise.weight.length);
+    if (count === 0) continue;
+    const index = count - 1;
+    return {
+      weight: exercise.weight[index],
+      reps: exercise.reps[index],
+      ...(exercise.rir?.[index] == null ? {} : { rir: exercise.rir[index] }),
+    };
+  }
+  return null;
+}
+
+/**
+ * Newest committed account-history set for an exercise, regardless of which
+ * split/workout contained it. Duplicate exercise rows use their live order;
+ * the final paired weight/reps entry in the latest row is the newest set.
+ */
+function latestRemoteExerciseRecordWithProvenance(
+  workouts: WorkoutLogResponse[],
+  exerciseName: string
+): ExerciseRecordProvenance | null {
+  const exerciseKey = normalized(exerciseName);
+  const ordered = [...workouts].sort(
+    (a, b) =>
+      timestamp(b.completed_at) - timestamp(a.completed_at) ||
+      timestamp(b.created_at) - timestamp(a.created_at)
+  );
+
+  for (const workout of ordered) {
+    const record = remoteExerciseRecord(workout, exerciseKey);
+    if (record) {
+      return {
+        record,
+        completedAt: timestamp(workout.completed_at),
+        source: 'remote',
+      };
+    }
+  }
+  return null;
+}
+
+export function latestRemoteExerciseRecord(
+  workouts: WorkoutLogResponse[],
+  exerciseName: string
+): SetRecord | null {
+  return latestRemoteExerciseRecordWithProvenance(workouts, exerciseName)?.record ?? null;
+}
+
+/**
+ * Signed-out/demo equivalent of latestRemoteExerciseRecord. Local completed
+ * exercises retain execution order in their array, so the last matching row
+ * with a committed record owns the latest set.
+ */
+function latestLocalExerciseRecordWithProvenance(
+  history: CompletedWorkout[],
+  exerciseName: string
+): ExerciseRecordProvenance | null {
+  const exerciseKey = normalized(exerciseName);
+  const ordered = [...history].sort((a, b) => timestamp(b.date) - timestamp(a.date));
+
+  for (const workout of ordered) {
+    for (let index = workout.exercises.length - 1; index >= 0; index--) {
+      const exercise = workout.exercises[index];
+      if (normalized(exercise.name) !== exerciseKey || exercise.records.length === 0) continue;
+      return {
+        record: exercise.records[exercise.records.length - 1],
+        completedAt: timestamp(workout.date),
+        source: 'local',
+      };
+    }
+  }
+  return null;
+}
+
+export function latestLocalExerciseRecord(
+  history: CompletedWorkout[],
+  exerciseName: string
+): SetRecord | null {
+  return latestLocalExerciseRecordWithProvenance(history, exerciseName)?.record ?? null;
+}
+
+/**
+ * Resolve authenticated history without assuming either cache is freshest.
+ * Local pending/failed work may not be on the server yet, while remote history
+ * may contain a newer workout recorded on another device. A remote tie wins
+ * because it is the account-authoritative copy of the same completion time.
+ */
+export function latestAuthenticatedExerciseRecord(
+  workouts: WorkoutLogResponse[],
+  localHistory: CompletedWorkout[],
+  exerciseName: string
+): ExerciseRecordProvenance | null {
+  const remote = latestRemoteExerciseRecordWithProvenance(workouts, exerciseName);
+  const local = latestLocalExerciseRecordWithProvenance(localHistory, exerciseName);
+  if (!remote) return local;
+  if (!local) return remote;
+  return local.completedAt > remote.completedAt ? local : remote;
+}
 
 /** Validate exactly what the workout API accepts, with tighter UI limits. */
 export function validateSetDraft(draft: SetDraft): SetDraftValidation {

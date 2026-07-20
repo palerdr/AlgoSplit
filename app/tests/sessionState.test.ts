@@ -117,7 +117,7 @@ describe('warmup invariants', () => {
     expect(repeated[0].warmupCompleted).toBe(true);
   });
 
-  it('does not record a disabled warmup or one after working sets begin', () => {
+  it('ignores a disabled warmup but completes one enabled after working sets begin', () => {
     const disabled = row('disabled');
     const working = row('working', {
       warmupEnabled: true,
@@ -127,26 +127,72 @@ describe('warmup invariants', () => {
     const late = completeSessionWarmupById(next, 'working');
 
     expect(next[0]).toBe(disabled);
-    expect(late[1]).toBe(working);
-    expect(late[1].warmupCompleted).toBe(false);
+    expect(late[1]).toMatchObject({
+      warmupEnabled: true,
+      warmupCompleted: true,
+      warmupBypassed: false,
+      completedSets: [{ weight: 185, reps: 8 }],
+    });
+    expect(sessionWarmupPending(late[1])).toBe(false);
+    expect(completeSessionWarmupById(late, 'working')[1]).toBe(late[1]);
   });
 
-  it('locks the checkbox after either warmup or working work begins', () => {
+  it('can toggle the checkbox after warmup or working work begins', () => {
     const untouched = row('untouched');
     const enabled = setSessionWarmupEnabledById([untouched], 'untouched', true);
     expect(enabled[0].warmupEnabled).toBe(true);
     expect(canChangeSessionWarmup(enabled[0])).toBe(true);
 
     const warmed = completeSessionWarmupById(enabled, 'untouched');
-    expect(canChangeSessionWarmup(warmed[0])).toBe(false);
-    expect(setSessionWarmupEnabledById(warmed, 'untouched', false)[0]).toBe(warmed[0]);
+    expect(canChangeSessionWarmup(warmed[0])).toBe(true);
+    const rewarmed = setSessionWarmupEnabledById(warmed, 'untouched', true);
+    expect(rewarmed[0]).toMatchObject({
+      warmupEnabled: true,
+      warmupCompleted: false,
+      warmupBypassed: false,
+    });
+    expect(sessionWarmupPending(rewarmed[0])).toBe(true);
+    expect(setSessionWarmupEnabledById(rewarmed, 'untouched', true)[0]).toBe(
+      rewarmed[0]
+    );
+
+    const disabled = setSessionWarmupEnabledById(rewarmed, 'untouched', false);
+    expect(disabled[0].warmupEnabled).toBe(false);
+    expect(sessionWarmupPending(disabled[0])).toBe(false);
 
     const working = row('working', {
       warmupEnabled: true,
       completedSets: [{ weight: 185, reps: 8 }],
     });
-    expect(canChangeSessionWarmup(working)).toBe(false);
-    expect(setSessionWarmupEnabledById([working], 'working', false)[0]).toBe(working);
+    expect(canChangeSessionWarmup(working)).toBe(true);
+    const workingDisabled = setSessionWarmupEnabledById(
+      [working],
+      'working',
+      false
+    );
+    expect(workingDisabled[0].warmupEnabled).toBe(false);
+    expect(workingDisabled[0].completedSets).toBe(working.completedSets);
+  });
+
+  it('re-enabling a bypassed warmup creates one fresh pending warmup', () => {
+    const bypassed = row('bench', {
+      warmupEnabled: true,
+      warmupBypassed: true,
+      completedSets: [{ weight: 185, reps: 8 }],
+    });
+    const enabled = setSessionWarmupEnabledById([bypassed], 'bench', true);
+
+    expect(enabled[0]).toMatchObject({
+      warmupEnabled: true,
+      warmupCompleted: false,
+      warmupBypassed: false,
+    });
+    expect(enabled[0].completedSets).toBe(bypassed.completedSets);
+    expect(sessionWarmupPending(enabled[0])).toBe(true);
+
+    const completed = completeSessionWarmupById(enabled, 'bench');
+    expect(sessionWarmupPending(completed[0])).toBe(false);
+    expect(completeSessionWarmupById(completed, 'bench')[0]).toBe(completed[0]);
   });
 
   it('bypasses only the explicitly selected pending warmup without logging work', () => {
@@ -161,7 +207,7 @@ describe('warmup invariants', () => {
       completedSets: [],
     });
     expect(sessionWarmupPending(exercises[0])).toBe(false);
-    expect(canChangeSessionWarmup(exercises[0])).toBe(false);
+    expect(canChangeSessionWarmup(exercises[0])).toBe(true);
     expect(exercises[1]).toBe(later);
     expect(sessionWarmupPending(exercises[1])).toBe(true);
   });

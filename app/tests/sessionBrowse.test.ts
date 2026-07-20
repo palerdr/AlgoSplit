@@ -45,13 +45,25 @@ describe('session arrow browsing', () => {
   it.each([
     ['completed', { warmupEnabled: true, warmupCompleted: true }],
     ['bypassed', { warmupEnabled: true, warmupBypassed: true }],
-    ['already working', { warmupEnabled: true, completedSets: [{}] }],
   ])('does not expose a %s warmup page', (_label, overrides) => {
     expect(sessionBrowseSteps([exercise('bench', overrides)])).toEqual([
       { sessionExerciseId: 'bench', kind: 'working', setIndex: 0 },
       { sessionExerciseId: 'bench', kind: 'working', setIndex: 1 },
       { sessionExerciseId: 'bench', kind: 'working', setIndex: 2 },
     ]);
+  });
+
+  it('exposes a newly enabled warmup even after working sets begin or finish', () => {
+    const steps = sessionBrowseSteps([
+      exercise('working', { warmupEnabled: true, completedSets: [{}] }),
+      exercise('completed', {
+        warmupEnabled: true,
+        completedSets: [{}, {}, {}],
+      }),
+    ]);
+
+    expect(steps[0]).toEqual({ sessionExerciseId: 'working', kind: 'warmup' });
+    expect(steps[4]).toEqual({ sessionExerciseId: 'completed', kind: 'warmup' });
   });
 
   it('omits invalid zero-set rows so warmups never become counted work', () => {

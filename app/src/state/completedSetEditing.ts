@@ -87,7 +87,29 @@ export function editCompletedSetInSession(
   };
   if (!validSetRecord(record)) return null;
 
-  const updatesLastUsed = setIndex === exercise.completedSets.length - 1;
+  let latestExerciseIndex = -1;
+  let latestCompletedAt = Number.NEGATIVE_INFINITY;
+  session.exercises.forEach((candidate, candidateIndex) => {
+    if (
+      candidate.exercise.id !== exercise.exercise.id ||
+      candidate.completedSets.length === 0
+    ) return;
+    const completedAt =
+      typeof candidate.lastCompletedAt === 'number' &&
+      Number.isFinite(candidate.lastCompletedAt)
+        ? candidate.lastCompletedAt
+        : Number.NEGATIVE_INFINITY;
+    if (
+      completedAt > latestCompletedAt ||
+      (completedAt === latestCompletedAt && candidateIndex > latestExerciseIndex)
+    ) {
+      latestCompletedAt = completedAt;
+      latestExerciseIndex = candidateIndex;
+    }
+  });
+  const updatesLastUsed =
+    setIndex === exercise.completedSets.length - 1 &&
+    exerciseIndex === latestExerciseIndex;
   if (sameSetRecord(previous, record)) {
     return {
       session,
