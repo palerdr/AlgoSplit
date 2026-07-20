@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const require = createRequire(import.meta.url);
-const { IOSConfig } = require('@expo/config-plugins');
+const { IOSConfig } = require('expo/config-plugins');
 const plist = require('plist');
 
 const SCRIPT_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
