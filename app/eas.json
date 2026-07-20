@@ -26,6 +26,10 @@
       "env": {
         "EXPO_PUBLIC_ALGOSPLIT_API": "https://algosplit-api-staging.vercel.app"
       }
+    },
+    "signing-canary": {
+      "extends": "production",
+      "autoIncrement": false
     }
   },
   "submit": {

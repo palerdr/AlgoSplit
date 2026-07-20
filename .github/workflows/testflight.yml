@@ -23,8 +23,8 @@
 #   *separate* App Store Connect API key (Users and Access → Integrations →
 #   App Store Connect API on appstoreconnect.apple.com), used to poll build
 #   processing status. ASC_PRIVATE_KEY is the full contents of the
-#   downloaded .p8 file. Until these exist, that step just fails quietly
-#   (continue-on-error) and the "available" email never fires — the build
+#   downloaded .p8 file. Until these exist, that step skips cleanly and the
+#   "available" email never fires — the build
 #   and submission themselves are unaffected.
 #
 # The build+submit job itself waits and fails loudly, so a break anywhere in
@@ -62,22 +62,27 @@ jobs:
     name: EAS iOS build → TestFlight
     runs-on: macos-15
     timeout-minutes: 120
+    concurrency:
+      # Serialize the release with the weekly signed canary so both can safely
+      # read the shared remote iOS build-number state.
+      group: ios-production-signing
+      cancel-in-progress: false
     env:
       GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
       GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: app/package-lock.json
 
       - name: Set up EAS
-        uses: expo/expo-github-action@v8
+        uses: expo/expo-github-action@v9
         with:
           eas-version: 21.0.2
           token: ${{ secrets.EXPO_TOKEN }}
@@ -106,7 +111,7 @@ jobs:
       - name: Validate iOS signing inventory
         run: |
           eas config --platform ios --profile production --json --non-interactive > "$RUNNER_TEMP/eas-ios-production.json"
-          eas env:exec production "npm run validate:ios-signing -- '$RUNNER_TEMP/eas-ios-production.json'" --non-interactive
+          eas env:exec production "npm run validate:ios-signing -- '$RUNNER_TEMP/eas-ios-production.json' && npm run validate:ios-native-targets" --non-interactive
         working-directory: app
 
       # Keep code, tests, and the production iOS bundle ahead of the expensive
@@ -133,16 +138,16 @@ jobs:
           echo "BUILDS_MONTH=${BUILDS_MONTH}" >> "$GITHUB_ENV"
 
       - name: Email contributors that a build started
-        if: ${{ env.GMAIL_APP_PASSWORD != '' }}
+        if: ${{ env.GMAIL_USERNAME != '' && env.GMAIL_APP_PASSWORD != '' }}
         continue-on-error: true
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v18
         with:
           server_address: smtp.gmail.com
           server_port: 465
           secure: true
           username: ${{ env.GMAIL_USERNAME }}
           password: ${{ env.GMAIL_APP_PASSWORD }}
-          from: AlgoSplit CI
+          from: 'AlgoSplit CI <${{ env.GMAIL_USERNAME }}>'
           to: ${{ env.NOTIFY_RECIPIENTS }}
           subject: 'AlgoSplit build started'
           body: |
@@ -180,12 +185,30 @@ jobs:
           echo "ASC_APP_ID=$(node -p "require('./eas.json').submit.production.ios.ascAppId")" >> "$GITHUB_ENV"
         working-directory: app
 
+      # App Store processing polling needs a separately downloadable ASC key;
+      # the EAS-managed submission key cannot be exported. Treat absent
+      # optional polling credentials as an intentional skip, not a red error
+      # annotation on an otherwise successful release.
+      - name: Detect optional Apple processing credentials
+        if: ${{ steps.build.outcome == 'success' }}
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          if [[ -n "$ASC_KEY_ID" && -n "$ASC_ISSUER_ID" && -n "$ASC_PRIVATE_KEY" ]]; then
+            echo "ASC_POLLING_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "ASC_POLLING_ENABLED=false" >> "$GITHUB_ENV"
+            echo "::notice title=Apple processing poll skipped::ASC polling secrets are optional and are not configured; the signed upload and TestFlight submission remain verified by EAS Submit."
+          fi
+
       # Apple's own processing, not "eas submit succeeded" — that only means
       # the upload went through. continue-on-error: a stuck/misconfigured
       # poll must not turn an otherwise-successful build red.
       - name: Wait for Apple to finish TestFlight processing
         id: wait_for_processing
-        if: ${{ steps.build.outcome == 'success' }}
+        if: ${{ steps.build.outcome == 'success' && env.ASC_POLLING_ENABLED == 'true' }}
         continue-on-error: true
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -196,16 +219,16 @@ jobs:
         run: node .github/scripts/wait-for-testflight-build.mjs
 
       - name: Email contributors that the build is available
-        if: ${{ steps.wait_for_processing.outcome == 'success' && env.GMAIL_APP_PASSWORD != '' }}
+        if: ${{ steps.wait_for_processing.outcome == 'success' && env.GMAIL_USERNAME != '' && env.GMAIL_APP_PASSWORD != '' }}
         continue-on-error: true
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v18
         with:
           server_address: smtp.gmail.com
           server_port: 465
           secure: true
           username: ${{ env.GMAIL_USERNAME }}
           password: ${{ env.GMAIL_APP_PASSWORD }}
-          from: AlgoSplit CI
+          from: 'AlgoSplit CI <${{ env.GMAIL_USERNAME }}>'
           to: ${{ env.NOTIFY_RECIPIENTS }}
           subject: 'AlgoSplit v${{ env.APP_VERSION }} (${{ env.IOS_BUILD_NUMBER }}) is now available'
           body: |
@@ -217,16 +240,16 @@ jobs:
       # Apple-processing poll is continue-on-error, so it cannot trip this;
       # config, test, bundle, signing, build, and submit failures all do.
       - name: Email contributors that the build failed
-        if: ${{ failure() && !cancelled() && env.GMAIL_APP_PASSWORD != '' }}
+        if: ${{ failure() && !cancelled() && env.GMAIL_USERNAME != '' && env.GMAIL_APP_PASSWORD != '' }}
         continue-on-error: true
-        uses: dawidd6/action-send-mail@v3
+        uses: dawidd6/action-send-mail@v18
         with:
           server_address: smtp.gmail.com
           server_port: 465
           secure: true
           username: ${{ env.GMAIL_USERNAME }}
           password: ${{ env.GMAIL_APP_PASSWORD }}
-          from: AlgoSplit CI
+          from: 'AlgoSplit CI <${{ env.GMAIL_USERNAME }}>'
           to: ${{ env.NOTIFY_RECIPIENTS }}
           subject: 'AlgoSplit build failed'
           body: |

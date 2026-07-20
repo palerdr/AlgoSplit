@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "lastVerifiedAt": "2026-07-20T16:32:28.000Z",
-  "minimumValidityDays": 45,
+  "lastVerifiedAt": "2026-07-20T17:10:31.000Z",
+  "minimumValidityDays": 60,
   "certificate": {
     "serialNumber": "26D0FAC8CDD0036DC2DB2BCAF96B7A12",
     "expiresAt": "2027-07-17T01:05:32.000Z",

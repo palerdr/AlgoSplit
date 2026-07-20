@@ -1,50 +1,45 @@
-name: iOS Signing Health
+name: iOS Signing Inventory Guard
 
 on:
   pull_request:
     paths:
-      - 'app/app.json'
-      - 'app/eas.json'
-      - 'app/package.json'
-      - 'app/package-lock.json'
-      - 'app/ios-signing-targets.json'
-      - 'app/scripts/validate-ios-signing-targets.mjs'
-      - 'app/scripts/validate-ios-signing-targets.test.mjs'
+      # Any app file can influence config plugins or generated native targets.
+      - 'app/**'
       - '.github/workflows/ios-signing-health.yml'
       - '.github/workflows/testflight.yml'
   push:
     branches: [main]
     paths:
-      - 'app/app.json'
-      - 'app/eas.json'
-      - 'app/package.json'
-      - 'app/package-lock.json'
-      - 'app/ios-signing-targets.json'
-      - 'app/scripts/validate-ios-signing-targets.mjs'
-      - 'app/scripts/validate-ios-signing-targets.test.mjs'
+      - 'app/**'
       - '.github/workflows/ios-signing-health.yml'
       - '.github/workflows/testflight.yml'
-  # Apple provisioning profiles are annual. Check the tracked target,
-  # entitlement, and expiry ledger every month so renewal is surfaced at
-  # least 45 days before a release build can be affected.
+  # Apple provisioning profiles are annual. Check weekly with a 60-day
+  # minimum-validity gate, guaranteeing more than seven weeks to renew before
+  # a release can be affected even in the worst scheduling case.
   schedule:
-    - cron: '17 15 1 * *'
+    - cron: '17 15 * * 1'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  NOTIFY_RECIPIENTS: ab3233@cornell.edu,jdewitte632@gmail.com
 
 jobs:
   validate-signing-inventory:
     name: Validate iOS signing inventory
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -52,7 +47,7 @@ jobs:
 
       - name: Set up EAS
         if: ${{ github.event_name != 'pull_request' }}
-        uses: expo/expo-github-action@v8
+        uses: expo/expo-github-action@v9
         with:
           eas-version: 21.0.2
           token: ${{ secrets.EXPO_TOKEN }}
@@ -61,20 +56,134 @@ jobs:
         run: npm ci
         working-directory: app
 
-      # Fork pull requests have no repository secrets. Native introspection is
-      # enough to block target/entitlement drift before merge; main and the
-      # monthly canary additionally resolve the authenticated production EAS
-      # profile below.
+      # Fork pull requests have no repository secrets. Resolve the checked-in
+      # production profile environment locally so profile-conditional config
+      # and config plugins are still evaluated before merge. Main and the
+      # daily canary additionally include authenticated server-side EAS env.
       - name: Validate pull-request signing inventory
         if: ${{ github.event_name == 'pull_request' }}
         run: |
-          npx expo config --type introspect --json > "$RUNNER_TEMP/expo-ios-introspect.json"
-          npm run validate:ios-signing -- "$RUNNER_TEMP/expo-ios-introspect.json"
+          npm run validate:ios-signing -- --local-production
+          npm run validate:ios-native-targets
         working-directory: app
 
       - name: Validate production target, entitlement, and expiry ledger
         if: ${{ github.event_name != 'pull_request' }}
         run: |
           eas config --platform ios --profile production --json --non-interactive > "$RUNNER_TEMP/eas-ios-production.json"
-          eas env:exec production "npm run validate:ios-signing -- '$RUNNER_TEMP/eas-ios-production.json'" --non-interactive
+          eas env:exec production "npm run validate:ios-signing -- '$RUNNER_TEMP/eas-ios-production.json' && npm run validate:ios-native-targets" --non-interactive
         working-directory: app
+
+      - name: Email maintainers when the signing guard fails
+        if: ${{ failure() && github.event_name != 'pull_request' && env.GMAIL_USERNAME != '' && env.GMAIL_APP_PASSWORD != '' }}
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v18
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ env.GMAIL_USERNAME }}
+          password: ${{ env.GMAIL_APP_PASSWORD }}
+          from: 'AlgoSplit CI <${{ env.GMAIL_USERNAME }}>'
+          to: ${{ env.NOTIFY_RECIPIENTS }}
+          subject: 'AlgoSplit iOS signing guard needs attention'
+          body: |
+            The iOS signing inventory, generated native target audit, or 60-day credential window failed.
+
+            Repair every target before the next release:
+            npx eas-cli@21.0.2 credentials:configure-build --platform ios --profile production
+
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+  # A ledger cannot exercise stored key material or the complete native
+  # archive path. Build a signed canary weekly with the production credential
+  # set, without auto-incrementing or uploading a duplicate to TestFlight.
+  # Apple acceptance/revocation is still authoritatively tested by each real
+  # release upload; EAS cannot validate every certificate state headlessly.
+  signed-archive-canary:
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    needs: validate-signing-inventory
+    name: Exercise stored iOS signing path
+    runs-on: macos-15
+    timeout-minutes: 60
+    concurrency:
+      group: ios-production-signing
+      cancel-in-progress: false
+    env:
+      GMAIL_USERNAME: ${{ secrets.GMAIL_USERNAME }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Set up EAS
+        uses: expo/expo-github-action@v9
+        with:
+          eas-version: 21.0.2
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Select newest available Xcode
+        run: |
+          LATEST_XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -n 1)
+          sudo xcode-select -s "${LATEST_XCODE:-/Applications/Xcode.app}/Contents/Developer"
+          xcodebuild -version
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: app
+
+      - name: Require initialized remote iOS build number
+        run: |
+          VERSION_OUTPUT=$(eas build:version:get --platform ios --non-interactive 2>&1)
+          echo "$VERSION_OUTPUT"
+          REMOTE_BUILD_NUMBER=$(echo "$VERSION_OUTPUT" | sed -nE 's/.*iOS buildNumber - ([0-9]+).*/\1/p' | tail -n 1)
+          if [[ ! "$REMOTE_BUILD_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "::error title=Remote iOS build number missing::Initialize the EAS remote iOS build number before running the signing canary."
+            exit 1
+          fi
+          echo "CANARY_BUILD_NUMBER_BEFORE=$REMOTE_BUILD_NUMBER" >> "$GITHUB_ENV"
+        working-directory: app
+
+      - name: Build signed canary archive without auto-incrementing or submitting
+        run: |
+          eas build --platform ios --profile signing-canary --local --non-interactive --output "$RUNNER_TEMP/AlgoSplit-signing-canary.ipa"
+        working-directory: app
+
+      - name: Verify canary preserved the remote build number
+        run: |
+          VERSION_OUTPUT=$(eas build:version:get --platform ios --non-interactive 2>&1)
+          echo "$VERSION_OUTPUT"
+          REMOTE_BUILD_NUMBER=$(echo "$VERSION_OUTPUT" | sed -nE 's/.*iOS buildNumber - ([0-9]+).*/\1/p' | tail -n 1)
+          if [[ "$REMOTE_BUILD_NUMBER" != "$CANARY_BUILD_NUMBER_BEFORE" ]]; then
+            echo "::error title=Signing canary changed remote build number::Expected $CANARY_BUILD_NUMBER_BEFORE, found ${REMOTE_BUILD_NUMBER:-missing}."
+            exit 1
+          fi
+        working-directory: app
+
+      - name: Email maintainers when live signing fails
+        if: ${{ failure() && env.GMAIL_USERNAME != '' && env.GMAIL_APP_PASSWORD != '' }}
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v18
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ env.GMAIL_USERNAME }}
+          password: ${{ env.GMAIL_APP_PASSWORD }}
+          from: 'AlgoSplit CI <${{ env.GMAIL_USERNAME }}>'
+          to: ${{ env.NOTIFY_RECIPIENTS }}
+          subject: 'AlgoSplit stored iOS signing canary failed'
+          body: |
+            The weekly archive could not exercise the stored EAS credentials and native codesign path.
+
+            Repair every target before the next release:
+            npx eas-cli@21.0.2 credentials:configure-build --platform ios --profile production
+
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

@@ -7,6 +7,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPT_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_MANIFEST_PATH = path.resolve(SCRIPT_DIRECTORY, '..', 'ios-signing-targets.json');
+const DEFAULT_EAS_CONFIG_PATH = path.resolve(SCRIPT_DIRECTORY, '..', 'eas.json');
+const DEFAULT_MINIMUM_VALIDITY_DAYS = 60;
 const CREDENTIAL_SETUP_COMMAND =
   'npx eas-cli@21.0.2 credentials:configure-build --platform ios --profile production';
 
@@ -175,7 +177,9 @@ export function validateIosSigningTargets({
     errors.push('minimumValidityDays must be a positive integer.');
   }
   const validityDays =
-    Number.isInteger(minimumValidityDays) && minimumValidityDays > 0 ? minimumValidityDays : 45;
+    Number.isInteger(minimumValidityDays) && minimumValidityDays > 0
+      ? minimumValidityDays
+      : DEFAULT_MINIMUM_VALIDITY_DAYS;
 
   const certificate = manifest.certificate;
   if (!isRecord(certificate)) {
@@ -380,6 +384,44 @@ export function validateIosSigningTargets({
   return { errors, targets: configuredTargets };
 }
 
+export function validateSigningCanaryProfile(easConfig) {
+  const errors = [];
+  const production = easConfig?.build?.production;
+  const canary = easConfig?.build?.['signing-canary'];
+  if (!isRecord(production)) {
+    return ['eas.json must define build.production.'];
+  }
+  if (production.credentialsSource !== 'remote') {
+    errors.push('build.production.credentialsSource must remain "remote".');
+  }
+  if (production.environment !== 'production') {
+    errors.push('build.production.environment must remain "production".');
+  }
+  if (production.autoIncrement !== true) {
+    errors.push('build.production.autoIncrement must remain true.');
+  }
+  if (!isRecord(canary)) {
+    errors.push('eas.json must define build.signing-canary.');
+    return errors;
+  }
+  if (canary.extends !== 'production') {
+    errors.push('build.signing-canary must extend "production".');
+  }
+  if (canary.autoIncrement !== false) {
+    errors.push('build.signing-canary.autoIncrement must remain false.');
+  }
+  const unexpectedKeys = Object.keys(canary).filter(
+    (key) => key !== 'extends' && key !== 'autoIncrement'
+  );
+  if (unexpectedKeys.length > 0) {
+    errors.push(
+      `build.signing-canary must inherit the production signing path without overrides; ` +
+        `remove: ${unexpectedKeys.sort().join(', ')}.`
+    );
+  }
+  return errors;
+}
+
 async function readJson(filePath, label) {
   let raw;
   try {
@@ -394,17 +436,15 @@ async function readJson(filePath, label) {
   }
 }
 
-function introspectWithProductionEnvironment(resolvedConfig) {
-  if (!isRecord(resolvedConfig?.buildProfile) || !isRecord(resolvedConfig?.appConfig)) {
-    return null;
-  }
-
-  const profileEnvironment = isRecord(resolvedConfig.buildProfile.env)
+function sanitizedProfileEnvironment(buildProfile) {
+  return isRecord(buildProfile?.env)
     ? Object.fromEntries(
-        Object.entries(resolvedConfig.buildProfile.env)
-          .filter(([, value]) => typeof value === 'string')
+        Object.entries(buildProfile.env).filter(([, value]) => typeof value === 'string')
       )
     : {};
+}
+
+function runExpoIntrospection(profileEnvironment) {
   const expoExecutable = path.resolve(
     process.cwd(),
     'node_modules',
@@ -442,23 +482,48 @@ function introspectWithProductionEnvironment(resolvedConfig) {
   }
 }
 
+function introspectWithProductionEnvironment(resolvedConfig) {
+  if (!isRecord(resolvedConfig?.buildProfile) || !isRecord(resolvedConfig?.appConfig)) {
+    return null;
+  }
+  return runExpoIntrospection(sanitizedProfileEnvironment(resolvedConfig.buildProfile));
+}
+
+async function resolveLocalProductionConfig() {
+  const easConfig = await readJson(DEFAULT_EAS_CONFIG_PATH, 'EAS config');
+  const buildProfile = easConfig?.build?.production;
+  if (!isRecord(buildProfile)) {
+    throw new Error(`${DEFAULT_EAS_CONFIG_PATH} does not define build.production.`);
+  }
+  return {
+    appConfig: runExpoIntrospection(sanitizedProfileEnvironment(buildProfile)),
+    buildProfile,
+  };
+}
+
 async function main() {
   const resolvedConfigArgument = process.argv[2];
   if (!resolvedConfigArgument) {
     console.error(
-      'Usage: node scripts/validate-ios-signing-targets.mjs <resolved-eas-config.json> [manifest.json]'
+      'Usage: node scripts/validate-ios-signing-targets.mjs ' +
+        '<resolved-eas-config.json|--local-production> [manifest.json]'
     );
     process.exitCode = 2;
     return;
   }
 
-  const resolvedConfigPath = path.resolve(process.cwd(), resolvedConfigArgument);
   const manifestPath = process.argv[3]
     ? path.resolve(process.cwd(), process.argv[3])
     : DEFAULT_MANIFEST_PATH;
-  const [resolvedConfig, manifest] = await Promise.all([
-    readJson(resolvedConfigPath, 'resolved EAS config'),
+  const [resolvedConfig, manifest, easConfig] = await Promise.all([
+    resolvedConfigArgument === '--local-production'
+      ? resolveLocalProductionConfig()
+      : readJson(
+          path.resolve(process.cwd(), resolvedConfigArgument),
+          'resolved EAS config'
+        ),
     readJson(manifestPath, 'iOS signing manifest'),
+    readJson(DEFAULT_EAS_CONFIG_PATH, 'EAS config'),
   ]);
   const introspectedConfig = introspectWithProductionEnvironment(resolvedConfig);
 
@@ -467,6 +532,7 @@ async function main() {
     introspectedConfig,
     manifest,
   });
+  result.errors.push(...validateSigningCanaryProfile(easConfig));
   if (result.errors.length > 0) {
     console.error('iOS signing validation failed:');
     for (const error of result.errors) console.error(`- ${error}`);

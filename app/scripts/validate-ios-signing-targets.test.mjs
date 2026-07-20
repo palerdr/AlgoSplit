@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { validateIosSigningTargets } from './validate-ios-signing-targets.mjs';
+import {
+  validateIosSigningTargets,
+  validateSigningCanaryProfile,
+} from './validate-ios-signing-targets.mjs';
 
 const NOW = new Date('2026-07-20T16:32:28.000Z');
 
@@ -40,7 +43,7 @@ function manifest(overrides = {}) {
   return {
     schemaVersion: 1,
     lastVerifiedAt: NOW.toISOString(),
-    minimumValidityDays: 45,
+    minimumValidityDays: 60,
     certificate: {
       serialNumber: certificateSerialNumber,
       expiresAt: '2027-07-17T01:05:32.000Z',
@@ -153,7 +156,7 @@ test('fails before a provisioning profile reaches the renewal window', () => {
     now: NOW,
   });
 
-  assert.ok(result.errors.some((error) => error.includes('at least 45 days are required')));
+  assert.ok(result.errors.some((error) => error.includes('at least 60 days are required')));
   assert.ok(result.errors.some((error) => error.includes('credentials:configure-build')));
 });
 
@@ -172,4 +175,42 @@ test('rejects a target whose provisioning profile was never bootstrapped', () =>
 
   assert.ok(result.errors.some((error) => error.includes('developerPortalId')));
   assert.ok(result.errors.some((error) => error.includes('credentials:configure-build')));
+});
+
+test('requires the signing canary to inherit production without incrementing', () => {
+  assert.deepEqual(
+    validateSigningCanaryProfile({
+      build: {
+        production: {
+          credentialsSource: 'remote',
+          environment: 'production',
+          autoIncrement: true,
+        },
+        'signing-canary': { extends: 'production', autoIncrement: false },
+      },
+    }),
+    []
+  );
+});
+
+test('rejects signing canary drift that could consume or exercise the wrong credentials', () => {
+  const errors = validateSigningCanaryProfile({
+    build: {
+      production: {
+        credentialsSource: 'local',
+        environment: 'preview',
+        autoIncrement: false,
+      },
+      'signing-canary': {
+        extends: 'preview',
+        autoIncrement: true,
+        distribution: 'internal',
+      },
+    },
+  });
+
+  assert.ok(errors.some((error) => error.includes('credentialsSource')));
+  assert.ok(errors.some((error) => error.includes('must extend')));
+  assert.ok(errors.some((error) => error.includes('autoIncrement')));
+  assert.ok(errors.some((error) => error.includes('remove: distribution')));
 });

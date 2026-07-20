@@ -1,0 +1,14 @@
+version: 2
+
+updates:
+  # Keep action runtimes ahead of GitHub-hosted runner deprecations. Updates
+  # arrive as reviewable PRs, while release workflows remain pinned to a
+  # tested major version until that PR passes CI.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "15:37"
+      timezone: America/Los_Angeles
+    open-pull-requests-limit: 5
