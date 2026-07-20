@@ -18,6 +18,10 @@ import {
   endRestLiveActivity,
   startRestLiveActivity,
 } from '../src/workout/restLiveActivity.ios';
+import {
+  endRestLiveActivity as resolvedEndRestLiveActivity,
+  startRestLiveActivity as resolvedStartRestLiveActivity,
+} from '../src/workout/restLiveActivity';
 
 const mockIsLiveActivityActive = jest.mocked(nativeIsLiveActivityActive);
 const mockStartLiveActivity = jest.mocked(nativeStartLiveActivity);
@@ -65,6 +69,19 @@ describe('rest Live Activity', () => {
     expect(payload).toContain(String(startedAtMs));
     expect(payload).toContain(String(endsAtMs));
     expect(Buffer.byteLength(payload, 'utf8')).toBeLessThan(4_096);
+  });
+
+  it('resolves the public iOS module to the native implementation', async () => {
+    const startedAtMs = 1_750_000_000_000;
+    const endsAtMs = startedAtMs + 180_000;
+
+    await resolvedStartRestLiveActivity({ startedAtMs, endsAtMs });
+    await resolvedEndRestLiveActivity();
+
+    expect(mockStartLiveActivity).toHaveBeenCalledTimes(1);
+    expect(mockStopLiveActivity).toHaveBeenCalledWith('algosplit-rest-timer', {
+      dismissalPolicy: 'immediate',
+    });
   });
 
   it('dismisses the named activity immediately', async () => {
