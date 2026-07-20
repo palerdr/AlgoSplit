@@ -7,6 +7,21 @@ export interface RestDrainTiming {
   easing: (fraction: number) => number;
 }
 
+export type RestFinishReason = 'expired' | 'skipped';
+
+/**
+ * The real deadline wins over a nearly simultaneous hold-to-skip completion.
+ * This keeps a rest that genuinely reached zero on the completion path even
+ * when the 250 ms display tick has not observed the deadline yet.
+ */
+export function resolveRestFinishReason(
+  requestedReason: RestFinishReason,
+  nowMs: number,
+  endsAtMs: number
+): RestFinishReason {
+  return nowMs >= endsAtMs ? 'expired' : requestedReason;
+}
+
 /**
  * Builds the water-drain curve for one rest interval.
  *

@@ -12,8 +12,17 @@ import Svg, { Path } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import { REST_SECONDS } from '../state/AppState';
 import { theme } from '../theme';
-import { endRestLiveActivity, startRestLiveActivity } from '../workout/restLiveActivity';
-import { createRestDrainTiming } from '../workout/restTiming';
+import {
+  completeRestLiveActivity,
+  endRestLiveActivity,
+  startRestLiveActivity,
+} from '../workout/restLiveActivity';
+import { playRestCompletionHaptics } from '../workout/restCompletionFeedback';
+import {
+  createRestDrainTiming,
+  resolveRestFinishReason,
+  type RestFinishReason,
+} from '../workout/restTiming';
 
 interface RestTimerProps {
   /** Name of the exercise coming up after the rest */
@@ -114,8 +123,10 @@ export default function RestTimer({
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const breathe = useRef(new Animated.Value(1)).current;
   const startedAtRef = useRef(Date.now());
+  const endsAtRef = useRef(startedAtRef.current + timing.totalMs);
   const holdingRef = useRef(false);
   const committedRef = useRef(false);
+  const liveActivityDispositionRef = useRef<'running' | 'completed' | 'ended'>('running');
   const onDoneRef = useRef(onDone);
   onDoneRef.current = onDone;
   const onShownRef = useRef(onShown);
@@ -125,11 +136,20 @@ export default function RestTimer({
   const elapsedFraction = () =>
     Math.min(1, (Date.now() - startedAtRef.current) / timing.totalMs);
 
-  const finish = () => {
+  const finish = (requestedReason: RestFinishReason) => {
     if (committedRef.current) return;
+    const reason = resolveRestFinishReason(requestedReason, Date.now(), endsAtRef.current);
     committedRef.current = true;
-    void endRestLiveActivity();
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    if (reason === 'expired') {
+      // The completed activity is intentionally left visible after this overlay
+      // unmounts so its expanded action can return the user to the workout.
+      liveActivityDispositionRef.current = 'completed';
+      void completeRestLiveActivity();
+      void playRestCompletionHaptics().catch(() => {});
+    } else {
+      liveActivityDispositionRef.current = 'ended';
+      void endRestLiveActivity();
+    }
     Animated.timing(overlayOpacity, {
       toValue: 0,
       duration: 220,
@@ -162,9 +182,11 @@ export default function RestTimer({
       if (finished) onShownRef.current?.();
     });
     startedAtRef.current = Date.now();
+    endsAtRef.current = startedAtRef.current + timing.totalMs;
     void startRestLiveActivity({
       startedAtMs: startedAtRef.current,
-      endsAtMs: startedAtRef.current + timing.totalMs,
+      endsAtMs: endsAtRef.current,
+      nextUp,
     });
     startMainDrain(0);
 
@@ -174,7 +196,7 @@ export default function RestTimer({
       if (left <= 0) {
         clearInterval(tick);
         setSecondsLeft(0);
-        finish();
+        finish('expired');
       } else {
         setSecondsLeft(left);
       }
@@ -182,7 +204,12 @@ export default function RestTimer({
 
     return () => {
       clearInterval(tick);
-      void endRestLiveActivity();
+      holdingRef.current = false;
+      committedRef.current = true;
+      if (liveActivityDispositionRef.current === 'running') {
+        liveActivityDispositionRef.current = 'ended';
+        void endRestLiveActivity();
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -201,7 +228,7 @@ export default function RestTimer({
         easing: Easing.in(Easing.cubic),
         useNativeDriver: false,
       }).start(({ finished }) => {
-        if (finished && holdingRef.current) finish();
+        if (finished && holdingRef.current) finish('skipped');
       });
     });
   };

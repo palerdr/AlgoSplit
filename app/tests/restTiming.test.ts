@@ -1,4 +1,4 @@
-import { createRestDrainTiming } from '../src/workout/restTiming';
+import { createRestDrainTiming, resolveRestFinishReason } from '../src/workout/restTiming';
 
 describe('createRestDrainTiming', () => {
   it('derives independent total durations for standard and warmup rests', () => {
@@ -25,5 +25,11 @@ describe('createRestDrainTiming', () => {
     expect(short.easing(-1)).toBe(0);
     expect(short.easing(0.5)).toBe(0.5);
     expect(short.easing(2)).toBe(1);
+  });
+
+  it('treats a hold that completes at the real deadline as natural expiry', () => {
+    expect(resolveRestFinishReason('skipped', 180_000, 180_000)).toBe('expired');
+    expect(resolveRestFinishReason('skipped', 179_999, 180_000)).toBe('skipped');
+    expect(resolveRestFinishReason('expired', 179_999, 180_000)).toBe('expired');
   });
 });

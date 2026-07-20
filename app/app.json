@@ -123,6 +123,7 @@
           }
         }
       ],
+      "./plugins/withRestAlarm",
       [
         "@use-voltra/ios-client",
         {
