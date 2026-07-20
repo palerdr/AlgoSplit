@@ -12,6 +12,7 @@ import Svg, { Path } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import { REST_SECONDS } from '../state/AppState';
 import { theme } from '../theme';
+import { endRestLiveActivity, startRestLiveActivity } from '../workout/restLiveActivity';
 import { createRestDrainTiming } from '../workout/restTiming';
 
 interface RestTimerProps {
@@ -127,6 +128,7 @@ export default function RestTimer({
   const finish = () => {
     if (committedRef.current) return;
     committedRef.current = true;
+    void endRestLiveActivity();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     Animated.timing(overlayOpacity, {
       toValue: 0,
@@ -160,6 +162,10 @@ export default function RestTimer({
       if (finished) onShownRef.current?.();
     });
     startedAtRef.current = Date.now();
+    void startRestLiveActivity({
+      startedAtMs: startedAtRef.current,
+      endsAtMs: startedAtRef.current + timing.totalMs,
+    });
     startMainDrain(0);
 
     const tick = setInterval(() => {
@@ -174,7 +180,10 @@ export default function RestTimer({
       }
     }, 250);
 
-    return () => clearInterval(tick);
+    return () => {
+      clearInterval(tick);
+      void endRestLiveActivity();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -114,6 +114,21 @@
             "image": "./assets/startup-splash.png"
           }
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.4"
+          }
+        }
+      ],
+      [
+        "@use-voltra/ios-client",
+        {
+          "deploymentTarget": "16.4",
+          "targetName": "AlgoSplitLiveActivity"
+        }
       ]
     ],
     "extra": {
