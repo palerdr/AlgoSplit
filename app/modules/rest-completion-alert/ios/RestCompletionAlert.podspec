@@ -1,8 +1,8 @@
 Pod::Spec.new do |s|
-  s.name           = 'RestAlarm'
+  s.name           = 'RestCompletionAlert'
   s.version        = '1.0.0'
-  s.summary        = 'AlgoSplit rest timer AlarmKit bridge'
-  s.description    = 'Schedules the system-managed rest countdown and presents Live Activity completion alerts.'
+  s.summary        = 'AlgoSplit rest Live Activity completion bridge'
+  s.description    = 'Presents a standard ActivityKit completion alert for the active rest Live Activity.'
   s.author         = 'AlgoSplit'
   s.homepage       = 'https://github.com/palerdr/AlgoSplit'
   s.platforms      = { :ios => '16.4' }
@@ -12,8 +12,7 @@ Pod::Spec.new do |s|
 
   s.dependency 'ExpoModulesCore'
   s.dependency 'Voltra'
-  s.frameworks = 'ActivityKit', 'AppIntents', 'SwiftUI'
-  s.weak_frameworks = 'AlarmKit'
+  s.frameworks = 'ActivityKit'
 
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',

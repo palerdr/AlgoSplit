@@ -1,8 +1,8 @@
-import RestAlarmModule from '../../modules/rest-alarm';
+import RestCompletionAlertModule from '../../modules/rest-completion-alert';
 
 export async function presentRestCompletionAlert(): Promise<void> {
   try {
-    await RestAlarmModule.presentCompletionAlert();
+    await RestCompletionAlertModule.present();
   } catch (error) {
     // Completion feedback is best-effort. Live Activities can be disabled and
     // the fallback must never interrupt a workout.

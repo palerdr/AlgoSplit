@@ -8,15 +8,6 @@ jest.mock('@use-voltra/ios-client', () => ({
 }));
 
 jest.mock(
-  '../src/workout/restAlarm',
-  () => ({
-    scheduleRestAlarm: jest.fn(async () => false),
-    cancelRestAlarm: jest.fn(async () => undefined),
-  }),
-  { virtual: true }
-);
-
-jest.mock(
   '../src/workout/restCompletionAlert',
   () => ({ presentRestCompletionAlert: jest.fn(async () => undefined) }),
   { virtual: true }
@@ -30,7 +21,6 @@ import {
   stopLiveActivity as nativeStopLiveActivity,
   updateLiveActivity as nativeUpdateLiveActivity,
 } from '@use-voltra/ios-client';
-import { cancelRestAlarm, scheduleRestAlarm } from '../src/workout/restAlarm';
 import { presentRestCompletionAlert } from '../src/workout/restCompletionAlert';
 import {
   completeRestLiveActivity,
@@ -49,8 +39,6 @@ const mockIsLiveActivityActive = jest.mocked(nativeIsLiveActivityActive);
 const mockStartLiveActivity = jest.mocked(nativeStartLiveActivity);
 const mockStopLiveActivity = jest.mocked(nativeStopLiveActivity);
 const mockUpdateLiveActivity = jest.mocked(nativeUpdateLiveActivity);
-const mockScheduleRestAlarm = jest.mocked(scheduleRestAlarm);
-const mockCancelRestAlarm = jest.mocked(cancelRestAlarm);
 const mockPresentRestCompletionAlert = jest.mocked(presentRestCompletionAlert);
 
 type TimerElement = ReactElement<{ startAtMs: number; endAtMs: number }>;
@@ -60,7 +48,6 @@ describe('rest Live Activity', () => {
     expect(Platform.OS).toBe('ios');
     jest.clearAllMocks();
     mockIsLiveActivityActive.mockReturnValue(true);
-    mockScheduleRestAlarm.mockResolvedValue(false);
   });
 
   it('uses one native deadline across the Lock Screen and Dynamic Island', async () => {
@@ -74,10 +61,6 @@ describe('rest Live Activity', () => {
     });
     await startRestLiveActivity({ startedAtMs, endsAtMs, nextUp: 'Romanian deadlift' });
 
-    expect(mockScheduleRestAlarm).toHaveBeenCalledWith({
-      endsAtMs,
-      nextWorkout: 'Romanian deadlift',
-    });
     expect(mockStartLiveActivity).toHaveBeenCalledTimes(1);
     const [, options] = mockStartLiveActivity.mock.calls[0];
     expect(options).toEqual({
@@ -86,7 +69,14 @@ describe('rest Live Activity', () => {
       staleDate: endsAtMs,
       relevanceScore: 1,
     });
-    expect(variants.island?.compact?.leading).toBeUndefined();
+    const compactLeading = variants.island?.compact?.leading as ReactElement<{
+      name: string;
+      tintColor: string;
+    }>;
+    expect(compactLeading.props).toMatchObject({
+      name: 'timer',
+      tintColor: '#41C46E',
+    });
     expect((variants.island?.compact?.trailing as TimerElement).props).toMatchObject({
       startAtMs: startedAtMs,
       endAtMs: endsAtMs,
@@ -99,61 +89,20 @@ describe('rest Live Activity', () => {
       content: ReactElement<{ children: React.ReactNode }>;
     };
     const lockScreenChildren = React.Children.toArray(lockScreen.content.props.children);
-    const lockScreenHeader = lockScreenChildren[0] as ReactElement<{
+    const timerColumn = lockScreenChildren[0] as ReactElement<{
       children: React.ReactNode;
     }>;
-    const lockScreenHeaderChildren = React.Children.toArray(lockScreenHeader.props.children);
-    expect((lockScreenHeaderChildren[3] as TimerElement).props).toMatchObject({
+    const timerColumnChildren = React.Children.toArray(timerColumn.props.children);
+    expect((timerColumnChildren[1] as TimerElement).props).toMatchObject({
       startAtMs: startedAtMs,
       endAtMs: endsAtMs,
     });
     const payload = renderLiveActivityToString(variants);
     expect(payload).toContain(String(startedAtMs));
     expect(payload).toContain(String(endsAtMs));
-    expect(payload).toContain('Next: Romanian deadlift');
+    expect(payload).toContain('NEXT SET');
+    expect(payload).toContain('Romanian deadlift');
     expect(Buffer.byteLength(payload, 'utf8')).toBeLessThan(4_096);
-  });
-
-  it('lets AlarmKit own the timer and leaves it armed at natural expiry', async () => {
-    const endsAtMs = 1_750_000_180_000;
-    mockScheduleRestAlarm.mockResolvedValueOnce(true);
-    mockIsLiveActivityActive.mockReturnValue(false);
-
-    await startRestLiveActivity({
-      startedAtMs: endsAtMs - 180_000,
-      endsAtMs,
-      nextUp: 'Incline press',
-    });
-    await completeRestLiveActivity();
-
-    expect(mockScheduleRestAlarm).toHaveBeenCalledWith({
-      endsAtMs,
-      nextWorkout: 'Incline press',
-    });
-    expect(mockStartLiveActivity).not.toHaveBeenCalled();
-    expect(mockUpdateLiveActivity).not.toHaveBeenCalled();
-    expect(mockPresentRestCompletionAlert).not.toHaveBeenCalled();
-    expect(mockCancelRestAlarm).not.toHaveBeenCalled();
-
-    // Test teardown: a real natural expiry intentionally leaves AlarmKit in
-    // control until the user handles its system alert.
-    await endRestLiveActivity();
-  });
-
-  it('cancels an AlarmKit timer when rest is skipped', async () => {
-    mockScheduleRestAlarm.mockResolvedValueOnce(true);
-    mockIsLiveActivityActive.mockReturnValue(false);
-
-    await startRestLiveActivity({
-      startedAtMs: 1_000,
-      endsAtMs: 181_000,
-      nextUp: null,
-    });
-    await endRestLiveActivity();
-
-    expect(mockCancelRestAlarm).toHaveBeenCalledTimes(1);
-    expect(mockStartLiveActivity).not.toHaveBeenCalled();
-    expect(mockStopLiveActivity).not.toHaveBeenCalled();
   });
 
   it('uses a linked completion layout and presents it as an alert', async () => {
@@ -189,7 +138,9 @@ describe('rest Live Activity', () => {
       nextUp: null,
     });
 
-    expect(renderLiveActivityToString(variants)).toContain('Next: Continue workout');
+    const payload = renderLiveActivityToString(variants);
+    expect(payload).toContain('NEXT SET');
+    expect(payload).toContain('Continue workout');
   });
 
   it('resolves the public iOS module to the native implementation', async () => {
