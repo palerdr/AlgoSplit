@@ -102,17 +102,7 @@ export function createRestLiveActivityVariants({
     island: {
       keylineTint: theme.accent,
       compact: {
-        trailing: (
-          <Voltra.HStack alignment="center" spacing={3}>
-            <Voltra.Symbol
-              name="timer"
-              size={13}
-              weight="semibold"
-              tintColor={theme.accent}
-            />
-            {countdown(startedAtMs, endsAtMs, 13)}
-          </Voltra.HStack>
-        ),
+        trailing: countdown(startedAtMs, endsAtMs, 13),
       },
       minimal: (
         <Voltra.Symbol
@@ -272,16 +262,14 @@ export function startRestLiveActivity({
 
 export function completeRestLiveActivity(): Promise<void> {
   return enqueueLifecycle(async () => {
-    const shouldPresentForegroundAlert = await cancelScheduledRestCompletionAlert();
+    await cancelScheduledRestCompletionAlert();
     if (!isLiveActivityActive(REST_ACTIVITY_NAME)) return;
     await updateLiveActivity(
       REST_ACTIVITY_NAME,
       createRestCompletionLiveActivityVariants(),
       { relevanceScore: 1 }
     );
-    if (shouldPresentForegroundAlert) {
-      await presentRestCompletionAlert();
-    }
+    await presentRestCompletionAlert();
   });
 }
 

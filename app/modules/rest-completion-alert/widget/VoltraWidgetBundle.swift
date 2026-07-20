@@ -75,14 +75,16 @@ private struct RestRegionView: View {
       // ActivityKit updates this flag even while the host app is suspended.
       if context.isStale {
         completionContent
+      } else if region == .islandCompactTrailing {
+        RestCompactCountdown(timing: timing)
       } else if region == .islandMinimal {
         RestProgressDial(timing: timing)
       } else {
         payloadContent
       }
     } else {
-      // Transient completion updates contain no Timer. Render their Voltra
-      // regions directly so foreground/native completion updates still work.
+      // Completion updates contain no Timer. Render their Voltra regions
+      // directly so foreground and scheduled completion states still work.
       payloadContent
     }
   }
@@ -111,6 +113,24 @@ private struct RestRegionView: View {
          .supplementalActivityFamiliesSmall:
       EmptyView()
     }
+  }
+}
+
+private struct RestCompactCountdown: View {
+  let timing: RestTiming
+
+  var body: some View {
+    Text(
+      timerInterval: timing.start ... timing.end,
+      countsDown: true,
+      showsHours: false
+    )
+    .font(.system(size: 13, weight: .semibold, design: .rounded))
+    .monospacedDigit()
+    .foregroundStyle(AlgoSplitLiveActivityStyle.text)
+    .lineLimit(1)
+    .multilineTextAlignment(.trailing)
+    .frame(width: 40, alignment: .trailing)
   }
 }
 
@@ -285,12 +305,9 @@ private struct AlgoSplitRestLiveActivityWidget: Widget {
         RestRegionView(region: .islandExpandedBottom, context: context)
       }
     } compactLeading: {
-      // Keeping this side empty prevents the active rest timer from spanning
-      // the full camera cutout. Icon + countdown remain on the trailing side.
       EmptyView()
     } compactTrailing: {
       RestRegionView(region: .islandCompactTrailing, context: context)
-        .fixedSize(horizontal: true, vertical: true)
     } minimal: {
       RestRegionView(region: .islandMinimal, context: context)
     }

@@ -36,7 +36,9 @@ public final class RestCompletionAlertModule: Module {
         attributes: attributes,
         content: content,
         pushType: nil,
-        style: .transient,
+        // A transient activity is removed as soon as its expanded presentation
+        // collapses. Completion must remain available until the user returns.
+        style: .standard,
         alertConfiguration: alert,
         start: startDate
       )
@@ -111,8 +113,8 @@ private func cancelScheduledCompletion() async -> Bool {
   defaults.removeObject(forKey: RestCompletionConstants.scheduledActivityIDKey)
 
   guard let activity else {
-    // A persisted ID that is no longer in ActivityKit means the transient
-    // activity already started and dismissed. Don't alert a second time.
+    // A persisted ID that is no longer in ActivityKit means the scheduled
+    // completion already ended or the user dismissed it.
     return storedActivityID == nil
   }
 

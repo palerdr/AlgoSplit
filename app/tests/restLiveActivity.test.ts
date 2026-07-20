@@ -89,17 +89,9 @@ describe('rest Live Activity', () => {
       relevanceScore: 0.8,
     });
     expect(variants.island?.compact?.leading).toBeUndefined();
-    const compactGroup = variants.island?.compact?.trailing as ReactElement<{
-      children: React.ReactNode;
-    }>;
-    const compactChildren = React.Children.toArray(compactGroup.props.children);
-    expect(
-      (compactChildren[0] as ReactElement<{ name: string; tintColor: string }>).props
-    ).toMatchObject({
-      name: 'timer',
-      tintColor: '#41C46E',
-    });
-    expect((compactChildren[1] as TimerElement).props).toMatchObject({
+    const compactCountdown = variants.island?.compact?.trailing as TimerElement;
+    expect(compactCountdown.type).toBe(Voltra.Timer);
+    expect(compactCountdown.props).toMatchObject({
       startAtMs: startedAtMs,
       endAtMs: endsAtMs,
     });
@@ -173,13 +165,13 @@ describe('rest Live Activity', () => {
     expect(mockPresentRestCompletionAlert).toHaveBeenCalledTimes(1);
   });
 
-  it('does not present a duplicate alert after the scheduled activity already started', async () => {
+  it('still presents the foreground alert if completion races the scheduled activity', async () => {
     mockCancelScheduledRestCompletionAlert.mockResolvedValueOnce(false);
 
     await completeRestLiveActivity();
 
     expect(mockUpdateLiveActivity).toHaveBeenCalledTimes(1);
-    expect(mockPresentRestCompletionAlert).not.toHaveBeenCalled();
+    expect(mockPresentRestCompletionAlert).toHaveBeenCalledTimes(1);
   });
 
   it('uses a useful Lock Screen fallback when there is no next exercise', () => {

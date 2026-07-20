@@ -1,6 +1,8 @@
 jest.mock('expo-haptics', () => ({
   ImpactFeedbackStyle: { Medium: 'medium' },
+  NotificationFeedbackType: { Success: 'success' },
   impactAsync: jest.fn(async () => undefined),
+  notificationAsync: jest.fn(async () => undefined),
 }));
 
 import * as Haptics from 'expo-haptics';
@@ -10,6 +12,7 @@ import {
 } from '../src/workout/restCompletionFeedback';
 
 const mockImpactAsync = jest.mocked(Haptics.impactAsync);
+const mockNotificationAsync = jest.mocked(Haptics.notificationAsync);
 
 describe('rest completion feedback', () => {
   beforeEach(() => {
@@ -21,17 +24,20 @@ describe('rest completion feedback', () => {
     jest.useRealTimers();
   });
 
-  it('plays two short medium pulses separated by a small gap', async () => {
+  it('plays a success haptic followed by a short medium pulse', async () => {
     const feedback = playRestCompletionHaptics();
     await Promise.resolve();
 
-    expect(mockImpactAsync).toHaveBeenCalledTimes(1);
-    expect(mockImpactAsync).toHaveBeenLastCalledWith(Haptics.ImpactFeedbackStyle.Medium);
+    expect(mockNotificationAsync).toHaveBeenCalledTimes(1);
+    expect(mockNotificationAsync).toHaveBeenCalledWith(
+      Haptics.NotificationFeedbackType.Success
+    );
+    expect(mockImpactAsync).not.toHaveBeenCalled();
 
     jest.advanceTimersByTime(REST_COMPLETION_HAPTIC_GAP_MS);
     await feedback;
 
-    expect(mockImpactAsync).toHaveBeenCalledTimes(2);
+    expect(mockImpactAsync).toHaveBeenCalledTimes(1);
     expect(mockImpactAsync).toHaveBeenLastCalledWith(Haptics.ImpactFeedbackStyle.Medium);
   });
 });

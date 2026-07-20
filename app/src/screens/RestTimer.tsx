@@ -149,6 +149,7 @@ export default function RestTimer({
     } else {
       liveActivityDispositionRef.current = 'ended';
       void endRestLiveActivity();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     }
     Animated.timing(overlayOpacity, {
       toValue: 0,

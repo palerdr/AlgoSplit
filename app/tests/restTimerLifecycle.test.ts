@@ -12,6 +12,8 @@ jest.mock('../src/state/AppState', () => ({ REST_SECONDS: 180 }));
 
 jest.mock('expo-haptics', () => ({
   selectionAsync: jest.fn(async () => undefined),
+  notificationAsync: jest.fn(async () => undefined),
+  NotificationFeedbackType: { Success: 'success' },
 }));
 
 jest.mock('react-native', () => {
@@ -28,6 +30,7 @@ jest.mock('react-native', () => {
 });
 
 import React from 'react';
+import * as Haptics from 'expo-haptics';
 import {
   completeRestLiveActivity,
   endRestLiveActivity,
@@ -41,6 +44,8 @@ const mockCompleteRestLiveActivity = jest.mocked(completeRestLiveActivity);
 const mockEndRestLiveActivity = jest.mocked(endRestLiveActivity);
 const mockStartRestLiveActivity = jest.mocked(startRestLiveActivity);
 const mockPlayRestCompletionHaptics = jest.mocked(playRestCompletionHaptics);
+const mockSelectionAsync = jest.mocked(Haptics.selectionAsync);
+const mockNotificationAsync = jest.mocked(Haptics.notificationAsync);
 
 describe('RestTimer Live Activity lifecycle', () => {
   let nowMs = 1_000;
@@ -84,6 +89,7 @@ describe('RestTimer Live Activity lifecycle', () => {
     expect(mockCompleteRestLiveActivity).toHaveBeenCalledTimes(1);
     expect(mockPlayRestCompletionHaptics).toHaveBeenCalledTimes(1);
     expect(mockEndRestLiveActivity).not.toHaveBeenCalled();
+    expect(mockNotificationAsync).not.toHaveBeenCalled();
   });
 
   it('ends an active Live Activity on an unexpected unmount', () => {
@@ -98,9 +104,10 @@ describe('RestTimer Live Activity lifecycle', () => {
     expect(mockEndRestLiveActivity).toHaveBeenCalledTimes(1);
     expect(mockCompleteRestLiveActivity).not.toHaveBeenCalled();
     expect(mockPlayRestCompletionHaptics).not.toHaveBeenCalled();
+    expect(mockNotificationAsync).not.toHaveBeenCalled();
   });
 
-  it('ends a held-to-skip activity without completion feedback', () => {
+  it('ends a held-to-skip activity with success haptics but no expiry feedback', () => {
     let renderer: ReturnType<typeof TestRenderer.create>;
     TestRenderer.act(() => {
       renderer = TestRenderer.create(
@@ -117,5 +124,9 @@ describe('RestTimer Live Activity lifecycle', () => {
     expect(mockEndRestLiveActivity).toHaveBeenCalledTimes(1);
     expect(mockCompleteRestLiveActivity).not.toHaveBeenCalled();
     expect(mockPlayRestCompletionHaptics).not.toHaveBeenCalled();
+    expect(mockSelectionAsync).toHaveBeenCalledTimes(1);
+    expect(mockNotificationAsync).toHaveBeenCalledWith(
+      Haptics.NotificationFeedbackType.Success
+    );
   });
 });
