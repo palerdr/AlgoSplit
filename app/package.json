@@ -56,7 +56,8 @@
     "web": "expo start --web",
     "build:web": "expo export --platform web && node scripts/copy-public.mjs",
     "test": "jest",
-    "test:ci": "jest --runInBand --coverage"
+    "test:ci": "jest --runInBand --coverage",
+    "validate:ios-signing": "node --test scripts/validate-ios-signing-targets.test.mjs && node scripts/validate-ios-signing-targets.mjs"
   },
   "jest": {
     "preset": "jest-expo",

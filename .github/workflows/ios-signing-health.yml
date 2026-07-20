@@ -1,0 +1,80 @@
+name: iOS Signing Health
+
+on:
+  pull_request:
+    paths:
+      - 'app/app.json'
+      - 'app/eas.json'
+      - 'app/package.json'
+      - 'app/package-lock.json'
+      - 'app/ios-signing-targets.json'
+      - 'app/scripts/validate-ios-signing-targets.mjs'
+      - 'app/scripts/validate-ios-signing-targets.test.mjs'
+      - '.github/workflows/ios-signing-health.yml'
+      - '.github/workflows/testflight.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/app.json'
+      - 'app/eas.json'
+      - 'app/package.json'
+      - 'app/package-lock.json'
+      - 'app/ios-signing-targets.json'
+      - 'app/scripts/validate-ios-signing-targets.mjs'
+      - 'app/scripts/validate-ios-signing-targets.test.mjs'
+      - '.github/workflows/ios-signing-health.yml'
+      - '.github/workflows/testflight.yml'
+  # Apple provisioning profiles are annual. Check the tracked target,
+  # entitlement, and expiry ledger every month so renewal is surfaced at
+  # least 45 days before a release build can be affected.
+  schedule:
+    - cron: '17 15 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-signing-inventory:
+    name: Validate iOS signing inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Set up EAS
+        if: ${{ github.event_name != 'pull_request' }}
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: 21.0.2
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: app
+
+      # Fork pull requests have no repository secrets. Native introspection is
+      # enough to block target/entitlement drift before merge; main and the
+      # monthly canary additionally resolve the authenticated production EAS
+      # profile below.
+      - name: Validate pull-request signing inventory
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          npx expo config --type introspect --json > "$RUNNER_TEMP/expo-ios-introspect.json"
+          npm run validate:ios-signing -- "$RUNNER_TEMP/expo-ios-introspect.json"
+        working-directory: app
+
+      - name: Validate production target, entitlement, and expiry ledger
+        if: ${{ github.event_name != 'pull_request' }}
+        run: |
+          eas config --platform ios --profile production --json --non-interactive > "$RUNNER_TEMP/eas-ios-production.json"
+          eas env:exec production "npm run validate:ios-signing -- '$RUNNER_TEMP/eas-ios-production.json'" --non-interactive
+        working-directory: app

@@ -1,5 +1,6 @@
-# Builds an iOS production build for every push to main that touches the app,
-# and submits it to TestFlight.
+# Builds the latest iOS production revision pushed to main that touches the
+# app, and submits it to TestFlight. A newer revision deliberately supersedes
+# an older in-flight release so stale binaries are never uploaded afterward.
 #
 # The build runs LOCALLY on the (free, public-repo) macOS runner via
 # `eas build --local` — it consumes no EAS-hosted build quota, so the monthly
@@ -12,7 +13,10 @@
 # - The app linked to the EAS project (extra.eas.projectId in app/app.json) —
 #   robot tokens cannot run `eas init` themselves.
 # - iOS signing credentials stored with EAS (distribution certificate +
-#   provisioning profile) and an App Store Connect API key for submission.
+#   one provisioning profile per native target) and an App Store Connect API
+#   key for submission. Every new target or entitlement must be provisioned
+#   interactively, then recorded in app/ios-signing-targets.json. CI validates
+#   that ledger before consuming a remote build number.
 #
 # Optional — needed only for the "now available" email (see below):
 # - ASC_KEY_ID / ASC_ISSUER_ID / ASC_PRIVATE_KEY repository secrets: a
@@ -38,7 +42,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: testflight
+  # A dispatch from a non-main ref must never cancel the real main release.
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 # Exactly two contributor emails: one when a build starts, one when Apple has
@@ -53,6 +58,7 @@ env:
 
 jobs:
   build-and-submit:
+    if: ${{ github.ref == 'refs/heads/main' }}
     name: EAS iOS build → TestFlight
     runs-on: macos-15
     timeout-minutes: 120
@@ -66,14 +72,14 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: app/package-lock.json
 
       - name: Set up EAS
         uses: expo/expo-github-action@v8
         with:
-          eas-version: latest
+          eas-version: 21.0.2
           token: ${{ secrets.EXPO_TOKEN }}
 
       # The runner ships several Xcode versions side by side; the default is
@@ -90,6 +96,26 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        working-directory: app
+
+      # Resolve config exactly as EAS Build will, then compare every native
+      # signing target and entitlement with the checked-in credential ledger.
+      # This blocks unreviewed native-target drift and known expiry windows
+      # before EAS increments the remote build number. The signed build below
+      # remains the live Apple/EAS credential check.
+      - name: Validate iOS signing inventory
+        run: |
+          eas config --platform ios --profile production --json --non-interactive > "$RUNNER_TEMP/eas-ios-production.json"
+          eas env:exec production "npm run validate:ios-signing -- '$RUNNER_TEMP/eas-ios-production.json'" --non-interactive
+        working-directory: app
+
+      # Keep code, tests, and the production iOS bundle ahead of the expensive
+      # signed archive. None of these checks consume an Apple build number.
+      - name: Verify app before release build
+        run: |
+          npx tsc --noEmit
+          npm run test:ci
+          npx expo export --platform ios --output-dir "$RUNNER_TEMP/expo-ios-export"
         working-directory: app
 
       # Build-cadence telemetry for the "started"/"failed" emails: how many
@@ -130,7 +156,19 @@ jobs:
       - name: Build and submit to TestFlight
         id: build
         run: |
-          eas build --platform ios --profile production --local --non-interactive --output "$RUNNER_TEMP/AlgoSplit.ipa"
+          set +e
+          set -o pipefail
+          eas build --platform ios --profile production --local --non-interactive --output "$RUNNER_TEMP/AlgoSplit.ipa" 2>&1 | tee "$RUNNER_TEMP/eas-ios-build.log"
+          BUILD_STATUS=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$BUILD_STATUS" -ne 0 ]; then
+            if grep -Eiq 'Credentials are not set up|Failed to set up credentials|require separate Provisioning Profiles|Provisioning profile is not configured correctly' "$RUNNER_TEMP/eas-ios-build.log"; then
+              echo "::error title=iOS signing credentials missing::EAS is missing build credentials for one or more iOS targets. From app/, run: npx eas-cli@21.0.2 credentials:configure-build --platform ios --profile production. Configure every target, update app/ios-signing-targets.json, then rerun TestFlight."
+            fi
+            exit "$BUILD_STATUS"
+          fi
+
           eas submit --platform ios --path "$RUNNER_TEMP/AlgoSplit.ipa" --non-interactive
         working-directory: app
 
@@ -175,11 +213,11 @@ jobs:
 
             ${{ github.event.head_commit.message }}
 
-      # !cancelled(): a run superseded by a newer push is not a failure —
-      # skip the email instead of sending a misleading ❌. Only the build
-      # step itself failing counts here — a processing-wait timeout doesn't.
+      # !cancelled(): a run superseded by a newer push is not a failure. The
+      # Apple-processing poll is continue-on-error, so it cannot trip this;
+      # config, test, bundle, signing, build, and submit failures all do.
       - name: Email contributors that the build failed
-        if: ${{ !cancelled() && steps.build.outcome == 'failure' && env.GMAIL_APP_PASSWORD != '' }}
+        if: ${{ failure() && !cancelled() && env.GMAIL_APP_PASSWORD != '' }}
         continue-on-error: true
         uses: dawidd6/action-send-mail@v3
         with:
@@ -192,7 +230,8 @@ jobs:
           to: ${{ env.NOTIFY_RECIPIENTS }}
           subject: 'AlgoSplit build failed'
           body: |
+            The release pipeline failed before this revision became available in TestFlight.
+
             ${{ github.event.head_commit.message }}
 
-            Build ${{ env.BUILDS_TODAY }} today · ${{ env.BUILDS_MONTH }} this month
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
