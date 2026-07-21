@@ -14,7 +14,7 @@ def import_client(client, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         imports_routes,
         "preload_user_exercise_maps",
-        lambda _user_id: {"custom": {}, "overrides": {}},
+        lambda _user_id, **_kwargs: {"custom": {}, "overrides": {}},
     )
     return client
 

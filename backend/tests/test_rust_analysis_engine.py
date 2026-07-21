@@ -51,7 +51,7 @@ def test_build_rust_analysis_input_resolves_known_exercises():
     assert bench["resistance_profile"] == "mid"
 
 
-def test_build_rust_analysis_input_collapses_duplicate_exercise_names_like_python():
+def test_build_rust_analysis_input_preserves_duplicate_exercise_names():
     request = SplitRequest(
         name="Duplicate Exercises",
         cycle_length=7,
@@ -74,9 +74,11 @@ def test_build_rust_analysis_input_collapses_duplicate_exercise_names_like_pytho
 
     exercises = build_rust_analysis_input(request)["sessions"][0]["exercises"]
 
-    assert [exercise["name"] for exercise in exercises] == ["Bench Press", "Squat"]
-    assert exercises[0]["sets"] == 5
-    assert exercises[0]["is_unilateral"] is True
+    assert [exercise["name"] for exercise in exercises] == ["Bench Press", "Squat", "Bench Press"]
+    assert exercises[0]["sets"] == 3
+    assert exercises[0]["is_unilateral"] is False
+    assert exercises[2]["sets"] == 5
+    assert exercises[2]["is_unilateral"] is True
 
 
 @pytest.mark.skipif(

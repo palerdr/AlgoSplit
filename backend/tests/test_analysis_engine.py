@@ -12,6 +12,8 @@ from pathlib import Path
 import sys
 from typing import Any
 
+import pytest
+
 
 backend_path = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_path))
@@ -297,18 +299,28 @@ def normalized_breakdowns(split: Split) -> list[dict]:
     return normalized
 
 
-class TestMainBranchParity:
+def without_timeline_metrics(snapshot: dict) -> dict:
+    return {
+        muscle_id: {
+            key: value for key, value in values.items()
+            if key not in {'stimulus', 'atrophy', 'net'}
+        }
+        for muscle_id, values in snapshot.items()
+    }
+
+
+class TestNonAtrophyRegression:
     def test_ppl_7day_matches_main_baseline(self):
-        assert normalized_snapshot(make_ppl_7day()) == BASELINE_FIXTURES['ppl_7day']
+        assert without_timeline_metrics(normalized_snapshot(make_ppl_7day())) == without_timeline_metrics(BASELINE_FIXTURES['ppl_7day'])
 
     def test_cycle_4_day_matches_main_baseline(self):
-        assert normalized_snapshot(make_4day_cycle()) == BASELINE_FIXTURES['cycle_4_day']
+        assert without_timeline_metrics(normalized_snapshot(make_4day_cycle())) == without_timeline_metrics(BASELINE_FIXTURES['cycle_4_day'])
 
     def test_cycle_5_day_matches_main_baseline(self):
-        assert normalized_snapshot(make_5day_cycle()) == BASELINE_FIXTURES['cycle_5_day']
+        assert without_timeline_metrics(normalized_snapshot(make_5day_cycle())) == without_timeline_metrics(BASELINE_FIXTURES['cycle_5_day'])
 
     def test_cycle_6_day_matches_main_baseline(self):
-        assert normalized_snapshot(make_6day_cycle()) == BASELINE_FIXTURES['cycle_6_day']
+        assert without_timeline_metrics(normalized_snapshot(make_6day_cycle())) == without_timeline_metrics(BASELINE_FIXTURES['cycle_6_day'])
 
     def test_single_session_breakdown_matches_main_baseline(self):
         assert normalized_breakdowns(make_single_session()) == BASELINE_FIXTURES['single_session_breakdown']
@@ -474,6 +486,68 @@ class TestEdgeCases:
         assert penalties[0] == 1.0
         for penalty in penalties[1:]:
             assert penalty <= 1.0
+
+
+class TestContinuousAtrophyTimeline:
+    @staticmethod
+    def muscle() -> MuscleRegion:
+        return MuscleRegion(
+            region_id='test', display_name='Test', parent_group='test',
+            leverage='M', damage_tier='0'
+        )
+
+    def test_elapsed_post_window_time_is_charged_once(self):
+        muscle = self.muscle()
+        muscle.reset_atrophy_clock(0.0)
+
+        muscle.account_atrophy_through(72.0, 48, 3, 'schoenfeld')
+        first = muscle.atrophy
+        muscle.account_atrophy_through(120.0, 48, 3, 'schoenfeld')
+        second = muscle.atrophy
+        muscle.account_atrophy_through(168.0, 48, 3, 'schoenfeld')
+
+        assert first > 0
+        assert second == pytest.approx(first * 3)
+        assert muscle.atrophy == pytest.approx(first * 5)
+
+    def test_only_prime_exposure_resets_clock(self):
+        uninterrupted = self.muscle()
+        uninterrupted.reset_atrophy_clock(0.0)
+        uninterrupted.account_atrophy_through(168.0, 48, 3, 'schoenfeld')
+
+        with_lower_tier_event = self.muscle()
+        with_lower_tier_event.reset_atrophy_clock(0.0)
+        with_lower_tier_event.account_atrophy_through(72.0, 48, 3, 'schoenfeld')
+        # A secondary/tertiary/quaternary exposure intentionally makes no
+        # reset_atrophy_clock call.
+        with_lower_tier_event.account_atrophy_through(168.0, 48, 3, 'schoenfeld')
+
+        with_new_prime = self.muscle()
+        with_new_prime.reset_atrophy_clock(0.0)
+        with_new_prime.account_atrophy_through(120.0, 48, 3, 'schoenfeld')
+        with_new_prime.reset_atrophy_clock(120.0)
+        with_new_prime.account_atrophy_through(168.0, 48, 3, 'schoenfeld')
+
+        assert with_lower_tier_event.atrophy == pytest.approx(uninterrupted.atrophy)
+        assert with_new_prime.atrophy < uninterrupted.atrophy
+
+    def test_duplicate_entries_are_both_executed(self):
+        split = Split(
+            name='Duplicates',
+            days=[('Push', 1, [
+                ('Bench Press', (2, False, None)),
+                ('Bench Press', (3, False, None)),
+            ])],
+            stimulus_duration=48,
+            maintenance_volume=3,
+            dataset='average',
+            cycle_length=7,
+        )
+        split.simulate_split(collect_breakdowns=True)
+
+        assert [item['name'] for item in split.session_stats[0]['exercise_breakdowns']] == [
+            'Bench Press', 'Bench Press'
+        ]
 
 
 class TestTiming:

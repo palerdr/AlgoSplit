@@ -4,6 +4,7 @@ FastAPI dependencies for authentication and authorization
 
 import os
 import logging
+import asyncio
 import httpx
 from typing import Optional, Tuple
 from time import time
@@ -28,26 +29,42 @@ SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_JWT_AUDIENCE = os.getenv("SUPABASE_JWT_AUDIENCE", "authenticated")
 SUPABASE_JWT_ISSUER = os.getenv("SUPABASE_JWT_ISSUER")
-JWKS_CACHE_TTL_SECONDS = int(os.getenv("JWKS_CACHE_TTL_SECONDS", "3600"))
+JWKS_CACHE_TTL_SECONDS = int(os.getenv("JWKS_CACHE_TTL_SECONDS", "900"))
 JWKS_FETCH_TIMEOUT_SECONDS = float(os.getenv("JWKS_FETCH_TIMEOUT_SECONDS", "3.0"))
 
 # Cache for JWKS
 _jwks_cache = None
 _jwks_cache_at = 0.0
+_jwks_lock = asyncio.Lock()
+_jwks_http_client: Optional[httpx.AsyncClient] = None
 
-def get_jwks():
-    """Fetch JWKS from Supabase for ES256 token validation"""
-    global _jwks_cache, _jwks_cache_at
+async def get_jwks(*, force_refresh: bool = False):
+    """Fetch JWKS asynchronously with a single-flight refresh."""
+    global _jwks_cache, _jwks_cache_at, _jwks_http_client
     now = time()
     cache_age = now - _jwks_cache_at
-    if _jwks_cache is None or cache_age > JWKS_CACHE_TTL_SECONDS:
-        if not SUPABASE_URL:
-            return None
+    if not force_refresh and _jwks_cache is not None and cache_age <= JWKS_CACHE_TTL_SECONDS:
+        return _jwks_cache
+    if not SUPABASE_URL:
+        return None
+    async with _jwks_lock:
+        now = time()
+        if (
+            not force_refresh
+            and _jwks_cache is not None
+            and now - _jwks_cache_at <= JWKS_CACHE_TTL_SECONDS
+        ):
+            return _jwks_cache
+        if _jwks_http_client is None:
+            _jwks_http_client = httpx.AsyncClient(
+                timeout=JWKS_FETCH_TIMEOUT_SECONDS,
+                follow_redirects=True,
+            )
         jwks_url = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
-        response = httpx.get(jwks_url, timeout=JWKS_FETCH_TIMEOUT_SECONDS)
-        if response.status_code == 200:
-            _jwks_cache = response.json()
-            _jwks_cache_at = now
+        response = await _jwks_http_client.get(jwks_url)
+        response.raise_for_status()
+        _jwks_cache = response.json()
+        _jwks_cache_at = now
     return _jwks_cache
 
 # Security scheme
@@ -76,7 +93,7 @@ def _resolve_issuer() -> Optional[str]:
     return None
 
 
-def _decode_token(token: str) -> dict:
+async def _decode_token(token: str) -> dict:
     # First, get the algorithm from the token header
     header = jwt.get_unverified_header(token)
     alg = header.get("alg", "HS256")
@@ -98,7 +115,7 @@ def _decode_token(token: str) -> dict:
 
     if alg == "ES256":
         # Use JWKS for ES256 tokens (newer Supabase projects)
-        jwks = get_jwks()
+        jwks = await get_jwks()
         if not jwks:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -113,6 +130,9 @@ def _decode_token(token: str) -> dict:
                 key = k
                 break
 
+        if not key:
+            jwks = await get_jwks(force_refresh=True)
+            key = next((item for item in jwks.get("keys", []) if item.get("kid") == kid), None)
         if not key:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -177,7 +197,22 @@ async def get_current_user(
         validate_csrf_request(request)
 
     try:
-        payload = _decode_token(token)
+        payload = await _decode_token(token)
+
+        methods = {
+            item.get("method") for item in payload.get("amr", [])
+            if isinstance(item, dict)
+        }
+        if (
+            payload.get("role") != "authenticated"
+            or payload.get("type") == "recovery"
+            or "recovery" in methods
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
         # Extract user ID from payload
         user_id: str = payload.get("sub")

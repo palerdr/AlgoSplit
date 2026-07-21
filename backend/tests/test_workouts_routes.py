@@ -239,10 +239,27 @@ def test_log_workout_retry_is_idempotent(client, fake_supabase, monkeypatch):
     assert retried.json()["id"] == first.json()["id"]
     assert len(fake_supabase.tables["workout_logs"]) == 1
     assert fake_supabase.tables["workout_logs"][0]["client_request_id"] == "workout-123"
+
+
+def test_log_workout_rejects_idempotency_key_reuse_with_different_payload(
+    client, fake_supabase, monkeypatch
+):
+    monkeypatch.setattr(workouts_routes, "get_supabase_client_with_token", lambda _token: fake_supabase)
+    first = {
+        "client_request_id": "conflict-123", "session_name": "Push",
+        "exercises": [{"exercise_name": "Bench Press", "sets_completed": 1, "reps": [8], "weight": [185]}],
+    }
+    assert client.post("/api/workouts", json=first).status_code == 201
+    first["session_name"] = "Different workout"
+
+    conflict = client.post("/api/workouts", json=first)
+
+    assert conflict.status_code == 409
+    assert len(fake_supabase.tables["workout_logs"]) == 1
     assert len(fake_supabase.tables["workout_exercises"]) == 1
 
 
-def test_log_workout_succeeds_when_schema_lacks_client_request_id(
+def test_log_workout_uses_atomic_rpc_even_with_legacy_client_wrapper(
     client, fake_supabase, monkeypatch
 ):
     legacy_supabase = _LegacyWorkoutLogsClient(fake_supabase)
@@ -275,9 +292,9 @@ def test_log_workout_succeeds_when_schema_lacks_client_request_id(
     assert retried.json()["id"] == response.json()["id"]
     assert response.json()["session_name"] == "Push Day"
     assert response.json()["exercises"][0]["exercise_name"] == "Bench Press"
-    assert legacy_supabase.failed_operations == ["select", "select"]
+    assert legacy_supabase.failed_operations == []
     assert len(fake_supabase.tables["workout_logs"]) == 1
-    assert "client_request_id" not in fake_supabase.tables["workout_logs"][0]
+    assert fake_supabase.tables["workout_logs"][0]["client_request_id"] == "legacy-schema-123"
     assert len(fake_supabase.tables["workout_exercises"]) == 1
 
 

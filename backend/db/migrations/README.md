@@ -14,8 +14,8 @@ This directory contains SQL migration files for setting up the AlgoSplit databas
    - `003_create_exercise_overrides.sql`
    - `004_setup_rls_policies.sql`
    - `005_create_triggers.sql`
-   - Continue through the remaining numbered migrations, including
-     `012_performance_rpcs.sql` before deploying the optimized frontend/backend.
+   - Continue through `015_backend_audit_advisor_followup.sql`. For a clean database,
+     prefer the ordered bootstrap file in `backend/db/bootstrap`.
 
 4. After running all migrations, verify the tables were created:
    ```sql
@@ -52,6 +52,9 @@ This directory contains SQL migration files for setting up the AlgoSplit databas
 | `004_setup_rls_policies.sql` | Sets up Row Level Security policies for all tables |
 | `005_create_triggers.sql` | Creates triggers for automatic timestamp updates |
 | `012_performance_rpcs.sql` | Adds atomic split-session saves and compact workout overview/progress RPCs |
+| `013_extend_split_cycle_to_14_days.sql` | Extends persisted split cycles to 14 days |
+| `014_backend_audit_repair.sql` | Adds missing meso schema, replay protection, and aggregate write RPCs |
+| `015_backend_audit_advisor_followup.sql` | Adds the recovery-use FK index and explicit backend-only policy |
 
 ## Schema Overview
 
@@ -173,3 +176,10 @@ After running migrations:
 - [Supabase Documentation](https://supabase.com/docs)
 - [PostgreSQL Documentation](https://www.postgresql.org/docs/)
 - [Row Level Security Guide](https://supabase.com/docs/guides/auth/row-level-security)
+# Migration ordering
+
+The duplicate `001`, `002`, and `008` prefixes are historical and may already
+have been applied manually in production. Do not rename them. New changes are
+strictly additive. For an empty database, use
+`backend/db/bootstrap/000_splitai_baseline.sql`, which records the authoritative
+dependency order and stops on the first error.

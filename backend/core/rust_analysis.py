@@ -170,26 +170,16 @@ def _resolve_session_exercises(
     user_id: Optional[str],
     user_exercise_maps: Optional[Dict[str, Dict[str, Any]]],
 ) -> list[dict]:
-    # Match _run_split_analysis' dict-comprehension behavior: duplicate
-    # exercise names keep their first insertion position but use the last value.
-    by_name = {}
-    for exercise in exercises:
-        by_name[exercise.name] = (
+    return [
+        _resolve_exercise(
+            exercise.name,
             exercise.sets,
             bool(exercise.unilateral),
             exercise.resistance_profile,
-        )
-
-    return [
-        _resolve_exercise(
-            name,
-            sets,
-            force_unilateral,
-            resistance_profile,
             user_id,
             user_exercise_maps,
         )
-        for name, (sets, force_unilateral, resistance_profile) in by_name.items()
+        for exercise in exercises
     ]
 
 

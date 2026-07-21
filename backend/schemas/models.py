@@ -5,7 +5,12 @@ Defines request/response schemas for the 29-region granular muscle model.
 """
 
 from typing import Dict, List, Optional
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, model_validator, validator
+from schemas.constraints import (
+    MAX_CYCLE_DAYS, MAX_MAINTENANCE_VOLUME, MAX_STIMULUS_DURATION,
+    MIN_CYCLE_DAYS, MIN_MAINTENANCE_VOLUME, MIN_STIMULUS_DURATION,
+    validate_session_days,
+)
 
 
 # ============================================================================
@@ -42,7 +47,7 @@ class ExerciseInput(BaseModel):
 class SessionInput(BaseModel):
     """A single training session (e.g., Monday's workout)"""
     name: str = Field(..., description="Session name (e.g., 'Push Day', 'Monday')")
-    day: int = Field(..., ge=1, le=14, description="Day number in the split (1-14)")
+    day: int = Field(..., ge=MIN_CYCLE_DAYS, le=MAX_CYCLE_DAYS, description="Day number in the split (1-14)")
     exercises: List[ExerciseInput] = Field(
         default_factory=list,
         description="List of exercises; empty sessions are rest days",
@@ -66,9 +71,9 @@ class SplitRequest(BaseModel):
     """Complete training split to analyze"""
     name: str = Field(default="My Split", description="Name of the split")
     sessions: List[SessionInput] = Field(..., min_length=1, max_length=14, description="Training sessions (1-14 days)")
-    cycle_length: Optional[int] = Field(default=None, ge=1, le=14, description="Cycle length in days (defaults to max day number)")
-    stimulus_duration: int = Field(default=48, ge=24, le=96, description="Muscle stimulus duration in hours (24-96)")
-    maintenance_volume: int = Field(default=3, ge=1, le=9, description="Maintenance volume sets (1-9)")
+    cycle_length: Optional[int] = Field(default=None, ge=MIN_CYCLE_DAYS, le=MAX_CYCLE_DAYS, description="Cycle length in days (defaults to max day number)")
+    stimulus_duration: int = Field(default=48, ge=MIN_STIMULUS_DURATION, le=MAX_STIMULUS_DURATION, description="Muscle stimulus duration in hours (24-96)")
+    maintenance_volume: int = Field(default=3, ge=MIN_MAINTENANCE_VOLUME, le=MAX_MAINTENANCE_VOLUME, description="Maintenance volume sets (1-9)")
     dataset: str = Field(default="pelland", description="Fatigue curve dataset")
     include_breakdowns: bool = Field(default=True, description="Include per-session exercise breakdowns (set false for faster responses)")
 
@@ -78,6 +83,11 @@ class SplitRequest(BaseModel):
         if v not in allowed:
             raise ValueError(f"Dataset must be one of: {allowed}")
         return v
+
+    @model_validator(mode='after')
+    def validate_cycle_session_days(self):
+        validate_session_days(self.sessions, self.cycle_length, 'day')
+        return self
 
     class Config:
         json_schema_extra = {

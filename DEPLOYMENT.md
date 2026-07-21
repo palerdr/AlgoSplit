@@ -18,7 +18,7 @@ changing the repository layout.
 ## Prerequisites
 
 - Apply the Supabase migrations in `backend/db/migrations` through migration
-  `012_performance_rpcs.sql`.
+  `014_backend_audit_repair.sql`.
 - Keep `backend/uv.lock` committed and synchronized with
   `backend/pyproject.toml`.
 - Never upload either local `.env` file to GitHub. Enter production secrets in

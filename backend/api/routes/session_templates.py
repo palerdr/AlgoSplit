@@ -33,38 +33,33 @@ def build_template_response(t: dict) -> SessionTemplateResponse:
     )
 
 
+def _rpc_payload(result, name: str) -> dict:
+    data = result.data
+    if isinstance(data, list) and len(data) == 1 and isinstance(data[0], dict):
+        data = data[0]
+    if not isinstance(data, dict):
+        raise RuntimeError(f"{name} returned an invalid payload")
+    return data
+
+
+def _template_payload(template) -> dict:
+    payload = template.model_dump(mode="json")
+    for index, exercise in enumerate(payload.get("exercises", [])):
+        if exercise.get("order_index", 0) == 0:
+            exercise["order_index"] = index
+    return payload
+
+
 @router.post("", response_model=SessionTemplateResponse, status_code=status.HTTP_201_CREATED)
 async def create_template(template: SessionTemplateCreate, current_user: AuthUser = Depends(get_current_user)):
     try:
         supabase = get_supabase_client_with_token(current_user.access_token)
 
-        template_result = supabase.table("session_templates").insert({
-            "user_id": current_user.id,
-            "name": template.name,
-            "notes": template.notes,
+        result = supabase.rpc("save_session_template_full", {
+            "p_template_id": None,
+            "p_template": _template_payload(template),
         }).execute()
-
-        if not template_result.data:
-            raise HTTPException(status_code=500, detail="Failed to create template")
-
-        template_record = template_result.data[0]
-        template_id = template_record["id"]
-
-        exercise_rows = [
-            {
-                "template_id": template_id,
-                "exercise_name": ex.exercise_name,
-                "sets": ex.sets,
-                "order_index": idx if ex.order_index == 0 else ex.order_index,
-                "unilateral": ex.unilateral,
-                "resistance_profile": ex.resistance_profile,
-            }
-            for idx, ex in enumerate(template.exercises)
-        ]
-
-        ex_result = supabase.table("session_template_exercises").insert(exercise_rows).execute()
-        template_record["session_template_exercises"] = ex_result.data or []
-        return build_template_response(template_record)
+        return build_template_response(_rpc_payload(result, "save_session_template_full"))
     except HTTPException:
         raise
     except Exception as e:
@@ -77,47 +72,11 @@ async def create_template_from_session(body: CreateTemplateFromSession, current_
     try:
         supabase = get_supabase_client_with_token(current_user.access_token)
 
-        # Fetch the session with exercises
-        session_result = supabase.table("sessions").select("*, exercises(*), splits(id)").eq("id", body.session_id).execute()
-        if not session_result.data:
-            raise HTTPException(status_code=404, detail="Session not found")
-
-        session = session_result.data[0]
-        template_name = body.name or session["name"]
-        split_id = session.get("splits", {}).get("id") if session.get("splits") else None
-
-        template_result = supabase.table("session_templates").insert({
-            "user_id": current_user.id,
-            "name": template_name,
-            "source_session_id": body.session_id,
-            "source_split_id": split_id,
+        result = supabase.rpc("create_session_template_from_session", {
+            "p_session_id": body.session_id,
+            "p_name": body.name,
         }).execute()
-
-        if not template_result.data:
-            raise HTTPException(status_code=500, detail="Failed to create template")
-
-        template_record = template_result.data[0]
-        template_id = template_record["id"]
-
-        exercises = sorted(session.get("exercises", []) or [], key=lambda e: e.get("order_index", 0))
-        if exercises:
-            exercise_rows = [
-                {
-                    "template_id": template_id,
-                    "exercise_name": ex["exercise_name"],
-                    "sets": ex["sets"],
-                    "order_index": ex.get("order_index", idx),
-                    "unilateral": ex.get("unilateral", False),
-                    "resistance_profile": ex.get("resistance_profile"),
-                }
-                for idx, ex in enumerate(exercises)
-            ]
-            ex_result = supabase.table("session_template_exercises").insert(exercise_rows).execute()
-            template_record["session_template_exercises"] = ex_result.data or []
-        else:
-            template_record["session_template_exercises"] = []
-
-        return build_template_response(template_record)
+        return build_template_response(_rpc_payload(result, "create_session_template_from_session"))
     except HTTPException:
         raise
     except Exception as e:
@@ -168,53 +127,16 @@ async def update_template(
     try:
         supabase = get_supabase_client_with_token(current_user.access_token)
 
-        # A manual edit severs any link to the source split session; otherwise
-        # the split-save background sync would clobber the user's changes.
-        template_result = supabase.table("session_templates").update({
-            "name": template.name,
-            "notes": template.notes,
-            "source_session_id": None,
-            "source_split_id": None,
-        }).eq("id", template_id).execute()
-
-        if not template_result.data:
-            raise HTTPException(status_code=404, detail="Template not found")
-
-        template_record = template_result.data[0]
-
-        stale_result = (
-            supabase.table("session_template_exercises")
-            .select("id")
-            .eq("template_id", template_id)
-            .execute()
-        )
-        stale_ids = [row["id"] for row in stale_result.data or []]
-
-        exercise_rows = [
-            {
-                "template_id": template_id,
-                "exercise_name": ex.exercise_name,
-                "sets": ex.sets,
-                "order_index": idx if ex.order_index == 0 else ex.order_index,
-                "unilateral": ex.unilateral,
-                "resistance_profile": ex.resistance_profile,
-            }
-            for idx, ex in enumerate(template.exercises)
-        ]
-
-        # Insert replacements before deleting the old rows so a mid-way failure
-        # never leaves the template without exercises (no transaction across
-        # PostgREST calls).
-        ex_result = supabase.table("session_template_exercises").insert(exercise_rows).execute()
-        if stale_ids:
-            supabase.table("session_template_exercises").delete().in_(
-                "id", stale_ids
-            ).execute()
-        template_record["session_template_exercises"] = ex_result.data or []
-        return build_template_response(template_record)
+        result = supabase.rpc("save_session_template_full", {
+            "p_template_id": template_id,
+            "p_template": _template_payload(template),
+        }).execute()
+        return build_template_response(_rpc_payload(result, "save_session_template_full"))
     except HTTPException:
         raise
     except Exception as e:
+        if getattr(e, "code", None) == "P0002" or "not_found" in str(e):
+            raise HTTPException(status_code=404, detail="Template not found") from e
         raise HTTPException(status_code=500, detail=f"Failed to update template: {str(e)}")
 
 

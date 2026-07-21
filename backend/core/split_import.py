@@ -28,7 +28,7 @@ from core.movementMatching import MatchResult, Movement, move_match_detailed
 # API layer; the default keeps this module usable without a database.
 MatcherFn = Callable[[str], Tuple[Optional[Movement], MatchResult]]
 
-MAX_DAYS = 7
+MAX_DAYS = 14
 DEFAULT_SETS = 3
 
 # ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@ from schemas.programs import DiagnosticsRequest
 from schemas.auth import ErrorResponse
 from api.dependencies import get_current_user, AuthUser
 from schemas.models import SplitRequest, SessionInput, ExerciseInput
-from api.analysis_routes import analyze_split as run_analysis
+from api.analysis_routes import _run_split_analysis
 
 router = APIRouter(prefix="/api/programs/{program_id}/diagnostics", tags=["Program Diagnostics"])
 
@@ -81,7 +81,7 @@ async def run_diagnostics(
                 dataset=program.get("dataset", "schoenfeld"),
             )
 
-            return await run_analysis(split_request)
+            return _run_split_analysis(split_request, current_user.id, supabase)
 
         elif request.level == "micro":
             if not request.target_id:
@@ -132,7 +132,7 @@ async def run_diagnostics(
                 dataset=program.get("dataset", "schoenfeld"),
             )
 
-            return await run_analysis(split_request)
+            return _run_split_analysis(split_request, current_user.id, supabase)
         elif request.level == "meso":
             if not request.target_id:
                 raise HTTPException(status_code=400, detail="target_id required for meso diagnostics")
@@ -189,7 +189,7 @@ async def run_diagnostics(
                     maintenance_volume=program.get("maintenance_volume", 4),
                     dataset=program.get("dataset", "schoenfeld"),
                 )
-                result = await run_analysis(split_request)
+                result = _run_split_analysis(split_request, current_user.id, supabase)
                 weekly_results.append({"week_index": micro["week_index"], "analysis": result})
 
             # Build progression data: region_id -> [week0_net, week1_net, ...]
@@ -275,7 +275,7 @@ async def run_diagnostics(
                         maintenance_volume=program.get("maintenance_volume", 4),
                         dataset=program.get("dataset", "schoenfeld"),
                     )
-                    result = await run_analysis(split_request)
+                    result = _run_split_analysis(split_request, current_user.id, supabase)
                     week_count += 1
                     for muscle in result.muscles:
                         if muscle.region_id not in all_muscle_stimulus:

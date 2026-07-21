@@ -115,6 +115,15 @@ async def save_meso_as_template(
     """
     try:
         supabase = get_supabase_client_with_token(current_user.access_token)
+        result = supabase.rpc("save_meso_template_from_meso", {
+            "p_source_meso_id": body.source_meso_id,
+            "p_name": body.name,
+            "p_notes": body.notes,
+        }).execute()
+        payload = result.data[0] if isinstance(result.data, list) else result.data
+        if not isinstance(payload, dict):
+            raise RuntimeError("save_meso_template_from_meso returned an invalid payload")
+        return MesoTemplateResponse.model_validate(payload)
 
         # 1. Fetch the source meso
         meso_res = supabase.table("program_mesos").select("*").eq("id", body.source_meso_id).execute()
@@ -359,6 +368,16 @@ async def apply_meso_template(
     """
     try:
         supabase = get_supabase_client_with_token(current_user.access_token)
+        result = supabase.rpc("apply_meso_template_full", {
+            "p_template_id": template_id,
+            "p_macro_id": body.macro_id,
+            "p_start_date": body.start_date,
+            "p_name": body.name,
+        }).execute()
+        payload = result.data[0] if isinstance(result.data, list) else result.data
+        if not isinstance(payload, dict):
+            raise RuntimeError("apply_meso_template_full returned an invalid payload")
+        return payload
 
         # 1. Verify template ownership
         t_res = supabase.table("meso_templates").select("*").eq("id", template_id).eq("user_id", current_user.id).execute()
