@@ -99,6 +99,26 @@ private func encodedActivityName(_ attributes: VoltraAttributes) -> String? {
   return object["name"] as? String
 }
 
+@available(iOS 16.4, *)
+func endAllRestLiveActivitiesImmediately() async {
+  UserDefaults.standard.removeObject(
+    forKey: RestCompletionConstants.scheduledActivityIDKey
+  )
+
+  let restActivityNames = Set([
+    RestCompletionConstants.runningActivityName,
+    RestCompletionConstants.activityName,
+  ])
+
+  for activity in Activity<VoltraAttributes>.activities {
+    guard let name = encodedActivityName(activity.attributes),
+          restActivityNames.contains(name)
+    else { continue }
+
+    await activity.end(nil, dismissalPolicy: .immediate)
+  }
+}
+
 @available(iOS 26.0, *)
 private func cancelScheduledCompletion() async -> Bool {
   let defaults = UserDefaults.standard

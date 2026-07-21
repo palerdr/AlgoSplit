@@ -1,6 +1,7 @@
 {
   "platforms": ["ios"],
   "ios": {
-    "modules": ["RestCompletionAlertModule"]
+    "modules": ["RestCompletionAlertModule"],
+    "appDelegateSubscribers": ["RestCompletionTerminationSubscriber"]
   }
 }
