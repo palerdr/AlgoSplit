@@ -321,6 +321,9 @@ class MuscleRegion:
         self.stimulus = 0.0
         self.atrophy = 0.0
         self.last_trained_time: Optional[float] = None
+        # Absolute timeline cursor through which post-window atrophy has already
+        # been charged. Only a prime exposure resets this cursor/clock.
+        self.atrophy_accounted_through: Optional[float] = None
         # Time of the most recent session that delivered ANY tier of stimulus
         # to this muscle (prime, secondary, tertiary, quaternary). Unlike
         # last_trained_time — which is updated only when the muscle is a prime
@@ -480,25 +483,32 @@ class MuscleRegion:
 
         return final_stimulus
 
-    def apply_atrophy(
+    def account_atrophy_through(
         self,
-        hours_since_training: Optional[float],
+        current_time: float,
         stimulus_duration: int,
         maintenance_volume: int,
         dataset: str
     ) -> None:
-        """
-        Apply atrophy based on time since last training.
-        Atrophy only begins after the stimulus window expires.
-        """
-        if hours_since_training is None:
+        """Charge the previously-unaccounted post-window interval once."""
+        if self.last_trained_time is None:
             return
 
-        if hours_since_training > stimulus_duration:
-            hours_in_atrophy = hours_since_training - stimulus_duration
+        window_end = self.last_trained_time + stimulus_duration
+        cursor = self.atrophy_accounted_through
+        if cursor is None:
+            cursor = self.last_trained_time
+        charge_from = max(cursor, window_end)
+        if current_time > charge_from:
             atrophy_period = 168 - stimulus_duration
             atrophy_rate = cum[dataset][maintenance_volume - 1] / atrophy_period
-            self.atrophy += atrophy_rate * hours_in_atrophy
+            self.atrophy += atrophy_rate * (current_time - charge_from)
+        self.atrophy_accounted_through = max(cursor, current_time)
+
+    def reset_atrophy_clock(self, current_time: float) -> None:
+        """Record a prime exposure; lower stimulus tiers deliberately do not call this."""
+        self.last_trained_time = current_time
+        self.atrophy_accounted_through = current_time
 
     def reset_session(self) -> None:
         """Reset per-session tracking variables."""
@@ -517,6 +527,7 @@ class MuscleRegion:
         self.stimulus = 0.0
         self.atrophy = 0.0
         self.last_trained_time = None
+        self.atrophy_accounted_through = None
         self.last_stimulus_time = None
         self.last_session_time = None
         self.session_times = set()
@@ -555,7 +566,7 @@ class Session:
         self,
         name: str,
         day: int,
-        exercises: Dict[str, Any],
+        exercises: Any,
         user_id: Optional[str] = None,
         user_exercise_maps: Optional[Dict[str, Dict[str, Any]]] = None,
         movement_cache: Optional[Dict[str, Optional[Any]]] = None,
@@ -564,7 +575,7 @@ class Session:
         Args:
             name: Session name
             day: Day number (1-indexed)
-            exercises: Dict mapping exercise name to either:
+            exercises: Ordered entries mapping an exercise name to either:
                 - int: just the number of sets
                 - tuple of 2: (sets, unilateral_flag)
                 - tuple of 3: (sets, unilateral_flag, resistance_profile_override)
@@ -574,24 +585,26 @@ class Session:
         self.user_exercise_maps = user_exercise_maps
         self.movement_cache = movement_cache if movement_cache is not None else {}
         self.time = (day - 1) * 24  # Hours into the split/cycle
-        # Normalize exercises to always have (sets, unilateral, resistance_profile) format
-        self.exercises = {}
-        self.exercise_unilateral = {}
-        self.exercise_resistance_profile = {}  # Optional override
-        for ex_name, value in exercises.items():
+        # Preserve repeated names and declaration order. Dict input remains
+        # accepted for internal/backward compatibility.
+        entries = exercises.items() if isinstance(exercises, dict) else exercises
+        self.exercises = []
+        for ex_name, value in entries:
             if isinstance(value, tuple):
-                self.exercises[ex_name] = value[0]  # sets
-                self.exercise_unilateral[ex_name] = value[1] if len(value) > 1 else False
-                self.exercise_resistance_profile[ex_name] = value[2] if len(value) > 2 else None
+                sets = value[0]
+                unilateral = value[1] if len(value) > 1 else False
+                resistance_profile = value[2] if len(value) > 2 else None
             else:
-                self.exercises[ex_name] = value  # just sets
-                self.exercise_unilateral[ex_name] = False
-                self.exercise_resistance_profile[ex_name] = None
+                sets = value
+                unilateral = False
+                resistance_profile = None
+            self.exercises.append((ex_name, sets, unilateral, resistance_profile))
 
     def execute(
         self,
         muscles: Dict[str, MuscleRegion],
         stimulus_duration: int,
+        maintenance_volume: int,
         dataset: str,
         fatigue_state: Optional[GlobalFatigueState] = None,
         consecutive_day_penalty: float = 1.0,
@@ -639,10 +652,7 @@ class Session:
         exercise_breakdowns = []
 
         # Process each exercise
-        for exercise_name, sets in self.exercises.items():
-            # Get explicit flags if provided
-            force_unilateral = self.exercise_unilateral.get(exercise_name, False)
-            resistance_override = self.exercise_resistance_profile.get(exercise_name)
+        for exercise_name, sets, force_unilateral, resistance_override in self.exercises:
 
             # Match exercise to pattern
             pattern_name, tiered_targets, is_bilateral, is_unilateral, axial_load, resistance_profile = \
@@ -666,6 +676,15 @@ class Session:
             tiered_targets = redistribute_leverage_weights(
                 tiered_targets, resistance_profile, muscles
             )
+
+            # Accrue atrophy immediately before a prime exposure. Unrelated
+            # lower-tier work never advances or resets this timeline.
+            for muscle_id in tiered_targets.get('prime', {}).keys():
+                muscle = muscles.get(muscle_id)
+                if muscle:
+                    muscle.account_atrophy_through(
+                        self.time, stimulus_duration, maintenance_volume, dataset
+                    )
 
             # Build per-exercise breakdown
             exercise_bd: Optional[Dict[str, Any]] = None
@@ -766,7 +785,7 @@ class Session:
             for muscle_id in tiered_targets.get('prime', {}).keys():
                 muscle = muscles.get(muscle_id)
                 if muscle:
-                    muscle.last_trained_time = self.time
+                    muscle.reset_atrophy_clock(self.time)
                     muscle.last_session_time = self.time
                     muscle.session_times.add(self.time)
 
@@ -920,7 +939,7 @@ class Split:
     def __init__(
         self,
         name: str,
-        days: List[Tuple[str, int, Dict[str, int]]],
+        days: List[Tuple[str, int, Any]],
         stimulus_duration: int,
         maintenance_volume: int,
         dataset: str,
@@ -959,6 +978,7 @@ class Split:
         # Initialize muscles
         self._init_muscles()
         self.session_stats = []
+        self.simulation_horizon_hours = 0.0
 
     def _init_muscles(self) -> None:
         """Initialize all 29 granular muscle regions."""
@@ -989,45 +1009,19 @@ class Split:
         total_days = weeks_to_sim * 7
         num_cycles = int(total_days / self.cycle_length)
 
-        # Track weekly results
-        weekly_results = {muscle_name: [] for muscle_name in self.muscles.keys()}
-
         # Global consecutive day tracker (persists across all weeks)
         consecutive_tracker = ConsecutiveDayTracker()
 
-        # Simulate each week
-        for week in range(weeks_to_sim):
-            week_start_hour = week * 168
+        timeline_sessions = []
+        for cycle in range(num_cycles):
+            cycle_offset_hours = cycle * self.cycle_length * 24
+            for session in self.days:
+                timeline_sessions.append((session.time + cycle_offset_hours, session))
+        timeline_sessions.sort(key=lambda item: item[0])
 
-            # Reset muscles
-            for muscle in self.muscles.values():
-                muscle.reset_week()
-                muscle.atrophy = 0
-
-            # Create sessions for this week
-            week_sessions = []
-            for cycle in range(num_cycles):
-                cycle_offset_hours = cycle * self.cycle_length * 24
-                for session in self.days:
-                    adjusted_time = session.time + cycle_offset_hours
-                    if week_start_hour <= adjusted_time < week_start_hour + 168:
-                        week_sessions.append((adjusted_time - week_start_hour, session))
-
-            week_sessions.sort(key=lambda x: x[0])
-
-            # Execute sessions with consecutive day tracking
-            fatigue_state = GlobalFatigueState()
-
-            for week_relative_time, session in week_sessions:
-                # Calculate absolute day number (1-indexed) for consecutive day tracking
-                absolute_day_number = int((week_start_hour + week_relative_time) / 24) + 1
-
-                # Apply atrophy before session
-                for muscle in self.muscles.values():
-                    if muscle.last_trained_time is not None:
-                        hours_since = week_relative_time - muscle.last_trained_time
-                        muscle.apply_atrophy(hours_since, self.stimulus_duration,
-                                            self.maintenance_volume, self.dataset)
+        fatigue_state = GlobalFatigueState()
+        for absolute_time, session in timeline_sessions:
+                absolute_day_number = int(absolute_time / 24) + 1
 
                 # Calculate consecutive day penalty BEFORE executing the session
                 # First, determine if this is a consecutive day and get base penalty
@@ -1051,19 +1045,20 @@ class Split:
 
                 # Execute session
                 original_time = session.time
-                session.time = week_relative_time
+                session.time = absolute_time
 
                 fatigue_state.reset()
                 stats = session.execute(
-                    self.muscles, self.stimulus_duration, self.dataset, fatigue_state,
+                    self.muscles, self.stimulus_duration, self.maintenance_volume,
+                    self.dataset, fatigue_state,
                     consecutive_day_penalty=consecutive_penalty,
                     collect_breakdowns=collect_breakdowns,
                 )
 
                 if stats:
                     if collect_breakdowns:
-                        stats['time'] = week_start_hour + week_relative_time
-                        stats['week'] = week + 1
+                        stats['time'] = absolute_time
+                        stats['week'] = int(absolute_time // 168) + 1
                         stats['consecutive_days'] = consecutive_tracker.consecutive_days
                         self.session_stats.append(stats)
 
@@ -1074,31 +1069,21 @@ class Split:
 
                 session.time = original_time
 
-            # End of week atrophy
-            for muscle_name, muscle in self.muscles.items():
-                if muscle.last_trained_time is not None:
-                    hours_until_end = 168 - muscle.last_trained_time
-                    muscle.apply_atrophy(hours_until_end, self.stimulus_duration,
-                                        self.maintenance_volume, self.dataset)
-
-                weekly_results[muscle_name].append({
-                    'week': week + 1,
-                    'stimulus': muscle.stimulus,
-                    'atrophy': muscle.atrophy,
-                    'net': muscle.net_weekly_stimulus(),
-                    'primary_sets': muscle.primary_sets,
-                    'sessions': len(muscle.session_times)
-                })
-
-        # Average weekly values
-        for muscle_name, muscle in self.muscles.items():
-            weekly_data = weekly_results[muscle_name]
-            if weekly_data:
-                muscle.stimulus = sum(w['stimulus'] for w in weekly_data) / len(weekly_data)
-                muscle.atrophy = sum(w['atrophy'] for w in weekly_data) / len(weekly_data)
-                muscle.primary_sets = int(sum(w['primary_sets'] for w in weekly_data) / len(weekly_data))
-                # Store average weekly frequency properly
-                muscle.weekly_frequency = sum(w['sessions'] for w in weekly_data) / len(weekly_data)
+        horizon_hours = total_days * 24
+        self.simulation_horizon_hours = float(horizon_hours)
+        for muscle in self.muscles.values():
+            muscle.account_atrophy_through(
+                horizon_hours, self.stimulus_duration,
+                self.maintenance_volume, self.dataset
+            )
+            muscle.stimulus /= weeks_to_sim
+            muscle.atrophy /= weeks_to_sim
+            muscle.primary_sets = int(muscle.primary_sets / weeks_to_sim)
+            muscle.prime_sets = int(muscle.prime_sets / weeks_to_sim)
+            muscle.secondary_sets = int(muscle.secondary_sets / weeks_to_sim)
+            muscle.tertiary_sets = int(muscle.tertiary_sets / weeks_to_sim)
+            muscle.quaternary_sets = int(muscle.quaternary_sets / weeks_to_sim)
+            muscle.weekly_frequency = len(muscle.session_times) / weeks_to_sim
 
     def get_report(self) -> str:
         """Generate detailed analysis report."""

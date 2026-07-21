@@ -12,9 +12,7 @@ from datetime import date, datetime, time, timedelta
 import logging
 import os
 import random
-import threading
 import time as _time
-import json
 import sys
 from pathlib import Path
 
@@ -35,10 +33,13 @@ from schemas.models import (
 )
 from core.MainClasses import Split, MuscleRegion
 from core.movementMatching import move_match
-from core.exerciseMatching import preload_user_exercise_maps
+from core.exerciseMatching import preload_user_exercise_maps, move_match_with_overrides
+from core.analysis_cache import (
+    get_cached_analysis, invalidate_analysis_cache, set_cached_analysis,
+)
 from core.rust_analysis import compare_analysis_responses, run_rust_split_analysis
 from core.muscle_regions import get_all_muscle_regions, get_parent_groups
-from api.dependencies import get_current_user, AuthUser
+from api.dependencies import get_current_user, get_current_user_optional, AuthUser
 from db.supabase import get_supabase_client_with_token
 from core.granular_patterns import (
     GRANULAR_PATTERNS, get_pattern_muscle_targets,
@@ -49,47 +50,22 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-# ============================================================================
-# ANALYSIS CACHE
-# ============================================================================
-# The analyze-workouts result for a given (user, params) tuple is
-# deterministic until that user logs, updates, or deletes a workout.
-# We cache the serialised AnalysisResponse keyed by (user_id, params)
-# with a 10-minute TTL.  Entries are also explicitly purged per-user
-# when workout mutations occur (see `invalidate_analysis_cache`).
-
-_ANALYSIS_CACHE_TTL_S = 10 * 60  # 10 minutes
-_analysis_cache: dict[str, tuple[AnalysisResponse, float]] = {}
-_analysis_cache_lock = threading.Lock()
-
-
-def _analysis_cache_key(
-    user_id: str,
+def _analysis_cache_parameters(
     days: int,
     end_date: Optional[date],
     timezone_offset_minutes: int,
     stimulus_duration: int,
     maintenance_volume: int,
     dataset: str,
-) -> str:
-    return f"{user_id}:{days}:{end_date}:{timezone_offset_minutes}:{stimulus_duration}:{maintenance_volume}:{dataset}"
-
-
-def _split_analysis_cache_key(user_id: str, request: SplitRequest) -> str:
-    payload = json.dumps(request.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
-    return f"{user_id}:split:{payload}"
-
-
-def invalidate_analysis_cache(user_id: str) -> None:
-    """Purge all cached analysis entries for a given user.
-
-    Call this from workout mutation endpoints (log, update, delete) so
-    the next analyze-workouts request reflects the new state.
-    """
-    with _analysis_cache_lock:
-        keys_to_remove = [k for k in _analysis_cache if k.startswith(f"{user_id}:")]
-        for k in keys_to_remove:
-            _analysis_cache.pop(k, None)
+) -> dict:
+    return {
+        "days": days,
+        "end_date": end_date.isoformat() if end_date else None,
+        "timezone_offset_minutes": timezone_offset_minutes,
+        "stimulus_duration": stimulus_duration,
+        "maintenance_volume": maintenance_volume,
+        "dataset": dataset,
+    }
 
 
 # ============================================================================
@@ -265,42 +241,26 @@ def _run_split_analysis(
     user_id: Optional[str] = None,
     supabase=None,
 ) -> AnalysisResponse:
-    if user_id:
-        cache_key = _split_analysis_cache_key(user_id, request)
-        now_mono = _time.monotonic()
-        with _analysis_cache_lock:
-            cached = _analysis_cache.get(cache_key)
-            if cached is not None:
-                response, cached_at = cached
-                if now_mono - cached_at < _ANALYSIS_CACHE_TTL_S:
-                    return response
-
     # Convert request sessions to Split format
-    # Now includes unilateral and resistance_profile as tuple: (sets, unilateral, resistance_profile)
+    # Keep an ordered list so repeated exercise names contribute independently.
     days = []
     for session in request.sessions:
-        exercises_dict = {
-            ex.name: (ex.sets, ex.unilateral, ex.resistance_profile)
+        exercises = [
+            (ex.name, (ex.sets, ex.unilateral, ex.resistance_profile))
             for ex in session.exercises
-        }
-        days.append((session.name, session.day, exercises_dict))
+        ]
+        days.append((session.name, session.day, exercises))
 
     user_exercise_maps = None
     if user_id:
         user_exercise_maps = preload_user_exercise_maps(user_id, supabase=supabase)
 
-    response = _run_analysis_engine(
+    return _run_analysis_engine(
         request,
         days,
         user_id,
         user_exercise_maps,
     )
-
-    if user_id:
-        with _analysis_cache_lock:
-            _analysis_cache[cache_key] = (response, _time.monotonic())
-
-    return response
 
 
 @router.post("/analyze-workouts", response_model=AnalysisResponse)
@@ -321,17 +281,13 @@ def analyze_workouts(
     """
     try:
         # Check cache first
-        cache_key = _analysis_cache_key(
-            current_user.id, days, end_date, timezone_offset_minutes,
+        cache_parameters = _analysis_cache_parameters(
+            days, end_date, timezone_offset_minutes,
             stimulus_duration, maintenance_volume, dataset,
         )
-        now_mono = _time.monotonic()
-        with _analysis_cache_lock:
-            cached = _analysis_cache.get(cache_key)
-            if cached is not None:
-                response, cached_at = cached
-                if now_mono - cached_at < _ANALYSIS_CACHE_TTL_S:
-                    return response
+        cached = get_cached_analysis(current_user.id, cache_parameters)
+        if cached is not None:
+            return AnalysisResponse.model_validate_json(cached)
 
         supabase = get_supabase_client_with_token(current_user.access_token)
         effective_end_date = end_date or datetime.utcnow().date()
@@ -355,8 +311,7 @@ def analyze_workouts(
 
         if not workouts_result.data:
             result = _empty_workout_analysis(days, stimulus_duration, maintenance_volume, dataset)
-            with _analysis_cache_lock:
-                _analysis_cache[cache_key] = (result, _time.monotonic())
+            set_cached_analysis(current_user.id, cache_parameters, result.model_dump_json())
             return result
 
         # Get only columns needed for analysis (exercise name + sets)
@@ -385,9 +340,7 @@ def analyze_workouts(
             user_exercise_maps=user_exercise_maps,
         )
 
-        # Store in cache
-        with _analysis_cache_lock:
-            _analysis_cache[cache_key] = (result, _time.monotonic())
+        set_cached_analysis(current_user.id, cache_parameters, result.model_dump_json())
 
         return result
 
@@ -526,16 +479,9 @@ def _build_response(split: Split, request: SplitRequest) -> AnalysisResponse:
     # (e.g. triceps on heavy rows) would read "fully ready" while the body map
     # shows real load.
     #
-    # `last_stimulus_time` is a within-week offset (apply_stimulus runs with
-    # the session's `week_relative_time`), and the engine references 168h as
-    # end-of-week (MainClasses.py:1065). For cycle_length == 7 — the dashboard's
-    # only caller via analyze-workouts/days=7 — this is exact: the final
-    # simulated week's end aligns with the user's window_end ("now"). For
-    # cycle_length != 7 the simulation tiles cycles across `lcm(cycle, 7) / 7`
-    # weeks and the final-week-end maps to a steady-state cycle phase rather
-    # than wall-clock now; readiness is approximate but monotonic in the
-    # right direction. Untrained muscles → None (frontend treats as ready).
-    week_end_hour = 168.0
+    # Sessions and muscle state use one absolute LCM timeline, so readiness is
+    # measured from the actual simulation horizon rather than a weekly offset.
+    horizon_hour = split.simulation_horizon_hours
     stim_duration = max(1, int(request.stimulus_duration))
 
     for muscle_name, muscle in split.muscles.items():
@@ -547,7 +493,7 @@ def _build_response(split: Split, request: SplitRequest) -> AnalysisResponse:
         if last_stim is None:
             readiness = None
         else:
-            hours_since = max(0.0, week_end_hour - last_stim)
+            hours_since = max(0.0, horizon_hour - last_stim)
             readiness = max(0.0, min(1.0, hours_since / float(stim_duration)))
 
         data = {
@@ -836,7 +782,10 @@ async def get_muscle_regions():
 # ============================================================================
 
 @router.post("/parse-exercise", response_model=ExerciseParseResponse)
-async def parse_exercise(request: ExerciseParseRequest):
+async def parse_exercise(
+    request: ExerciseParseRequest,
+    current_user: Optional[AuthUser] = Depends(get_current_user_optional),
+):
     """
     Parse and classify a single exercise text.
 
@@ -844,7 +793,16 @@ async def parse_exercise(request: ExerciseParseRequest):
     bilateral status, axial load, and resistance profile.
     """
     try:
-        movement = move_match(request.text)
+        if current_user is None:
+            movement = move_match(request.text)
+        else:
+            supabase = get_supabase_client_with_token(current_user.access_token)
+            user_maps = preload_user_exercise_maps(
+                current_user.id, supabase=supabase, strict=True
+            )
+            movement = move_match_with_overrides(
+                request.text, current_user.id, user_maps=user_maps
+            )
 
         if not movement:
             return ExerciseParseResponse(

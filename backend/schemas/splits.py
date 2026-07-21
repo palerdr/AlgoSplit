@@ -5,6 +5,11 @@ Pydantic schemas for split management (database operations)
 from typing import List, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field, model_validator
+from schemas.constraints import (
+    MAX_CYCLE_DAYS, MAX_MAINTENANCE_VOLUME, MAX_STIMULUS_DURATION,
+    MIN_CYCLE_DAYS, MIN_MAINTENANCE_VOLUME, MIN_STIMULUS_DURATION,
+    validate_session_days,
+)
 
 
 # ============================================================================
@@ -67,7 +72,7 @@ class SessionCreate(BaseModel):
     """Session to be added to a split"""
 
     name: str = Field(..., min_length=1, description="Session name (e.g., 'Push Day')")
-    day_number: int = Field(..., ge=1, le=14, description="Day number in the split cycle (1-14)")
+    day_number: int = Field(..., ge=MIN_CYCLE_DAYS, le=MAX_CYCLE_DAYS, description="Day number in the split cycle (1-14)")
     exercises: List[ExerciseCreate] = Field(
         default_factory=list,
         description="Exercises in this session; empty sessions are non-executable rest days",
@@ -126,13 +131,13 @@ class SplitCreate(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=200, description="Split name")
     cycle_length: Optional[int] = Field(
-        default=None, ge=1, le=14, description="Cycle length in days (max 14, matching the analysis engine; auto-calculated from sessions if not provided)"
+        default=None, ge=MIN_CYCLE_DAYS, le=MAX_CYCLE_DAYS, description="Cycle length in days (max 14, matching the analysis engine; auto-calculated from sessions if not provided)"
     )
     stimulus_duration: int = Field(
-        default=48, gt=0, description="Hours of elevated protein synthesis"
+        default=48, ge=MIN_STIMULUS_DURATION, le=MAX_STIMULUS_DURATION, description="Hours of elevated protein synthesis"
     )
     maintenance_volume: int = Field(
-        default=4, ge=0, description="Sets needed to maintain muscle"
+        default=4, ge=MIN_MAINTENANCE_VOLUME, le=MAX_MAINTENANCE_VOLUME, description="Sets needed to maintain muscle"
     )
     dataset: str = Field(
         default="pelland",
@@ -142,6 +147,11 @@ class SplitCreate(BaseModel):
     sessions: List[SessionCreate] = Field(
         ..., min_items=1, description="Sessions in this split"
     )
+
+    @model_validator(mode="after")
+    def validate_cycle_session_days(self):
+        validate_session_days(self.sessions, self.cycle_length, 'day_number')
+        return self
 
     model_config = {
         "json_schema_extra": {
@@ -176,13 +186,13 @@ class SplitUpdate(BaseModel):
     """Request to update an existing split"""
 
     name: Optional[str] = Field(None, min_length=1, max_length=200)
-    cycle_length: Optional[int] = Field(None, ge=1, le=14)
+    cycle_length: Optional[int] = Field(None, ge=MIN_CYCLE_DAYS, le=MAX_CYCLE_DAYS)
     # Bounds match SplitRequest (the analysis endpoint). Previously these only
     # had lower guards (stimulus gt=0, maintenance ge=0), so a value the analysis
     # would later reject (e.g. stimulus 999) could be persisted here and then
     # 422 every analysis call — taking the whole Analysis tab down.
-    stimulus_duration: Optional[int] = Field(None, ge=24, le=96)
-    maintenance_volume: Optional[int] = Field(None, ge=1, le=9)
+    stimulus_duration: Optional[int] = Field(None, ge=MIN_STIMULUS_DURATION, le=MAX_STIMULUS_DURATION)
+    maintenance_volume: Optional[int] = Field(None, ge=MIN_MAINTENANCE_VOLUME, le=MAX_MAINTENANCE_VOLUME)
     dataset: Optional[str] = Field(None, pattern="^(schoenfeld|pelland|average)$")
 
     model_config = {

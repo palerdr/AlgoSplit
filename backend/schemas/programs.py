@@ -5,6 +5,10 @@ Pydantic schemas for program management
 from typing import Annotated, List, Optional
 from datetime import datetime, date
 from pydantic import BaseModel, Field
+from schemas.constraints import (
+    MAX_MAINTENANCE_VOLUME, MAX_STIMULUS_DURATION,
+    MIN_MAINTENANCE_VOLUME, MIN_STIMULUS_DURATION,
+)
 
 
 # ============================================================================
@@ -73,8 +77,8 @@ class ProgramCreate(BaseModel):
     start_date: Optional[date] = Field(default=None, description="Program start date")
     end_date: Optional[date] = Field(default=None, description="Program end date")
     goal: Optional[str] = Field(default=None, max_length=500, description="Training goal")
-    stimulus_duration: int = Field(default=48, gt=0, description="Hours of elevated MPS")
-    maintenance_volume: int = Field(default=4, ge=0, description="Maintenance sets")
+    stimulus_duration: int = Field(default=48, ge=MIN_STIMULUS_DURATION, le=MAX_STIMULUS_DURATION, description="Hours of elevated MPS")
+    maintenance_volume: int = Field(default=4, ge=MIN_MAINTENANCE_VOLUME, le=MAX_MAINTENANCE_VOLUME, description="Maintenance sets")
     dataset: str = Field(default="schoenfeld", pattern="^(schoenfeld|pelland|average)$")
 
 class ProgramUpdate(BaseModel):
@@ -84,8 +88,8 @@ class ProgramUpdate(BaseModel):
     end_date: Optional[date] = None
     goal: Optional[str] = Field(None, max_length=500)
     status: Optional[str] = Field(None, pattern="^(draft|active|completed|archived)$")
-    stimulus_duration: Optional[int] = Field(None, gt=0)
-    maintenance_volume: Optional[int] = Field(None, ge=0)
+    stimulus_duration: Optional[int] = Field(None, ge=MIN_STIMULUS_DURATION, le=MAX_STIMULUS_DURATION)
+    maintenance_volume: Optional[int] = Field(None, ge=MIN_MAINTENANCE_VOLUME, le=MAX_MAINTENANCE_VOLUME)
     dataset: Optional[str] = Field(None, pattern="^(schoenfeld|pelland|average)$")
 
 class ProgramResponse(BaseModel):

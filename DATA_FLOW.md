@@ -302,8 +302,8 @@ MuscleStats(
 ```
 FINAL_STIMULUS = base_weight
     × recovery_penalty      [0.0 - 1.0]  if < stimulus_duration
-    × bilateral_modifier    [0.95 or 1.05]
-    × leverage_multiplier   [0.75 - 1.0]
+    × bilateral_modifier    [1.0 baseline or 1.05 unilateral]
+    × leverage_redistribution [tier weight is redistributed, not multiplied away]
     × local_multiplier      [tier-specific diminishing returns]
     × global_cns_fatigue    [0.85 - 1.0]
 ```

@@ -10,12 +10,14 @@ screen or shared app state consumes it. Nothing is omitted from the client.
 
 | Metric | Count |
 | --- | --- |
-| Total backend endpoints (method + path) | **95** |
-| Total endpoint client functions in `backend.ts` | **95** (1:1 with endpoints; lifecycle helpers excluded) |
-| Endpoints without a client function | **0** |
+| OpenAPI paths | **70** |
+| OpenAPI operations | **102** including the explicit keepalive `HEAD` operation |
+| Endpoint client functions in the historical `backend.ts` inventory | **95** |
 | Routers covered | 16 of 16 (misc/root, auth, splits, imports, workouts, overrides, custom exercises, comparisons, programs, session templates, program sessions, program diagnostics, periodization, meso templates, bodyweight, analysis) |
 
 Notes:
+- The generated OpenAPI document is authoritative; raw route/client counts are
+  not evidence of 1:1 coverage because one path can expose several methods.
 - `bodyweight.list()` and `customExercises.list()` unwrap the backend's `{ entries|exercises, total }` envelope to a plain array per the app API contract; the endpoints are still called 1:1.
 - `overrides.update()` sends `pattern_override` as a **query** parameter — that is how the backend declares it (bare `str` param, overrides.py:198).
 - Browser mutations bootstrap and attach the persistent `X-CSRF-Token` header, while HttpOnly credentials rotate on 401. Native sessions use one versioned, device-bound SecureStore envelope and rotate before expiry or once on 401.

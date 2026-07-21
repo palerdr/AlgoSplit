@@ -138,8 +138,7 @@ def test_long_with_reps_and_weight_columns_ignored():
 
 
 def test_long_sparse_high_days_not_silently_merged():
-    # Day values 13/14 must form their own sessions (later re-sequenced with
-    # a warning), not silently merge into the previous kept session.
+    # Day values 13/14 are valid and must form their own sessions.
     grid = [
         ["Day", "Exercise", "Sets"],
         ["1", "Squat", "5"],
@@ -151,7 +150,7 @@ def test_long_sparse_high_days_not_silently_merged():
     assert parse is not None
     assert [len(s.exercises) for s in parse.sessions] == [1, 1, 1, 1]
     assert [e.name for e in parse.sessions[1].exercises] == ["Bench Press"]
-    assert any("1-7" in w for w in parse.warnings)
+    assert [s.day_number for s in parse.sessions] == [1, 2, 13, 14]
 
 
 def test_long_unreadable_day_cell_warns():
@@ -299,17 +298,18 @@ def test_non_split_content_returns_low_confidence_no_sessions():
     assert preview.warnings
 
 
-def test_more_than_seven_sessions_clamped_with_warning():
+def test_more_than_fourteen_sessions_clamped_with_warning():
     grid = [["Exercise", "Day", "Sets"]] + [
         [name, str(day), "3"]
         for day, name in enumerate(
             ["Bench Press", "Squat", "Deadlift", "Overhead Press",
              "Barbell Row", "Leg Press", "Lat Pulldown", "Incline Press",
-             "Hip Thrust"], start=1)
+             "Hip Thrust", "Leg Curl", "Leg Extension", "Calf Raise",
+             "Cable Row", "Pull Up", "Lunge", "Face Pull"], start=1)
     ]
     preview = infer_split([{"name": "S1", "grid": grid}])
-    assert len(preview.sessions) <= 7
-    assert any("7" in w for w in preview.warnings)
+    assert len(preview.sessions) <= 14
+    assert preview.warnings
 
 
 def test_empty_input():

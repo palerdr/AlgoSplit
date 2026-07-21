@@ -4,8 +4,6 @@ Wrapper around movementMatching that supports database-backed user overrides
 """
 
 from typing import Optional, Dict, Any, Tuple, cast
-from threading import Lock
-from time import monotonic
 from core.movementMatching import (
     move_match as default_move_match,
     move_match_detailed as default_move_match_detailed,
@@ -17,11 +15,6 @@ from core.granular_patterns import GRANULAR_PATTERNS
 from db.supabase import get_supabase_client
 
 UserExerciseMaps = Dict[str, Dict[str, Any]]
-
-_USER_MAP_CACHE_TTL_SECONDS = 10 * 60
-_user_map_cache: Dict[str, Tuple[UserExerciseMaps, float]] = {}
-_user_map_cache_lock = Lock()
-
 
 def _as_dict(value: Any) -> Optional[Dict[str, Any]]:
     if isinstance(value, dict):
@@ -86,9 +79,7 @@ def _build_movement_from_custom(custom: Dict[str, Any], exercise_name: str) -> M
 
 
 def invalidate_user_exercise_maps(user_id: str) -> None:
-    """Drop cached custom exercises and overrides after a user mutation."""
-    with _user_map_cache_lock:
-        _user_map_cache.pop(user_id, None)
+    """Compatibility hook; maps are intentionally loaded fresh per request."""
 
 
 def preload_user_exercise_maps(
@@ -106,12 +97,6 @@ def preload_user_exercise_maps(
             "overrides": {normalized_exercise_name: pattern_override}
         }
     """
-    now = monotonic()
-    with _user_map_cache_lock:
-        cached = _user_map_cache.get(user_id)
-        if cached is not None and now - cached[1] < _USER_MAP_CACHE_TTL_SECONDS:
-            return cached[0]
-
     custom_map: Dict[str, Dict[str, Any]] = {}
     override_map: Dict[str, str] = {}
 
@@ -157,8 +142,6 @@ def preload_user_exercise_maps(
         "custom": custom_map,
         "overrides": {k: v for k, v in override_map.items()},
     }
-    with _user_map_cache_lock:
-        _user_map_cache[user_id] = (maps, monotonic())
     return maps
 
 

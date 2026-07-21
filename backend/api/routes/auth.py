@@ -5,6 +5,9 @@ Handles user signup, login, and user info retrieval
 
 import logging
 import os
+import asyncio
+import hashlib
+import inspect
 from time import perf_counter, time
 from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException, Depends, status, Request, Response
@@ -77,7 +80,12 @@ def _provider_user_for_access_token(access_token: str):
     return user
 
 
-def _validated_social_session(
+async def _decode_claims(token: str) -> dict:
+    result = _decode_token(token)
+    return await result if inspect.isawaitable(result) else result
+
+
+async def _validated_social_session(
     access_token: str,
     refresh_token: str,
 ) -> tuple[object, str, str, int]:
@@ -88,7 +96,7 @@ def _validated_social_session(
     to Auth. The two results must identify the same account.
     """
     try:
-        payload = _decode_token(access_token)
+        payload = await _decode_claims(access_token)
         user_id = payload.get("sub")
         expires_at = int(payload.get("exp") or 0)
         if (
@@ -355,6 +363,29 @@ def _provider_error_text(error: Exception) -> str:
     """Normalize provider errors for classification only; never return this text to clients."""
     parts = [str(error), str(getattr(error, "code", "")), str(getattr(error, "message", ""))]
     return " ".join(parts).lower()
+
+
+def _is_determinate_auth_failure(error: Exception) -> bool:
+    """Return true only when Auth definitively rejected the requested change."""
+    response = getattr(error, "response", None)
+    candidates = (
+        getattr(error, "status_code", None),
+        getattr(error, "status", None),
+        getattr(response, "status_code", None),
+        getattr(error, "code", None),
+    )
+    for candidate in candidates:
+        try:
+            code = int(candidate)
+        except (TypeError, ValueError):
+            continue
+        if 400 <= code < 500:
+            return True
+    error_text = _provider_error_text(error)
+    return any(
+        marker in error_text
+        for marker in ("weak password", "password should", "invalid password")
+    )
 
 
 def _is_rate_limited(error_text: str) -> bool:
@@ -653,14 +684,14 @@ def login(request: LoginRequest, http_request: Request, http_response: Response)
         "AlgoSplit cookie or native-token session."
     ),
 )
-def complete_oauth_session(
+async def complete_oauth_session(
     request: OAuthSessionCompleteRequest,
     http_request: Request,
     http_response: Response,
 ):
     """Move a Supabase OAuth session into the existing API session boundary."""
     started = perf_counter()
-    user, access_token, refresh_token, expires_in = _validated_social_session(
+    user, access_token, refresh_token, expires_in = await _validated_social_session(
         request.access_token,
         request.refresh_token,
     )
@@ -952,7 +983,7 @@ def forgot_password(request: ForgotPasswordRequest):
     summary="Reset password with token",
     description="Set a new password using the access token from the reset email link",
 )
-def reset_password(request: ResetPasswordRequest):
+async def reset_password(request: ResetPasswordRequest):
     """
     Reset a user's password using the access token from the Supabase reset link.
 
@@ -965,9 +996,15 @@ def reset_password(request: ResetPasswordRequest):
         # as every authenticated route. A normal access token must never be
         # accepted as a password-reset credential.
         try:
-            payload = _decode_token(request.access_token)
+            payload = await _decode_claims(request.access_token)
             user_id = payload.get("sub")
-            if not user_id or payload.get("type") != "recovery":
+            methods = {
+                item.get("method") for item in payload.get("amr", [])
+                if isinstance(item, dict)
+            }
+            if not user_id or not (
+                payload.get("type") == "recovery" or "recovery" in methods
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid reset token",
@@ -980,10 +1017,48 @@ def reset_password(request: ResetPasswordRequest):
                 detail="Invalid or expired reset token",
             )
 
-        admin.auth.admin.update_user_by_id(
-            user_id,
-            {"password": request.new_password},
+        live_user = await asyncio.to_thread(
+            _provider_user_for_access_token, request.access_token
         )
+        if str(getattr(live_user, "id", "")) != str(user_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid reset token",
+            )
+
+        token_hash = hashlib.sha256(request.access_token.encode("utf-8")).hexdigest()
+        try:
+            admin.table("auth_recovery_token_uses").insert({
+                "token_hash": token_hash,
+                "user_id": user_id,
+                "expires_at": payload.get("exp"),
+            }).execute()
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Reset token has already been used",
+            )
+
+        try:
+            await asyncio.to_thread(
+                admin.auth.admin.update_user_by_id,
+                user_id,
+                {"password": request.new_password},
+            )
+        except Exception as error:
+            # Release only when Auth definitively rejected the change. Network,
+            # timeout, and 5xx outcomes may have committed remotely, so retain
+            # the reservation and fail closed against replay.
+            if _is_determinate_auth_failure(error):
+                try:
+                    admin.table("auth_recovery_token_uses").delete().eq(
+                        "token_hash", token_hash
+                    ).execute()
+                except Exception:
+                    logger.exception("Failed to release recovery token reservation")
+            else:
+                logger.warning("Retaining recovery token reservation after indeterminate Auth failure")
+            raise
 
         return {"message": "Password has been reset successfully."}
 

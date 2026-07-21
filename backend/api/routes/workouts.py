@@ -4,8 +4,10 @@ Handles logging completed workouts and viewing history
 """
 
 import logging
+import hashlib
+import json
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from db.supabase import get_supabase_client_with_token
 from schemas.workouts import (
@@ -25,7 +27,7 @@ from schemas.workouts import (
 )
 from schemas.auth import ErrorResponse
 from api.dependencies import get_current_user, AuthUser
-from api.analysis_routes import invalidate_analysis_cache
+from core.analysis_cache import invalidate_analysis_cache
 
 router = APIRouter(prefix="/api/workouts", tags=["Workouts"])
 logger = logging.getLogger(__name__)
@@ -85,11 +87,13 @@ def build_workout_response(workout_data: dict, exercises_data: list) -> WorkoutL
         user_id=workout_data["user_id"],
         session_id=workout_data.get("session_id"),
         split_id=workout_data.get("split_id"),
+        program_session_id=workout_data.get("program_session_id"),
         session_name=workout_data["session_name"],
         completed_at=workout_data["completed_at"],
         duration_minutes=workout_data.get("duration_minutes"),
         notes=workout_data.get("notes"),
         session_id_dropped=workout_data.get("session_id_dropped", False),
+        program_session_id_dropped=workout_data.get("program_session_id_dropped", False),
         exercises=exercises,
         created_at=workout_data["created_at"],
     )
@@ -126,6 +130,29 @@ def validate_workout_exercises(workout: WorkoutLogCreate) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Workout must include at least one set with reps greater than 0",
         )
+
+
+def canonical_workout_hash(workout: WorkoutLogCreate) -> str:
+    """Hash logical request content; omitted timestamps use a stable sentinel."""
+    payload = workout.model_dump(mode="json", exclude={"client_request_id"})
+    if workout.completed_at is None:
+        payload["completed_at"] = "__server_timestamp__"
+    else:
+        completed_at = workout.completed_at
+        if completed_at.tzinfo is None:
+            completed_at = completed_at.replace(tzinfo=timezone.utc)
+        payload["completed_at"] = completed_at.astimezone(timezone.utc).isoformat()
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _rpc_payload(result, name: str) -> dict:
+    data = result.data
+    if isinstance(data, list) and len(data) == 1 and isinstance(data[0], dict):
+        data = data[0]
+    if not isinstance(data, dict):
+        raise RuntimeError(f"{name} returned an invalid payload")
+    return data
 
 
 def workout_exercise_rows(workout: WorkoutLogCreate, workout_log_id: str) -> list[dict]:
@@ -293,114 +320,35 @@ def log_workout(
 
         validate_workout_exercises(workout)
 
-        idempotency_column_available = True
-        if workout.client_request_id:
-            try:
-                existing = find_idempotent_workout(
-                    supabase, current_user.id, workout.client_request_id, workout
-                )
-            except Exception as exc:
-                if not _missing_client_request_id_column(exc):
-                    raise
-                idempotency_column_available = False
-                logger.warning(
-                    "Workout idempotency migration 011 is missing; using compatibility lookup",
-                    extra={"user_id": current_user.id},
-                )
-                existing = find_legacy_idempotent_workout(
-                    supabase, current_user.id, workout
-                )
-            if existing:
-                return existing
-
-        # Use provided completed_at or default to now
-        completed_at = workout.completed_at or datetime.utcnow()
-
-        # Insert workout log
-        workout_data = {
-            "user_id": current_user.id,
-            "session_name": workout.session_name,
-            "completed_at": completed_at.isoformat(),
-        }
-        if workout.client_request_id and idempotency_column_available:
-            workout_data["client_request_id"] = workout.client_request_id
-
-        # Validate session_id FK before inserting — the session may have been
-        # deleted/recreated if the user replaced exercises mid-workout
-        session_id = workout.session_id
-        session_id_dropped = False
-        if session_id:
-            session_check = supabase.table("sessions").select("id").eq(
-                "id", session_id
-            ).execute()
-            if session_check.data:
-                workout_data["session_id"] = session_id
-            else:
-                session_id_dropped = True
-                logger.warning(
-                    "Dropping stale workout session_id",
-                    extra={"user_id": current_user.id, "session_id": session_id},
-                )
-
-        if workout.split_id:
-            workout_data["split_id"] = workout.split_id
-        if workout.duration_minutes:
-            workout_data["duration_minutes"] = workout.duration_minutes
-        if workout.notes:
-            workout_data["notes"] = workout.notes
-
         try:
-            workout_result = supabase.table("workout_logs").insert(workout_data).execute()
-        except Exception:
-            # A concurrent retry may have won the unique-key race.
-            if workout.client_request_id and idempotency_column_available:
-                existing = find_idempotent_workout(
-                    supabase, current_user.id, workout.client_request_id, workout
-                )
-                if existing:
-                    return existing
-            elif workout.client_request_id:
-                existing = find_legacy_idempotent_workout(
-                    supabase, current_user.id, workout
-                )
-                if existing:
-                    return existing
+            result = supabase.rpc(
+                "log_workout_full",
+                {
+                    "p_workout": workout.model_dump(mode="json"),
+                    "p_request_hash": canonical_workout_hash(workout),
+                },
+            ).execute()
+        except Exception as exc:
+            if "idempotency_conflict" in str(exc).lower():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="client_request_id was already used for a different workout",
+                ) from exc
             raise
 
-        if not workout_result.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create workout log",
-            )
-
-        workout_log_id = workout_result.data[0]["id"]
-
-        # Batch insert all exercises in a single DB round-trip.
-        exercise_rows = workout_exercise_rows(workout, workout_log_id)
-        exercises_result = supabase.table("workout_exercises").insert(
-            exercise_rows
-        ).execute()
-        exercises_data = exercises_result.data or []
-
-        # If linked to a program session, mark it completed
-        if workout.program_session_id:
-            try:
-                auth_supabase = get_supabase_client_with_token(current_user.access_token)
-                auth_supabase.table("program_sessions").update({
-                    "workout_log_id": workout_log_id,
-                    "status": "completed",
-                }).eq("id", workout.program_session_id).eq("status", "planned").execute()
-            except Exception:
-                pass  # Non-critical — workout is already saved
-
-        # Invalidate cached analysis for this user
         invalidate_analysis_cache(current_user.id)
-
-        # Build and return response
-        response_payload = {
-            **workout_result.data[0],
-            "session_id_dropped": session_id_dropped,
-        }
+        response_payload = _rpc_payload(result, "log_workout_full")
+        exercises_data = response_payload.pop("exercises", [])
+        if response_payload.get("session_id_dropped"):
+            logger.warning(
+                "Dropping stale workout session_id",
+                extra={"user_id": current_user.id, "session_id": workout.session_id},
+            )
+        if response_payload.get("program_session_id_dropped"):
+            logger.warning(
+                "Dropping stale workout program_session_id",
+                extra={"user_id": current_user.id, "program_session_id": workout.program_session_id},
+            )
         return build_workout_response(response_payload, exercises_data)
 
     except HTTPException:

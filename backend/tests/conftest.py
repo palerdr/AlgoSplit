@@ -98,6 +98,7 @@ class FakeSupabaseAuth:
         self.link_identity_calls: list[dict[str, Any]] = []
         self.unlink_identity_calls: list[Any] = []
         self.set_session_calls: list[tuple[str, str]] = []
+        self.password_updates: list[tuple[str, dict[str, str]]] = []
 
     def sign_up(self, payload: dict[str, str]) -> FakeAuthResponse:
         if self.raise_on_signup:
@@ -136,6 +137,10 @@ class FakeSupabaseAuth:
 
     def get_user(self, _access_token: str):
         return type("UserResponse", (), {"user": self.current_user})()
+
+    def update_user_by_id(self, user_id: str, payload: dict[str, str]):
+        self.password_updates.append((user_id, copy.deepcopy(payload)))
+        return type("AdminResponse", (), {"user": self.current_user})()
 
     def set_session(self, access_token: str, refresh_token: str):
         self.set_session_calls.append((access_token, refresh_token))
@@ -317,6 +322,11 @@ class FakeTableQuery:
         inserted = []
         for row in self._insert_rows:
             new_row = copy.deepcopy(row)
+            if self.table_name == "auth_recovery_token_uses" and any(
+                existing["token_hash"] == new_row["token_hash"]
+                for existing in self.client.tables[self.table_name]
+            ):
+                raise FakeRpcError("23505", "duplicate recovery token")
             new_row.setdefault("id", self.client.next_id(self.table_name))
             now = _utc_now_iso()
 
@@ -428,6 +438,107 @@ class FakeSupabaseClient:
         return payload
 
     def execute_rpc(self, function_name: str, params: dict[str, Any]):
+        if function_name == "create_split_full":
+            payload = params["p_split"]
+            now = _utc_now_iso()
+            split = {
+                "id": self.next_id("splits"), "user_id": "user-123",
+                "name": payload["name"], "cycle_length": payload.get("cycle_length"),
+                "stimulus_duration": payload["stimulus_duration"],
+                "maintenance_volume": payload["maintenance_volume"],
+                "dataset": payload["dataset"], "created_at": now, "updated_at": now,
+            }
+            self.tables["splits"].append(split)
+            for session in payload.get("sessions", []):
+                self.execute_rpc("save_split_session", {
+                    "p_split_id": split["id"], "p_session_id": None,
+                    "p_name": session["name"], "p_day_number": session["day_number"],
+                    "p_exercises": session.get("exercises", []),
+                })
+            response = copy.deepcopy(split)
+            response["sessions"] = sorted(
+                [self._session_payload(row) for row in self.tables["sessions"] if row["split_id"] == split["id"]],
+                key=lambda row: row["day_number"],
+            )
+            return response
+
+        if function_name == "save_session_template_full":
+            payload = params["p_template"]
+            template_id = params.get("p_template_id")
+            now = _utc_now_iso()
+            if template_id is None:
+                template = {
+                    "id": self.next_id("session_templates"), "user_id": "user-123",
+                    "name": payload["name"], "notes": payload.get("notes"),
+                    "source_session_id": None, "source_split_id": None,
+                    "created_at": now, "updated_at": now,
+                }
+                self.tables["session_templates"].append(template)
+            else:
+                template = next((row for row in self.tables["session_templates"] if row["id"] == template_id), None)
+                if template is None:
+                    raise FakeRpcError("P0002", "template_not_found")
+                template.update(name=payload["name"], notes=payload.get("notes"),
+                                source_session_id=None, source_split_id=None, updated_at=now)
+                self.tables["session_template_exercises"] = [
+                    row for row in self.tables["session_template_exercises"] if row["template_id"] != template_id
+                ]
+            for index, exercise in enumerate(payload.get("exercises", [])):
+                self.tables["session_template_exercises"].append({
+                    "id": self.next_id("session_template_exercises"),
+                    "template_id": template["id"], "exercise_name": exercise["exercise_name"],
+                    "sets": exercise["sets"], "order_index": exercise.get("order_index", index),
+                    "unilateral": exercise.get("unilateral", False),
+                    "resistance_profile": exercise.get("resistance_profile"), "created_at": now,
+                })
+            response = copy.deepcopy(template)
+            response["session_template_exercises"] = copy.deepcopy([
+                row for row in self.tables["session_template_exercises"] if row["template_id"] == template["id"]
+            ])
+            return response
+
+        if function_name == "log_workout_full":
+            payload = params["p_workout"]
+            request_hash = params["p_request_hash"]
+            key = payload.get("client_request_id")
+            existing = next((row for row in self.tables["workout_logs"] if key and row.get("client_request_id") == key), None)
+            if existing is not None and existing.get("request_hash") not in {None, request_hash}:
+                raise FakeRpcError("22000", "idempotency_conflict")
+            if existing is None:
+                now = _utc_now_iso()
+                requested_session = payload.get("session_id")
+                valid_session = requested_session if any(row["id"] == requested_session for row in self.tables["sessions"]) else None
+                requested_program = payload.get("program_session_id")
+                program = next((row for row in self.tables["program_sessions"] if row["id"] == requested_program and row.get("status") == "planned" and not row.get("workout_log_id")), None)
+                log = {
+                    "id": self.next_id("workout_logs"), "user_id": "user-123",
+                    "session_id": valid_session, "split_id": payload.get("split_id"),
+                    "program_session_id": program["id"] if program else None,
+                    "session_name": payload["session_name"],
+                    "completed_at": payload.get("completed_at") or now,
+                    "duration_minutes": payload.get("duration_minutes"), "notes": payload.get("notes"),
+                    "client_request_id": key, "request_hash": request_hash, "created_at": now,
+                }
+                self.tables["workout_logs"].append(log)
+                existing = log
+                if program:
+                    program.update(status="completed", workout_log_id=log["id"])
+            if not any(row["workout_log_id"] == existing["id"] for row in self.tables["workout_exercises"]):
+                for index, exercise in enumerate(payload.get("exercises", [])):
+                    self.tables["workout_exercises"].append({
+                        "id": self.next_id("workout_exercises"), "workout_log_id": existing["id"],
+                        "exercise_name": exercise["exercise_name"], "sets_completed": exercise["sets_completed"],
+                        "reps": exercise["reps"], "weight": exercise["weight"], "rir": exercise.get("rir"),
+                        "order_index": index, "notes": exercise.get("notes"), "created_at": _utc_now_iso(),
+                    })
+            response = copy.deepcopy(existing)
+            response["session_id_dropped"] = bool(payload.get("session_id") and not existing.get("session_id"))
+            response["program_session_id_dropped"] = bool(payload.get("program_session_id") and not existing.get("program_session_id"))
+            response["exercises"] = copy.deepcopy([
+                row for row in self.tables["workout_exercises"] if row["workout_log_id"] == existing["id"]
+            ])
+            return response
+
         if function_name == "save_split_session":
             split_id = params["p_split_id"]
             if not any(split["id"] == split_id for split in self.tables["splits"]):
@@ -562,7 +673,7 @@ def client(monkeypatch: pytest.MonkeyPatch, fake_supabase: FakeSupabaseClient, a
     monkeypatch.setattr(
         splits_routes,
         "move_match_with_overrides",
-        lambda _name, _user_id=None: type("Movement", (), {"name": "mock_pattern"})(),
+        lambda _name, _user_id=None, **_kwargs: type("Movement", (), {"name": "mock_pattern"})(),
     )
 
     app.dependency_overrides[get_current_user] = lambda: auth_user

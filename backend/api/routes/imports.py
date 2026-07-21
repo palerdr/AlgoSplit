@@ -13,6 +13,7 @@ from typing import Dict, Optional, Tuple
 from fastapi import APIRouter, Depends
 
 from api.dependencies import AuthUser, get_current_user
+from db.supabase import get_supabase_client_with_token
 from core.exerciseMatching import (
     move_match_with_overrides_detailed,
     preload_user_exercise_maps,
@@ -38,7 +39,10 @@ def preview_import(
 ) -> ImportPreviewResponse:
     # One batch query for the user's custom exercises/overrides so matching
     # doesn't hit the database per cell.
-    user_maps = preload_user_exercise_maps(current_user.id)
+    supabase = get_supabase_client_with_token(current_user.access_token)
+    user_maps = preload_user_exercise_maps(
+        current_user.id, supabase=supabase, strict=True
+    )
 
     # Per-request memo: the inference passes (column profiling + extraction)
     # revisit the same cell strings, and the module-level lru_cache evicts

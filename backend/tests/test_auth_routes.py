@@ -100,6 +100,79 @@ def test_reset_validation_does_not_echo_recovery_token(client):
     assert "private-recovery-token" not in response.text
 
 
+def test_password_recovery_token_is_single_use(client, fake_supabase, monkeypatch):
+    monkeypatch.setattr(auth_routes, "get_supabase_admin", lambda: fake_supabase)
+    monkeypatch.setattr(
+        auth_routes, "_decode_token",
+        lambda _token: {"sub": "user-123", "type": "recovery", "exp": 2_000_000_000},
+    )
+    payload = {
+        "access_token": "one-time-recovery-token-which-is-long-enough",
+        "new_password": "NewStrongPass123!",
+    }
+
+    first = client.post("/auth/reset-password", json=payload)
+    replay = client.post("/auth/reset-password", json=payload)
+
+    assert first.status_code == 200
+    assert replay.status_code == 400
+    assert len(fake_supabase.auth.password_updates) == 1
+    assert len(fake_supabase.tables["auth_recovery_token_uses"]) == 1
+
+
+def test_password_recovery_token_fails_closed_after_indeterminate_auth_error(
+    client, fake_supabase, monkeypatch
+):
+    monkeypatch.setattr(auth_routes, "get_supabase_admin", lambda: fake_supabase)
+    monkeypatch.setattr(
+        auth_routes, "_decode_token",
+        lambda _token: {"sub": "user-123", "type": "recovery", "exp": 2_000_000_000},
+    )
+    monkeypatch.setattr(
+        fake_supabase.auth, "update_user_by_id",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("Auth timed out")),
+    )
+    payload = {
+        "access_token": "indeterminate-recovery-token-long-enough",
+        "new_password": "NewStrongPass123!",
+    }
+
+    first = client.post("/auth/reset-password", json=payload)
+    replay = client.post("/auth/reset-password", json=payload)
+
+    assert first.status_code == 503
+    assert replay.status_code == 400
+    assert len(fake_supabase.tables["auth_recovery_token_uses"]) == 1
+
+
+def test_password_recovery_token_releases_after_determinate_auth_rejection(
+    client, fake_supabase, monkeypatch
+):
+    class RejectedPassword(Exception):
+        status_code = 422
+
+    monkeypatch.setattr(auth_routes, "get_supabase_admin", lambda: fake_supabase)
+    monkeypatch.setattr(
+        auth_routes, "_decode_token",
+        lambda _token: {"sub": "user-123", "type": "recovery", "exp": 2_000_000_000},
+    )
+    monkeypatch.setattr(
+        fake_supabase.auth, "update_user_by_id",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RejectedPassword("weak password")),
+    )
+
+    response = client.post(
+        "/auth/reset-password",
+        json={
+            "access_token": "rejected-recovery-token-long-enough",
+            "new_password": "NewStrongPass123!",
+        },
+    )
+
+    assert response.status_code == 503
+    assert fake_supabase.tables["auth_recovery_token_uses"] == []
+
+
 def test_signup_provider_errors_do_not_leak_details(client, fake_supabase):
     fake_supabase.auth.raise_on_signup = Exception(
         "upstream failure using service_role=do-not-return-this"

@@ -44,8 +44,6 @@ const CONSECUTIVE_DAY_FLOOR: f64 = 0.25;
 
 #[derive(Debug, Error)]
 pub enum AnalysisError {
-    #[error("missing region data")]
-    MissingRegionData,
     #[error("invalid maintenance_volume {0}; expected 1..=9")]
     InvalidMaintenanceVolume(i32),
 }
@@ -79,6 +77,7 @@ struct MuscleRegion {
     stimulus: f64,
     atrophy: f64,
     last_trained_time: Option<f64>,
+    atrophy_accounted_through: Option<f64>,
     last_stimulus_time: Option<f64>,
     last_session_time: Option<f64>,
     session_times: BTreeSet<i32>,
@@ -106,6 +105,7 @@ impl From<&RegionInput> for MuscleRegion {
             stimulus: 0.0,
             atrophy: 0.0,
             last_trained_time: None,
+            atrophy_accounted_through: None,
             last_stimulus_time: None,
             last_session_time: None,
             session_times: BTreeSet::new(),
@@ -123,23 +123,6 @@ impl MuscleRegion {
     fn reset_session(&mut self) {
         self.residuals = 0;
         self.sets_this_session = 0;
-    }
-
-    fn reset_week(&mut self) {
-        self.residuals = 0;
-        self.sets_this_session = 0;
-        self.primary_sets = 0;
-        self.prime_sets = 0;
-        self.secondary_sets = 0;
-        self.tertiary_sets = 0;
-        self.quaternary_sets = 0;
-        self.stimulus = 0.0;
-        self.atrophy = 0.0;
-        self.last_trained_time = None;
-        self.last_stimulus_time = None;
-        self.last_session_time = None;
-        self.session_times.clear();
-        self.last_breakdown = None;
     }
 
     fn net_weekly_stimulus(&self) -> f64 {
@@ -234,9 +217,9 @@ impl MuscleRegion {
         final_stimulus
     }
 
-    fn apply_atrophy(
+    fn account_atrophy_through(
         &mut self,
-        hours_since_training: Option<f64>,
+        current_time: f64,
         stimulus_duration: i32,
         maintenance_volume: i32,
         dataset: &str,
@@ -244,16 +227,23 @@ impl MuscleRegion {
         if !(1..=9).contains(&maintenance_volume) {
             return Err(AnalysisError::InvalidMaintenanceVolume(maintenance_volume));
         }
-        if let Some(hours_since) = hours_since_training {
-            if hours_since > stimulus_duration as f64 {
-                let hours_in_atrophy = hours_since - stimulus_duration as f64;
+        if let Some(last) = self.last_trained_time {
+            let cursor = self.atrophy_accounted_through.unwrap_or(last);
+            let charge_from = cursor.max(last + stimulus_duration as f64);
+            if current_time > charge_from {
                 let atrophy_period = 168.0 - stimulus_duration as f64;
                 let atrophy_rate =
                     cumulative(dataset)[maintenance_volume as usize - 1] / atrophy_period;
-                self.atrophy += atrophy_rate * hours_in_atrophy;
+                self.atrophy += atrophy_rate * (current_time - charge_from);
             }
+            self.atrophy_accounted_through = Some(cursor.max(current_time));
         }
         Ok(())
+    }
+
+    fn reset_atrophy_clock(&mut self, current_time: f64) {
+        self.last_trained_time = Some(current_time);
+        self.atrophy_accounted_through = Some(current_time);
     }
 }
 
@@ -305,8 +295,6 @@ struct SessionStats {
     exercise_breakdowns: Vec<ExerciseBreakdownOutput>,
 }
 
-type WeeklyResult = (f64, f64, f64, i32, usize);
-
 pub fn analyze(input: AnalysisInput) -> Result<AnalysisOutput, AnalysisError> {
     if input.regions.is_empty() {
         return Ok(empty_output(input));
@@ -332,6 +320,7 @@ struct Split {
     // wire response remains byte-for-byte deterministic across engines.
     region_order: Vec<String>,
     session_stats: Vec<SessionStats>,
+    simulation_horizon_hours: f64,
 }
 
 impl Split {
@@ -370,6 +359,7 @@ impl Split {
             muscles,
             region_order,
             session_stats: Vec::new(),
+            simulation_horizon_hours: 0.0,
         })
     }
 
@@ -381,132 +371,88 @@ impl Split {
         let weeks_to_sim = lcm(self.cycle_length, 7) / 7;
         let total_days = weeks_to_sim * 7;
         let num_cycles = total_days / self.cycle_length;
-        let muscle_ids = self.muscles.keys().cloned().collect::<Vec<_>>();
-        let mut weekly_results: BTreeMap<String, Vec<WeeklyResult>> = muscle_ids
-            .iter()
-            .map(|id| (id.clone(), Vec::new()))
-            .collect();
         let mut consecutive_tracker = ConsecutiveDayTracker::default();
-
-        for week in 0..weeks_to_sim {
-            let week_start_hour = (week * 168) as f64;
-            for muscle in self.muscles.values_mut() {
-                muscle.reset_week();
-                muscle.atrophy = 0.0;
+        let mut timeline_sessions = Vec::new();
+        for cycle in 0..num_cycles {
+            let cycle_offset_hours = (cycle * self.cycle_length * 24) as f64;
+            for (idx, session) in self.sessions.iter().enumerate() {
+                timeline_sessions.push((session.time + cycle_offset_hours, idx));
             }
+        }
+        timeline_sessions.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-            let mut week_sessions: Vec<(f64, usize)> = Vec::new();
-            for cycle in 0..num_cycles {
-                let cycle_offset_hours = (cycle * self.cycle_length * 24) as f64;
-                for (idx, session) in self.sessions.iter().enumerate() {
-                    let adjusted_time = session.time + cycle_offset_hours;
-                    if adjusted_time >= week_start_hour && adjusted_time < week_start_hour + 168.0 {
-                        week_sessions.push((adjusted_time - week_start_hour, idx));
-                    }
-                }
-            }
-            week_sessions.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let mut fatigue_state = GlobalFatigueState::default();
+        for (absolute_time, session_idx) in timeline_sessions {
+            let absolute_day_number = (absolute_time / 24.0) as i32 + 1;
 
-            let mut fatigue_state = GlobalFatigueState::default();
-            for (week_relative_time, session_idx) in week_sessions {
-                let absolute_day_number =
-                    ((week_start_hour + week_relative_time) / 24.0) as i32 + 1;
-
-                for muscle in self.muscles.values_mut() {
-                    if let Some(last) = muscle.last_trained_time {
-                        let hours_since = week_relative_time - last;
-                        muscle.apply_atrophy(
-                            Some(hours_since),
-                            self.stimulus_duration,
-                            self.maintenance_volume,
-                            &self.dataset,
-                        )?;
-                    }
-                }
-
-                if let Some(last_day) = consecutive_tracker.last_training_day {
-                    let days_since_last = absolute_day_number - last_day;
-                    if days_since_last == 1 {
-                        consecutive_tracker.consecutive_days += 1;
-                    } else if days_since_last > 1 {
-                        consecutive_tracker.consecutive_days = 1;
-                        consecutive_tracker.cumulative_axial_fatigue = 0.0;
-                        consecutive_tracker.cumulative_bilateral_sets = 0;
-                    }
-                } else {
+            if let Some(last_day) = consecutive_tracker.last_training_day {
+                let days_since_last = absolute_day_number - last_day;
+                if days_since_last == 1 {
+                    consecutive_tracker.consecutive_days += 1;
+                } else if days_since_last > 1 {
                     consecutive_tracker.consecutive_days = 1;
+                    consecutive_tracker.cumulative_axial_fatigue = 0.0;
+                    consecutive_tracker.cumulative_bilateral_sets = 0;
                 }
-
-                let consecutive_penalty = calculate_consecutive_day_penalty(
-                    consecutive_tracker.consecutive_days,
-                    consecutive_tracker.cumulative_axial_fatigue,
-                    consecutive_tracker.cumulative_bilateral_sets,
-                );
-
-                fatigue_state.reset();
-                let mut session = self.sessions[session_idx].clone();
-                session.time = week_relative_time;
-                if let Some(mut stats) = session.execute(
-                    &mut self.muscles,
-                    self.stimulus_duration,
-                    &self.dataset,
-                    &mut fatigue_state,
-                    consecutive_penalty,
-                    self.include_breakdowns,
-                ) {
-                    if self.include_breakdowns {
-                        stats.time = week_start_hour + week_relative_time;
-                        stats.week = week + 1;
-                        stats.consecutive_days = consecutive_tracker.consecutive_days;
-                        self.session_stats.push(stats.clone());
-                    }
-                    consecutive_tracker.cumulative_axial_fatigue += stats.axial_fatigue;
-                    consecutive_tracker.cumulative_bilateral_sets += stats.bilateral_compound_sets;
-                    consecutive_tracker.last_training_day = Some(absolute_day_number);
-                }
+            } else {
+                consecutive_tracker.consecutive_days = 1;
             }
 
-            for muscle_id in &muscle_ids {
-                let muscle = self
-                    .muscles
-                    .get_mut(muscle_id)
-                    .ok_or(AnalysisError::MissingRegionData)?;
-                if let Some(last) = muscle.last_trained_time {
-                    let hours_until_end = 168.0 - last;
-                    muscle.apply_atrophy(
-                        Some(hours_until_end),
-                        self.stimulus_duration,
-                        self.maintenance_volume,
-                        &self.dataset,
-                    )?;
+            let consecutive_penalty = calculate_consecutive_day_penalty(
+                consecutive_tracker.consecutive_days,
+                consecutive_tracker.cumulative_axial_fatigue,
+                consecutive_tracker.cumulative_bilateral_sets,
+            );
+
+            fatigue_state.reset();
+            let mut session = self.sessions[session_idx].clone();
+            session.time = absolute_time;
+            if let Some(mut stats) = session.execute(
+                &mut self.muscles,
+                self.stimulus_duration,
+                self.maintenance_volume,
+                &self.dataset,
+                &mut fatigue_state,
+                consecutive_penalty,
+                self.include_breakdowns,
+            ) {
+                if self.include_breakdowns {
+                    stats.time = absolute_time;
+                    stats.week = (absolute_time / 168.0) as i32 + 1;
+                    stats.consecutive_days = consecutive_tracker.consecutive_days;
+                    self.session_stats.push(stats.clone());
                 }
-                weekly_results.get_mut(muscle_id).unwrap().push((
-                    muscle.stimulus,
-                    muscle.atrophy,
-                    muscle.net_weekly_stimulus(),
-                    muscle.primary_sets,
-                    muscle.session_times.len(),
-                ));
+                consecutive_tracker.cumulative_axial_fatigue += stats.axial_fatigue;
+                consecutive_tracker.cumulative_bilateral_sets += stats.bilateral_compound_sets;
+                consecutive_tracker.last_training_day = Some(absolute_day_number);
             }
         }
 
-        for muscle_id in muscle_ids {
-            let weekly = weekly_results.get(&muscle_id).unwrap();
-            if !weekly.is_empty() {
-                let n = weekly.len() as f64;
-                let muscle = self.muscles.get_mut(&muscle_id).unwrap();
-                muscle.stimulus = weekly.iter().map(|w| w.0).sum::<f64>() / n;
-                muscle.atrophy = weekly.iter().map(|w| w.1).sum::<f64>() / n;
-                muscle.primary_sets = (weekly.iter().map(|w| w.3).sum::<i32>() as f64 / n) as i32;
-                muscle.weekly_frequency = weekly.iter().map(|w| w.4 as f64).sum::<f64>() / n;
-            }
+        let horizon = (total_days * 24) as f64;
+        self.simulation_horizon_hours = horizon;
+        for muscle in self.muscles.values_mut() {
+            muscle.account_atrophy_through(
+                horizon,
+                self.stimulus_duration,
+                self.maintenance_volume,
+                &self.dataset,
+            )?;
+            let weeks = weeks_to_sim as f64;
+            muscle.stimulus /= weeks;
+            muscle.atrophy /= weeks;
+            muscle.primary_sets = (muscle.primary_sets as f64 / weeks) as i32;
+            muscle.prime_sets = (muscle.prime_sets as f64 / weeks) as i32;
+            muscle.secondary_sets = (muscle.secondary_sets as f64 / weeks) as i32;
+            muscle.tertiary_sets = (muscle.tertiary_sets as f64 / weeks) as i32;
+            muscle.quaternary_sets = (muscle.quaternary_sets as f64 / weeks) as i32;
+            muscle.weekly_frequency = muscle.session_times.len() as f64 / weeks;
         }
 
         Ok(())
     }
 
     fn build_response(&self) -> AnalysisOutput {
-        let week_end_hour = 168.0;
+        let horizon_hour = self.simulation_horizon_hours;
         let stim_duration = self.stimulus_duration.max(1) as f64;
         let mut muscles_list = self
             .region_order
@@ -514,7 +460,7 @@ impl Split {
             .filter_map(|region_id| self.muscles.get(region_id))
             .map(|m| {
                 let readiness = m.last_stimulus_time.map(|last| {
-                    let hours_since = (week_end_hour - last).max(0.0);
+                    let hours_since = (horizon_hour - last).max(0.0);
                     (hours_since / stim_duration).clamp(0.0, 1.0)
                 });
                 MuscleStatsOutput {
@@ -624,6 +570,7 @@ impl Session {
         &mut self,
         muscles: &mut BTreeMap<String, MuscleRegion>,
         stimulus_duration: i32,
+        maintenance_volume: i32,
         dataset: &str,
         fatigue_state: &mut GlobalFatigueState,
         consecutive_day_penalty: f64,
@@ -664,6 +611,21 @@ impl Session {
             );
             ensure_tiers(&mut tiered_targets);
             let pre_leverage_targets = exercise.tiered_targets.clone();
+
+            if let Some(prime_targets) = tiered_targets.get("prime") {
+                for muscle_id in prime_targets.keys() {
+                    if let Some(muscle) = muscles.get_mut(muscle_id) {
+                        muscle
+                            .account_atrophy_through(
+                                self.time,
+                                stimulus_duration,
+                                maintenance_volume,
+                                dataset,
+                            )
+                            .ok()?;
+                    }
+                }
+            }
 
             if exercise.axial_load > 0.0 {
                 fatigue_state.axial_fatigue +=
@@ -775,7 +737,7 @@ impl Session {
             if let Some(prime_targets) = tiered_targets.get("prime") {
                 for muscle_id in prime_targets.keys() {
                     if let Some(muscle) = muscles.get_mut(muscle_id) {
-                        muscle.last_trained_time = Some(self.time);
+                        muscle.reset_atrophy_clock(self.time);
                         muscle.last_session_time = Some(self.time);
                         muscle.session_times.insert(self.time as i32);
                     }
@@ -1221,6 +1183,7 @@ mod tests {
         let region = test_region("a", "M");
         let mut muscle = MuscleRegion::from(&region);
         muscle.last_session_time = Some(0.0);
+        muscle.reset_atrophy_clock(0.0);
 
         let recovered_stimulus = muscle.apply_stimulus(
             1.0,
@@ -1236,7 +1199,7 @@ mod tests {
             1.0,
         );
         muscle
-            .apply_atrophy(Some(60.0), 48, 3, "schoenfeld")
+            .account_atrophy_through(60.0, 48, 3, "schoenfeld")
             .expect("valid maintenance volume");
 
         assert!((recovered_stimulus - 0.5).abs() < 1e-12);

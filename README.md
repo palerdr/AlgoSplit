@@ -245,7 +245,7 @@ The root endpoint exposes a live endpoint map. Major route groups include:
 - `POST /api/analyze-split`
 - `POST /api/analyze-workouts`
 - `POST /api/parse-exercise`
-- `GET /api/movement-patterns`
+- `GET /api/patterns`
 - `GET/POST /api/workouts`
 - `GET/DELETE /api/workouts/{id}`
 - `GET /api/workouts/summaries`
@@ -422,7 +422,7 @@ conceptual translation from FastAPI dependencies and middleware while keeping
 the service modular. See the [Axum documentation](https://docs.rs/axum/latest/axum/).
 
 This would not be a framework-name swap. The difficult work is reproducing the
-95-endpoint contract, Supabase Auth behavior, rotating browser/native sessions,
+OpenAPI contract, Supabase Auth behavior, rotating browser/native sessions,
 CSRF and rate limiting, Pydantic validation semantics, PostgREST/RPC behavior,
 OpenAPI output, and failure mapping. Supabase does not list an officially
 supported Rust client, so the least disruptive first version should use `reqwest`
@@ -483,6 +483,15 @@ For production, set:
 - `APP_ENV=production`, `FRONTEND_URL=https://your-web-app.example` and `ALLOWED_HOSTS=your-api.example` (comma-separated values are accepted). The service refuses to boot without explicit production origins and hosts.
 - `AUTH_EXPOSE_ACCESS_TOKEN=true` when the same deployment serves native clients. Tokens are returned only when the explicit native header is present, while browser responses remain cookie-only. Native credentials are stored with SecureStore.
 - Apply `backend/db/migrations/011_workout_idempotency.sql` before distributing the mobile build so persisted workout retries cannot create duplicates.
+- Apply `backend/db/migrations/014_backend_audit_repair.sql` before deploying the atomic split/template/workout routes.
+
+### Stimulus score semantics
+
+Stimulus and atrophy are project-defined relative scores, not estimates of a
+physical quantity. Atrophy is intentionally reset only by prime stimulus;
+secondary, tertiary, and quaternary contributions add stimulus without delaying
+the atrophy clock. This preserves the model's intended comparison of training
+frequency while avoiding double-counting elapsed time.
 - `AUTH_REFRESH_COOKIE_MAX_AGE_SECONDS` when the default 30-day browser session lifetime is unsuitable.
 - `MAX_REQUEST_BODY_BYTES` to adjust the default 1 MiB API request limit.
 - `TRUST_PROXY=true` only behind a trusted reverse proxy

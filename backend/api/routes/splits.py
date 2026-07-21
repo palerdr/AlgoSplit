@@ -384,74 +384,11 @@ def create_split(
                 },
             )
 
-        # Insert split
-        split_insert_data = {
-            "user_id": current_user.id,
-            "name": split.name,
-            "stimulus_duration": split.stimulus_duration,
-            "maintenance_volume": split.maintenance_volume,
-            "dataset": split.dataset,
-        }
-        if split.cycle_length is not None:
-            split_insert_data["cycle_length"] = split.cycle_length
-        split_result = supabase.table("splits").insert(split_insert_data).execute()
-
-        if not split_result.data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create split: no data returned from database",
-            )
-
-        split_record = split_result.data[0]
-        split_id = split_record["id"]
-
-        # Batch insert all sessions at once
-        session_rows = [
-            {"split_id": split_id, "name": s.name, "day_number": s.day_number}
-            for s in split.sessions
-        ]
-        sessions_result = supabase.table("sessions").insert(session_rows).execute()
-
-        if not sessions_result.data or len(sessions_result.data) != len(split.sessions):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create sessions",
-            )
-
-        # Build exercise rows for batch insert, mapping to returned session IDs
-        # Sessions come back in insert order
-        exercise_rows = []
-        for session_idx, session in enumerate(split.sessions):
-            session_id = sessions_result.data[session_idx]["id"]
-            for ex_idx, exercise in enumerate(session.exercises):
-                exercise_rows.append({
-                    "session_id": session_id,
-                    "exercise_name": exercise.name,
-                    "sets": exercise.sets,
-                    "order_index": ex_idx,
-                    "unilateral": exercise.unilateral,
-                    "resistance_profile": exercise.resistance_profile,
-                })
-
-        # Batch insert all exercises at once
-        exercises_result = supabase.table("exercises").insert(exercise_rows).execute() if exercise_rows else None
-
-        # Build response by mapping exercises back to their sessions
-        exercise_map = {}  # session_id -> [exercise_records]
-        if exercises_result and exercises_result.data:
-            for ex in exercises_result.data:
-                sid = ex["session_id"]
-                if sid not in exercise_map:
-                    exercise_map[sid] = []
-                exercise_map[sid].append(ex)
-
-        sessions_data = []
-        for session_record in sessions_result.data:
-            sd = dict(session_record)
-            sd["exercises"] = exercise_map.get(session_record["id"], [])
-            sessions_data.append(sd)
-
-        return build_split_response(split_record, sessions_data)
+        result = supabase.rpc(
+            "create_split_full",
+            {"p_split": split.model_dump(mode="json")},
+        ).execute()
+        return SplitResponse.model_validate(_rpc_payload(result, "create_split_full"))
 
     except HTTPException:
         raise
@@ -895,8 +832,36 @@ def batch_update_exercises(
     """
     try:
         t0 = perf_counter()
-        _ = split_id
         supabase = get_supabase_client_with_token(current_user.access_token)
+
+        requested_ids = [update.id for update in request.updates]
+        exercise_rows = supabase.table("exercises").select("id, session_id").in_(
+            "id", requested_ids
+        ).execute().data or []
+        if not exercise_rows:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="One or more exercises do not belong to this split",
+            )
+        session_ids = list({row["session_id"] for row in exercise_rows})
+        owned_sessions = (
+            supabase.table("sessions").select("id").in_("id", session_ids)
+            .eq("split_id", split_id).execute().data or []
+        )
+        allowed_sessions = {row["id"] for row in owned_sessions}
+        allowed_exercises = {
+            row["id"] for row in exercise_rows
+            if row["session_id"] in allowed_sessions
+        }
+        if set(requested_ids) != allowed_exercises:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="One or more exercises do not belong to this split",
+            )
+
+        user_maps = preload_user_exercise_maps(
+            current_user.id, supabase=supabase, strict=True
+        )
 
         unrecognized = []
         rows = []
@@ -904,7 +869,9 @@ def batch_update_exercises(
             row = {"id": update.id}
 
             if update.name is not None:
-                movement = move_match_with_overrides(update.name, current_user.id)
+                movement = move_match_with_overrides(
+                    update.name, current_user.id, user_maps=user_maps
+                )
                 if movement is None:
                     unrecognized.append(update.name)
                 else:

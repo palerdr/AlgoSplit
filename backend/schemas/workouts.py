@@ -148,12 +148,16 @@ class WorkoutLogResponse(BaseModel):
     user_id: str = Field(..., description="User who performed workout")
     session_id: Optional[str] = Field(None, description="Reference to planned session")
     split_id: Optional[str] = Field(None, description="Reference to split")
+    program_session_id: Optional[str] = Field(None, description="Linked program session")
     session_name: str = Field(..., description="Session name")
     completed_at: datetime = Field(..., description="When workout was completed")
     duration_minutes: Optional[int] = Field(None, description="Duration in minutes")
     notes: Optional[str] = Field(None, description="Workout notes")
     session_id_dropped: bool = Field(
         False, description="Whether the requested session_id could not be linked"
+    )
+    program_session_id_dropped: bool = Field(
+        False, description="Whether the requested program_session_id could not be linked"
     )
     exercises: List[WorkoutExerciseResponse] = Field(
         default=[], description="Exercises performed"
