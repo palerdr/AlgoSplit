@@ -44,8 +44,6 @@ const CONSECUTIVE_DAY_FLOOR: f64 = 0.25;
 
 #[derive(Debug, Error)]
 pub enum AnalysisError {
-    #[error("missing region data")]
-    MissingRegionData,
     #[error("invalid maintenance_volume {0}; expected 1..=9")]
     InvalidMaintenanceVolume(i32),
 }
@@ -385,49 +383,49 @@ impl Split {
 
         let mut fatigue_state = GlobalFatigueState::default();
         for (absolute_time, session_idx) in timeline_sessions {
-                let absolute_day_number = (absolute_time / 24.0) as i32 + 1;
+            let absolute_day_number = (absolute_time / 24.0) as i32 + 1;
 
-                if let Some(last_day) = consecutive_tracker.last_training_day {
-                    let days_since_last = absolute_day_number - last_day;
-                    if days_since_last == 1 {
-                        consecutive_tracker.consecutive_days += 1;
-                    } else if days_since_last > 1 {
-                        consecutive_tracker.consecutive_days = 1;
-                        consecutive_tracker.cumulative_axial_fatigue = 0.0;
-                        consecutive_tracker.cumulative_bilateral_sets = 0;
-                    }
-                } else {
+            if let Some(last_day) = consecutive_tracker.last_training_day {
+                let days_since_last = absolute_day_number - last_day;
+                if days_since_last == 1 {
+                    consecutive_tracker.consecutive_days += 1;
+                } else if days_since_last > 1 {
                     consecutive_tracker.consecutive_days = 1;
+                    consecutive_tracker.cumulative_axial_fatigue = 0.0;
+                    consecutive_tracker.cumulative_bilateral_sets = 0;
                 }
+            } else {
+                consecutive_tracker.consecutive_days = 1;
+            }
 
-                let consecutive_penalty = calculate_consecutive_day_penalty(
-                    consecutive_tracker.consecutive_days,
-                    consecutive_tracker.cumulative_axial_fatigue,
-                    consecutive_tracker.cumulative_bilateral_sets,
-                );
+            let consecutive_penalty = calculate_consecutive_day_penalty(
+                consecutive_tracker.consecutive_days,
+                consecutive_tracker.cumulative_axial_fatigue,
+                consecutive_tracker.cumulative_bilateral_sets,
+            );
 
-                fatigue_state.reset();
-                let mut session = self.sessions[session_idx].clone();
-                session.time = absolute_time;
-                if let Some(mut stats) = session.execute(
-                    &mut self.muscles,
-                    self.stimulus_duration,
-                    self.maintenance_volume,
-                    &self.dataset,
-                    &mut fatigue_state,
-                    consecutive_penalty,
-                    self.include_breakdowns,
-                ) {
-                    if self.include_breakdowns {
-                        stats.time = absolute_time;
-                        stats.week = (absolute_time / 168.0) as i32 + 1;
-                        stats.consecutive_days = consecutive_tracker.consecutive_days;
-                        self.session_stats.push(stats.clone());
-                    }
-                    consecutive_tracker.cumulative_axial_fatigue += stats.axial_fatigue;
-                    consecutive_tracker.cumulative_bilateral_sets += stats.bilateral_compound_sets;
-                    consecutive_tracker.last_training_day = Some(absolute_day_number);
+            fatigue_state.reset();
+            let mut session = self.sessions[session_idx].clone();
+            session.time = absolute_time;
+            if let Some(mut stats) = session.execute(
+                &mut self.muscles,
+                self.stimulus_duration,
+                self.maintenance_volume,
+                &self.dataset,
+                &mut fatigue_state,
+                consecutive_penalty,
+                self.include_breakdowns,
+            ) {
+                if self.include_breakdowns {
+                    stats.time = absolute_time;
+                    stats.week = (absolute_time / 168.0) as i32 + 1;
+                    stats.consecutive_days = consecutive_tracker.consecutive_days;
+                    self.session_stats.push(stats.clone());
                 }
+                consecutive_tracker.cumulative_axial_fatigue += stats.axial_fatigue;
+                consecutive_tracker.cumulative_bilateral_sets += stats.bilateral_compound_sets;
+                consecutive_tracker.last_training_day = Some(absolute_day_number);
+            }
         }
 
         let horizon = (total_days * 24) as f64;
