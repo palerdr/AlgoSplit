@@ -36,9 +36,10 @@ public final class RestCompletionAlertModule: Module {
         attributes: attributes,
         content: content,
         pushType: nil,
-        // A transient activity is removed as soon as its expanded presentation
-        // collapses. Completion must remain available until the user returns.
-        style: .standard,
+        // This second activity exists only to trigger the scheduled expanded
+        // alert. The original standard activity remains as the persistent
+        // compact and Lock Screen completion state after this one collapses.
+        style: .transient,
         alertConfiguration: alert,
         start: startDate
       )
