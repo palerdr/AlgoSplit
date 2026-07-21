@@ -8,7 +8,11 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { AppState as NativeAppState, Platform } from 'react-native';
+import {
+  AppState as NativeAppState,
+  InteractionManager,
+  Platform,
+} from 'react-native';
 import {
   BackendError,
   AnalysisResponse,
@@ -55,12 +59,17 @@ import {
 import {
   AnalysisPreferences,
   DEFAULT_ANALYSIS_PREFERENCES,
+  HomeAnalysisCacheParams,
   clearPersistedAccountData,
   loadActiveSplitId,
   loadAnalysisPreferences,
+  loadPersistedHomeAnalysis,
+  loadPersistedHomeSplits,
   normalizeAnalysisPreferences,
   saveActiveSplitId,
   saveAnalysisPreferences,
+  savePersistedHomeAnalysis,
+  savePersistedHomeSplits,
 } from './localPersistence';
 
 const RESOURCE_TTL_MS = 60_000;
@@ -189,6 +198,29 @@ function isFresh(resource: RemoteResource<unknown>): boolean {
 function filterWorkoutRange(workouts: WorkoutLogResponse[], days: number): WorkoutLogResponse[] {
   const cutoff = Date.now() - days * 86_400_000;
   return workouts.filter((workout) => new Date(workout.completed_at).getTime() >= cutoff);
+}
+
+function currentHomeAnalysisParams(
+  preferences: AnalysisPreferences
+): HomeAnalysisCacheParams {
+  return {
+    ...preferences,
+    days: 7,
+    endDate: localDateKey(new Date()),
+    timezoneOffsetMinutes: new Date().getTimezoneOffset(),
+  };
+}
+
+/** Let the authenticated Home shell commit before starting network/analysis work. */
+function runAfterFirstPaint(task: () => void): () => void {
+  let interaction: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+  const frame = requestAnimationFrame(() => {
+    interaction = InteractionManager.runAfterInteractions(task);
+  });
+  return () => {
+    cancelAnimationFrame(frame);
+    interaction?.cancel();
+  };
 }
 
 const AccountStateContext = createContext<AccountState | null>(null);
@@ -369,6 +401,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
             error: null,
             fetchedAt: Date.now(),
           });
+          if (user?.id) void savePersistedHomeSplits(user.id, response.splits).catch(() => {});
         })
         .catch((error) => {
           if (generation !== generationRef.current) return;
@@ -386,7 +419,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       splitInFlight.current = promise;
       return promise;
     },
-    [markSignedOut]
+    [markSignedOut, user?.id]
   );
   const ensureSplits = useCallback(() => loadSplits(false), [loadSplits]);
   const refreshSplits = useCallback(() => loadSplits(true), [loadSplits]);
@@ -808,11 +841,12 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       const generation = generationRef.current;
       const requestId = ++stimulusRequestRef.current;
       setRecentStimulus((previous) => ({ ...previous, loading: true, error: null }));
+      const cacheParams = currentHomeAnalysisParams(analysisPreferences);
       const promise = analysis
         .analyzeWorkouts({
-          days: 7,
-          end_date: localDateKey(new Date()),
-          timezone_offset_minutes: new Date().getTimezoneOffset(),
+          days: cacheParams.days,
+          end_date: cacheParams.endDate,
+          timezone_offset_minutes: cacheParams.timezoneOffsetMinutes,
           stimulus_duration: analysisPreferences.stimulusDuration,
           maintenance_volume: analysisPreferences.maintenanceVolume,
           dataset: analysisPreferences.dataset,
@@ -826,6 +860,9 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
             error: null,
             fetchedAt: Date.now(),
           });
+          if (user?.id) {
+            void savePersistedHomeAnalysis(user.id, cacheParams, data).catch(() => {});
+          }
         })
         .catch((error) => {
           if (generation !== generationRef.current || requestId !== stimulusRequestRef.current) return;
@@ -843,9 +880,8 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       stimulusInFlight.current = promise;
       return promise;
     },
-    [analysisPreferences, markSignedOut]
+    [analysisPreferences, markSignedOut, user?.id]
   );
-  const ensureStimulus = useCallback(() => loadStimulus(false), [loadStimulus]);
   const refreshStimulus = useCallback(() => loadStimulus(true), [loadStimulus]);
 
   const createSplit = useCallback(
@@ -1374,12 +1410,76 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
   }, [user?.id]);
 
   useEffect(() => {
-    if (status === 'authenticated') ensureSplits();
-  }, [status, ensureSplits]);
+    if (status !== 'authenticated' || !user?.id) return;
+    let cancelled = false;
+    let cancelRefresh = () => {};
+    const generation = generationRef.current;
+    loadPersistedHomeSplits<SplitResponse[]>(user.id)
+      .then((cached) => {
+        if (
+          cancelled ||
+          generation !== generationRef.current ||
+          !cached ||
+          !Array.isArray(cached.data)
+        ) return;
+        setSplitResource({
+          data: cached.data,
+          loading: false,
+          loaded: true,
+          error: null,
+          fetchedAt: cached.savedAt,
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (cancelled || generation !== generationRef.current) return;
+        cancelRefresh = runAfterFirstPaint(() => void loadSplits(true));
+      });
+    return () => {
+      cancelled = true;
+      cancelRefresh();
+    };
+  }, [status, user?.id, loadSplits]);
 
   useEffect(() => {
-    if (status === 'authenticated' && analysisPreferencesReady) ensureStimulus();
-  }, [status, analysisPreferencesReady, ensureStimulus]);
+    if (status !== 'authenticated' || !analysisPreferencesReady || !user?.id) return;
+    let cancelled = false;
+    let cancelRefresh = () => {};
+    const generation = generationRef.current;
+    const cacheParams = currentHomeAnalysisParams(analysisPreferences);
+    loadPersistedHomeAnalysis<AnalysisResponse>(user.id, cacheParams)
+      .then((cached) => {
+        if (
+          cancelled ||
+          generation !== generationRef.current ||
+          !cached ||
+          !cached.data ||
+          !Array.isArray(cached.data.muscles)
+        ) return;
+        setRecentStimulus({
+          data: cached.data,
+          loading: false,
+          loaded: true,
+          error: null,
+          fetchedAt: cached.savedAt,
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (cancelled || generation !== generationRef.current) return;
+        cancelRefresh = runAfterFirstPaint(() => void loadStimulus(true));
+      });
+    return () => {
+      cancelled = true;
+      cancelRefresh();
+    };
+  }, [
+    status,
+    user?.id,
+    analysisPreferences,
+    analysisPreferencesReady,
+    loadStimulus,
+  ]);
 
   const value = useMemo<AccountState>(
     () => ({

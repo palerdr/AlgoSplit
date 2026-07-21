@@ -14,7 +14,7 @@ This directory contains SQL migration files for setting up the AlgoSplit databas
    - `003_create_exercise_overrides.sql`
    - `004_setup_rls_policies.sql`
    - `005_create_triggers.sql`
-   - Continue through `015_backend_audit_advisor_followup.sql`. For a clean database,
+   - Continue through `016_durable_analysis_snapshots.sql`. For a clean database,
      prefer the ordered bootstrap file in `backend/db/bootstrap`.
 
 4. After running all migrations, verify the tables were created:
@@ -55,6 +55,7 @@ This directory contains SQL migration files for setting up the AlgoSplit databas
 | `013_extend_split_cycle_to_14_days.sql` | Extends persisted split cycles to 14 days |
 | `014_backend_audit_repair.sql` | Adds missing meso schema, replay protection, and aggregate write RPCs |
 | `015_backend_audit_advisor_followup.sql` | Adds the recovery-use FK index and explicit backend-only policy |
+| `016_durable_analysis_snapshots.sql` | Stores parameter-keyed workout analysis snapshots with per-user RLS |
 
 ## Schema Overview
 

@@ -3,6 +3,7 @@ import {
   AccessibilityInfo,
   Animated,
   Easing,
+  InteractionManager,
   PanResponder,
   Pressable,
   ScrollView,
@@ -14,7 +15,6 @@ import {
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle } from 'react-native-svg';
-import BodyHeatmap from '../3d/BodyHeatmap';
 import FireIcon from '../ui/FireIcon';
 import Glass from '../ui/Glass';
 import PopupLayer from '../ui/PopupLayer';
@@ -35,6 +35,18 @@ import {
   splitWorkoutStreak,
 } from '../workout/splitStreak';
 import { theme } from '../theme';
+
+const BodyHeatmap = React.lazy(() => import('../3d/BodyHeatmap'));
+
+function BodyPlaceholder() {
+  return (
+    <View style={styles.bodyPlaceholder}>
+      <View style={styles.bodyPlaceholderHead} />
+      <View style={styles.bodyPlaceholderTorso} />
+      <View style={styles.bodyPlaceholderLegs} />
+    </View>
+  );
+}
 
 interface HomeScreenProps {
   /** One-shot: true only on the arrival right after finishing a workout */
@@ -215,6 +227,7 @@ export default function HomeScreen({
 }: HomeScreenProps) {
   const {
     recentStimulus,
+    recentStimulusNet,
     lastCompleted,
     history,
     failedSyncCount,
@@ -231,6 +244,7 @@ export default function HomeScreen({
   );
   const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
   const [splitPickerOpen, setSplitPickerOpen] = useState(false);
+  const [bodyReady, setBodyReady] = useState(false);
   const selectedWorkoutGroup =
     workoutGroups.find((group) => group.id === selectedSplitId) ?? null;
   const { width, height } = useWindowDimensions();
@@ -247,6 +261,20 @@ export default function HomeScreen({
   useEffect(() => {
     return () => {
       if (dialTipTimerRef.current) clearTimeout(dialTipTimerRef.current);
+    };
+  }, []);
+
+  // Three.js, GL setup, and the model asset stay off the first interaction
+  // path. The shell and locally derived metrics can paint without evaluating
+  // the 3D bundle; the heatmap replaces this lightweight silhouette afterward.
+  useEffect(() => {
+    let interaction: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+    const frame = requestAnimationFrame(() => {
+      interaction = InteractionManager.runAfterInteractions(() => setBodyReady(true));
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      interaction?.cancel();
     };
   }, []);
 
@@ -355,12 +383,15 @@ export default function HomeScreen({
       workoutAnalysisNetStimulus(account.recentStimulus.data?.muscles ?? []),
     [account.recentStimulus.data]
   );
+  const hasAccountStimulus = Boolean(account.recentStimulus.data);
   // Optimistic stimulus: workouts finished after the server analysis was
   // fetched are layered on locally, so the dial and body update instantly.
   // When the post-sync refresh lands (fetchedAt advances), the overlay empties
   // and the server's numbers quietly take over.
   const optimisticNet = React.useMemo(() => {
-    if (account.status !== 'authenticated') return null;
+    // The local fallback already includes every persisted workout. Only layer
+    // unseen workouts onto an actual server/persisted analysis baseline.
+    if (account.status !== 'authenticated' || !hasAccountStimulus) return null;
     const fetchedAt = account.recentStimulus.fetchedAt ?? 0;
     const unseen = history.filter(
       (workout) => new Date(workout.date).getTime() > fetchedAt
@@ -373,39 +404,29 @@ export default function HomeScreen({
       }
     }
     return net;
-  }, [account.status, account.recentStimulus.fetchedAt, accountStimulusNet, history]);
-  const displayNet = optimisticNet ?? accountStimulusNet;
+  }, [
+    account.status,
+    account.recentStimulus.fetchedAt,
+    accountStimulusNet,
+    hasAccountStimulus,
+    history,
+  ]);
+  const displayNet =
+    optimisticNet ?? (hasAccountStimulus ? accountStimulusNet : recentStimulusNet);
   const weekEffort = React.useMemo(
     () =>
       optimisticNet
         ? stimulusScore(optimisticNet)
-        : stimulusScore(account.recentStimulus.data?.muscles ?? []),
-    [optimisticNet, account.recentStimulus.data]
+        : hasAccountStimulus
+          ? stimulusScore(account.recentStimulus.data?.muscles ?? [])
+          : stimulusScore(recentStimulusNet),
+    [hasAccountStimulus, optimisticNet, account.recentStimulus.data, recentStimulusNet]
   );
   const loadedWeekEffort =
-    account.status === 'authenticated' &&
-    (optimisticNet !== null ||
-      (account.recentStimulus.loaded && account.recentStimulus.data))
-      ? weekEffort
-      : null;
+    account.status === 'authenticated' ? weekEffort : null;
 
   const SHEET_HEIGHT = Math.min(height * 0.64, 580);
   const OPEN_DRAG = SHEET_HEIGHT * 0.5; // finger travel that maps to fully open
-
-  useEffect(() => {
-    if (account.status === 'authenticated') {
-      account.ensureWorkoutTemplates();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account.status]);
-
-  // Streak and quick-start need logged-workout attribution.
-  useEffect(() => {
-    if (account.status === 'authenticated' && account.activeSplitId) {
-      account.ensureWorkoutSummaries();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [account.status, account.activeSplitId]);
 
   // ── Post-workout celebration ────────────────────────────────────
   // The SAME positioned body model that lives on this screen plays the ending:
@@ -500,6 +521,10 @@ export default function HomeScreen({
     // Flip interactivity at the START of the spring both ways — waiting for
     // the close spring to finish left a dead zone where the scrim ate taps.
     setSheetLive(toValue === 1);
+    if (toValue === 1 && account.status === 'authenticated') {
+      void account.ensureSplits();
+      void account.ensureWorkoutTemplates();
+    }
     if (toValue === 0) setSelectedSplitId(null);
     Animated.spring(progress, {
       toValue,
@@ -594,12 +619,18 @@ export default function HomeScreen({
             },
           ]}
         >
-          <BodyHeatmap
-            width={width}
-            height={height}
-            stimulusLevels={bodyLevels}
-            spinTrigger={spinNonce}
-          />
+          {bodyReady ? (
+            <React.Suspense fallback={<BodyPlaceholder />}>
+              <BodyHeatmap
+                width={width}
+                height={height}
+                stimulusLevels={bodyLevels}
+                spinTrigger={spinNonce}
+              />
+            </React.Suspense>
+          ) : (
+            <BodyPlaceholder />
+          )}
         </Animated.View>
       </Animated.View>
 
@@ -654,6 +685,7 @@ export default function HomeScreen({
             style={styles.activeZonePress}
             onPress={() => {
               tick();
+              void account.ensureSplits();
               if (
                 account.splits.loaded &&
                 !account.splits.error &&
@@ -1158,6 +1190,32 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.bg,
     overflow: 'hidden',
+  },
+  bodyPlaceholder: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    opacity: 0.32,
+  },
+  bodyPlaceholderHead: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    marginBottom: 8,
+  },
+  bodyPlaceholderTorso: {
+    width: 112,
+    height: 178,
+    borderRadius: 50,
+    backgroundColor: 'rgba(255,255,255,0.11)',
+  },
+  bodyPlaceholderLegs: {
+    width: 76,
+    height: 162,
+    borderRadius: 36,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginTop: -8,
   },
   topRow: {
     position: 'absolute',

@@ -136,6 +136,8 @@ interface AppState {
   lastCompleted: CompletedWorkout | null;
   /** Decayed 0–7 heat levels from recent history, for the home heatmap */
   recentStimulus: Record<string, number>;
+  /** Decayed net stimulus from local history, used before server analysis arrives. */
+  recentStimulusNet: Record<string, number>;
   /** Last weight/reps used per exercise id, to prefill the set screen */
   lastUsed: Record<string, SetRecord>;
   /** Persistent exercise cues keyed by catalog exercise id. */
@@ -216,15 +218,14 @@ function computeSessionStimulus(
 }
 
 /** Home heatmap levels: decayed rolling net across history → 0–7 heat. */
-function computeRecentStimulus(history: CompletedWorkout[]): Record<string, number> {
+function computeRecentStimulusNet(history: CompletedWorkout[]): Record<string, number> {
   const now = Date.now();
-  const net = rollingNet(
+  return rollingNet(
     history.map((w) => ({
       stimulus: w.stimulus,
       daysAgo: (now - new Date(w.date).getTime()) / 86_400_000,
     }))
   );
-  return levelsFromNet(net);
 }
 
 function daysAgoISO(days: number): string {
@@ -462,7 +463,8 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, [storageKey, hydrated, history, templates, lastUsed, exerciseNotes, session]);
 
-  const recentStimulus = useMemo(() => computeRecentStimulus(history), [history]);
+  const recentStimulusNet = useMemo(() => computeRecentStimulusNet(history), [history]);
+  const recentStimulus = useMemo(() => levelsFromNet(recentStimulusNet), [recentStimulusNet]);
   const pendingSyncCount = history.filter((workout) => workout.syncStatus === 'pending').length;
   const failedSyncCount = history.filter((workout) => workout.syncStatus === 'failed').length;
 
@@ -534,6 +536,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     session,
     lastCompleted,
     recentStimulus,
+    recentStimulusNet,
     lastUsed,
     exerciseNotes,
     templates,

@@ -5,10 +5,12 @@ Endpoints for analyzing workout splits and parsing exercises using
 the 29-region granular muscle model.
 """
 
+from __future__ import annotations
+
 from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List, Optional
 from collections import defaultdict
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 import logging
 import os
 import random
@@ -31,13 +33,11 @@ from schemas.models import (
     # Breakdown models
     SetBreakdown, MuscleContribution, ExerciseBreakdown, SessionBreakdown,
 )
-from core.MainClasses import Split, MuscleRegion
 from core.movementMatching import move_match
 from core.exerciseMatching import preload_user_exercise_maps, move_match_with_overrides
 from core.analysis_cache import (
     get_cached_analysis, invalidate_analysis_cache, set_cached_analysis,
 )
-from core.rust_analysis import compare_analysis_responses, run_rust_split_analysis
 from core.muscle_regions import get_all_muscle_regions, get_parent_groups
 from api.dependencies import get_current_user, get_current_user_optional, AuthUser
 from db.supabase import get_supabase_client_with_token
@@ -66,6 +66,19 @@ def _analysis_cache_parameters(
         "maintenance_volume": maintenance_volume,
         "dataset": dataset,
     }
+
+
+def run_rust_split_analysis(*args, **kwargs):
+    """Import the native extension only when an analysis request needs it."""
+    from core.rust_analysis import run_rust_split_analysis as implementation
+
+    return implementation(*args, **kwargs)
+
+
+def compare_analysis_responses(*args, **kwargs):
+    from core.rust_analysis import compare_analysis_responses as implementation
+
+    return implementation(*args, **kwargs)
 
 
 # ============================================================================
@@ -100,6 +113,8 @@ def _run_python_analysis(
     user_id: Optional[str],
     user_exercise_maps: Optional[dict],
 ) -> AnalysisResponse:
+    from core.MainClasses import Split
+
     split = Split(
         name=request.name,
         days=days,
@@ -263,6 +278,154 @@ def _run_split_analysis(
     )
 
 
+_SNAPSHOT_CONFLICT_COLUMNS = (
+    "user_id,days,end_date,timezone_offset_minutes,"
+    "stimulus_duration,maintenance_volume,dataset"
+)
+_SNAPSHOT_REFRESH_LIMIT = 8
+
+
+def _snapshot_filters(query, *, user_id: str, days: int, end_date: date,
+                      timezone_offset_minutes: int, stimulus_duration: int,
+                      maintenance_volume: int, dataset: str):
+    return (
+        query.eq("user_id", user_id)
+        .eq("days", days)
+        .eq("end_date", end_date.isoformat())
+        .eq("timezone_offset_minutes", timezone_offset_minutes)
+        .eq("stimulus_duration", stimulus_duration)
+        .eq("maintenance_volume", maintenance_volume)
+        .eq("dataset", dataset)
+    )
+
+
+def _load_analysis_snapshot(supabase, **params) -> AnalysisResponse | None:
+    try:
+        result = _snapshot_filters(
+            supabase.table("analysis_snapshots").select("response"), **params
+        ).limit(1).execute()
+        if not result.data:
+            return None
+        return AnalysisResponse.model_validate(result.data[0]["response"])
+    except Exception:
+        # Code and migration can roll out independently. A missing snapshot
+        # table degrades to computation instead of breaking workout analysis.
+        logger.warning("analysis_snapshot_read_failed", exc_info=True)
+        return None
+
+
+def _store_analysis_snapshot(supabase, response: AnalysisResponse, **params) -> None:
+    payload = {
+        **params,
+        "end_date": params["end_date"].isoformat(),
+        "response": response.model_dump(mode="json"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        supabase.table("analysis_snapshots").upsert(
+            payload, on_conflict=_SNAPSHOT_CONFLICT_COLUMNS
+        ).execute()
+    except Exception:
+        logger.warning("analysis_snapshot_write_failed", exc_info=True)
+
+
+def _compute_workout_analysis(
+    supabase,
+    *,
+    user_id: str,
+    days: int,
+    end_date: date,
+    timezone_offset_minutes: int,
+    stimulus_duration: int,
+    maintenance_volume: int,
+    dataset: str,
+) -> AnalysisResponse:
+    window_start_date = end_date - timedelta(days=days - 1)
+    local_window_start = datetime.combine(window_start_date, time.min)
+    local_window_end = datetime.combine(end_date, time.max)
+    offset_delta = timedelta(minutes=timezone_offset_minutes)
+    window_start = local_window_start + offset_delta
+    window_end = local_window_end + offset_delta
+
+    workouts_result = (
+        supabase.table("workout_logs")
+        .select("id, completed_at, session_name")
+        .eq("user_id", user_id)
+        .gte("completed_at", window_start.isoformat())
+        .lte("completed_at", window_end.isoformat())
+        .order("completed_at")
+        .execute()
+    )
+    if not workouts_result.data:
+        return _empty_workout_analysis(
+            days, stimulus_duration, maintenance_volume, dataset
+        )
+
+    workout_ids = [workout["id"] for workout in workouts_result.data]
+    exercises_result = (
+        supabase.table("workout_exercises")
+        .select("workout_log_id, exercise_name, sets_completed, order_index")
+        .in_("workout_log_id", workout_ids)
+        .order("order_index")
+        .execute()
+    )
+    user_exercise_maps = preload_user_exercise_maps(user_id, supabase=supabase)
+    return _build_workout_analysis(
+        workouts_result.data,
+        exercises_result.data or [],
+        days=days,
+        stimulus_duration=stimulus_duration,
+        maintenance_volume=maintenance_volume,
+        dataset=dataset,
+        now=window_end,
+        user_id=user_id,
+        user_exercise_maps=user_exercise_maps,
+    )
+
+
+def refresh_analysis_snapshots(user_id: str, access_token: str, supabase=None) -> None:
+    """Recompute the user's most recently used durable parameter sets."""
+    invalidate_analysis_cache(user_id)
+    supabase = supabase or get_supabase_client_with_token(access_token)
+    try:
+        rows = (
+            supabase.table("analysis_snapshots")
+            .select(
+                "days,end_date,timezone_offset_minutes,stimulus_duration,"
+                "maintenance_volume,dataset"
+            )
+            .eq("user_id", user_id)
+            .order("updated_at", desc=True)
+            .limit(_SNAPSHOT_REFRESH_LIMIT)
+            .execute()
+        ).data or []
+    except Exception:
+        logger.warning("analysis_snapshot_refresh_lookup_failed", exc_info=True)
+        return
+
+    for row in rows:
+        try:
+            params = {
+                "user_id": user_id,
+                "days": int(row["days"]),
+                "end_date": date.fromisoformat(str(row["end_date"])),
+                "timezone_offset_minutes": int(row["timezone_offset_minutes"]),
+                "stimulus_duration": int(row["stimulus_duration"]),
+                "maintenance_volume": int(row["maintenance_volume"]),
+                "dataset": str(row["dataset"]),
+            }
+            response = _compute_workout_analysis(supabase, **params)
+            _store_analysis_snapshot(supabase, response, **params)
+            cache_parameters = _analysis_cache_parameters(
+                params["days"], params["end_date"],
+                params["timezone_offset_minutes"], params["stimulus_duration"],
+                params["maintenance_volume"], params["dataset"],
+            )
+            set_cached_analysis(user_id, cache_parameters, response.model_dump_json())
+        except Exception:
+            logger.warning("analysis_snapshot_refresh_failed", exc_info=True)
+
+
 @router.post("/analyze-workouts", response_model=AnalysisResponse)
 def analyze_workouts(
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
@@ -273,81 +436,44 @@ def analyze_workouts(
     dataset: str = Query("schoenfeld", description="Fatigue curve dataset"),
     current_user: AuthUser = Depends(get_current_user),
 ):
-    """
-    Analyze logged workouts using the 29-region muscle model.
-
-    Fetches the user's workout history within the specified day window,
-    converts it to Split format, and runs the stimulus engine.
-    """
+    """Return a durable snapshot when available, otherwise compute and persist it."""
     try:
-        # Check cache first
+        effective_end_date = end_date or datetime.utcnow().date()
         cache_parameters = _analysis_cache_parameters(
-            days, end_date, timezone_offset_minutes,
+            days, effective_end_date, timezone_offset_minutes,
             stimulus_duration, maintenance_volume, dataset,
         )
         cached = get_cached_analysis(current_user.id, cache_parameters)
         if cached is not None:
             return AnalysisResponse.model_validate_json(cached)
 
+        params = {
+            "user_id": current_user.id,
+            "days": days,
+            "end_date": effective_end_date,
+            "timezone_offset_minutes": timezone_offset_minutes,
+            "stimulus_duration": stimulus_duration,
+            "maintenance_volume": maintenance_volume,
+            "dataset": dataset,
+        }
         supabase = get_supabase_client_with_token(current_user.access_token)
-        effective_end_date = end_date or datetime.utcnow().date()
-        window_start_date = effective_end_date - timedelta(days=days - 1)
-        local_window_start = datetime.combine(window_start_date, time.min)
-        local_window_end = datetime.combine(effective_end_date, time.max)
-        offset_delta = timedelta(minutes=timezone_offset_minutes)
-        window_start = local_window_start + offset_delta
-        window_end = local_window_end + offset_delta
+        snapshot = _load_analysis_snapshot(supabase, **params)
+        if snapshot is not None:
+            set_cached_analysis(
+                current_user.id, cache_parameters, snapshot.model_dump_json()
+            )
+            return snapshot
 
-        # Fetch workout logs within the time window — only columns needed for analysis
-        workouts_result = (
-            supabase.table("workout_logs")
-            .select("id, completed_at, session_name")
-            .eq("user_id", current_user.id)
-            .gte("completed_at", window_start.isoformat())
-            .lte("completed_at", window_end.isoformat())
-            .order("completed_at")
-            .execute()
+        result = _compute_workout_analysis(supabase, **params)
+        set_cached_analysis(
+            current_user.id, cache_parameters, result.model_dump_json()
         )
-
-        if not workouts_result.data:
-            result = _empty_workout_analysis(days, stimulus_duration, maintenance_volume, dataset)
-            set_cached_analysis(current_user.id, cache_parameters, result.model_dump_json())
-            return result
-
-        # Get only columns needed for analysis (exercise name + sets)
-        workout_ids = [w["id"] for w in workouts_result.data]
-        exercises_result = (
-            supabase.table("workout_exercises")
-            .select("workout_log_id, exercise_name, sets_completed, order_index")
-            .in_("workout_log_id", workout_ids)
-            .order("order_index")
-            .execute()
-        )
-
-        user_exercise_maps = preload_user_exercise_maps(
-            current_user.id,
-            supabase=supabase,
-        )
-        result = _build_workout_analysis(
-            workouts_result.data,
-            exercises_result.data or [],
-            days=days,
-            stimulus_duration=stimulus_duration,
-            maintenance_volume=maintenance_volume,
-            dataset=dataset,
-            now=window_end,
-            user_id=current_user.id,
-            user_exercise_maps=user_exercise_maps,
-        )
-
-        set_cached_analysis(current_user.id, cache_parameters, result.model_dump_json())
-
+        _store_analysis_snapshot(supabase, result, **params)
         return result
-
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error analyzing workouts: {str(e)}")
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Error analyzing workouts: {error}")
 
 
 def _empty_workout_analysis(
@@ -465,8 +591,10 @@ def _build_workout_analysis(
     )
 
 
-def _build_response(split: Split, request: SplitRequest) -> AnalysisResponse:
+def _build_response(split, request: SplitRequest) -> AnalysisResponse:
     """Build analysis response from split simulation."""
+    from core.MainClasses import MuscleRegion
+
     muscles_list = []
     muscle_data = []
 
@@ -643,7 +771,7 @@ def _generate_suggestions(muscle_data: List[dict], maintenance_volume: int) -> L
     return suggestions
 
 
-def _build_session_breakdowns(split: Split, request: SplitRequest) -> List[SessionBreakdown]:
+def _build_session_breakdowns(split, request: SplitRequest) -> List[SessionBreakdown]:
     """Transform session_stats exercise_breakdowns into SessionBreakdown models."""
     # The simulation may repeat sessions across multiple weeks.
     # Group by cycle-relative day and keep only the last occurrence (steady-state).

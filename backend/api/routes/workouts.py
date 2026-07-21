@@ -33,6 +33,19 @@ router = APIRouter(prefix="/api/workouts", tags=["Workouts"])
 logger = logging.getLogger(__name__)
 
 
+def refresh_analysis_after_mutation(user_id: str, access_token: str, supabase) -> None:
+    """Refresh durable snapshots without loading analysis code on ordinary requests."""
+    invalidate_analysis_cache(user_id)
+    try:
+        from api.analysis_routes import refresh_analysis_snapshots
+
+        refresh_analysis_snapshots(user_id, access_token, supabase=supabase)
+    except Exception:
+        # The workout mutation is authoritative. Snapshot refresh is a latency
+        # optimization and must never turn a successful log/edit into an error.
+        logger.warning("analysis_snapshot_post_mutation_refresh_failed", exc_info=True)
+
+
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -336,7 +349,9 @@ def log_workout(
                 ) from exc
             raise
 
-        invalidate_analysis_cache(current_user.id)
+        refresh_analysis_after_mutation(
+            current_user.id, current_user.access_token, supabase
+        )
         response_payload = _rpc_payload(result, "log_workout_full")
         exercises_data = response_payload.pop("exercises", [])
         if response_payload.get("session_id_dropped"):
@@ -702,7 +717,12 @@ def clear_exercise_history(
             .ilike("exercise_name", exercise_name) \
             .execute()
 
-        return {"deleted_count": len(result.data) if result.data else 0}
+        deleted_count = len(result.data) if result.data else 0
+        if deleted_count:
+            refresh_analysis_after_mutation(
+                current_user.id, current_user.access_token, supabase
+            )
+        return {"deleted_count": deleted_count}
 
     except Exception as e:
         raise HTTPException(
@@ -783,8 +803,9 @@ def update_workout(
             if result.data:
                 exercises_data.append(result.data[0])
 
-        # Invalidate cached analysis for this user
-        invalidate_analysis_cache(current_user.id)
+        refresh_analysis_after_mutation(
+            current_user.id, current_user.access_token, supabase
+        )
 
         # Fetch updated workout
         workout_result = supabase.table("workout_logs").select("*").eq(
@@ -1000,8 +1021,9 @@ def delete_workout(
                 detail="Workout not found",
             )
 
-        # Invalidate cached analysis for this user
-        invalidate_analysis_cache(current_user.id)
+        refresh_analysis_after_mutation(
+            current_user.id, current_user.access_token, supabase
+        )
 
         return None
 
