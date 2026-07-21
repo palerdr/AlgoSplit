@@ -3,7 +3,6 @@ import {
   AccessibilityInfo,
   Animated,
   Easing,
-  InteractionManager,
   PanResponder,
   Pressable,
   ScrollView,
@@ -21,6 +20,7 @@ import PopupLayer from '../ui/PopupLayer';
 import PopupContent from '../ui/PopupContent';
 import StatusHud from '../ui/StatusHud';
 import Tooltip from '../ui/Tooltip';
+import { scheduleAfterFirstPaint } from '../ui/afterFirstPaint';
 import { levelsFromNet, stimulusScore } from '../analysis/stimulus';
 import { useAppState } from '../state/AppState';
 import { useAccountState } from '../state/AccountState';
@@ -268,14 +268,7 @@ export default function HomeScreen({
   // path. The shell and locally derived metrics can paint without evaluating
   // the 3D bundle; the heatmap replaces this lightweight silhouette afterward.
   useEffect(() => {
-    let interaction: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
-    const frame = requestAnimationFrame(() => {
-      interaction = InteractionManager.runAfterInteractions(() => setBodyReady(true));
-    });
-    return () => {
-      cancelAnimationFrame(frame);
-      interaction?.cancel();
-    };
+    return scheduleAfterFirstPaint(() => setBodyReady(true));
   }, []);
 
   // ── Active split: streak + the workout a quick start launches ──
@@ -287,16 +280,9 @@ export default function HomeScreen({
   // gates the Home shell and only runs when the widget has an active split.
   useEffect(() => {
     if (account.status !== 'authenticated' || !activeSplit?.id) return;
-    let interaction: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
-    const frame = requestAnimationFrame(() => {
-      interaction = InteractionManager.runAfterInteractions(() => {
-        void account.ensureWorkoutSummaries();
-      });
+    return scheduleAfterFirstPaint(() => {
+      void account.ensureWorkoutSummaries();
     });
-    return () => {
-      cancelAnimationFrame(frame);
-      interaction?.cancel();
-    };
   }, [account.status, account.ensureWorkoutSummaries, activeSplit?.id]);
 
   const splitLogs = React.useMemo(

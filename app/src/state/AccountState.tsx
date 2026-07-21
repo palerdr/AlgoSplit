@@ -10,7 +10,6 @@ import React, {
 } from 'react';
 import {
   AppState as NativeAppState,
-  InteractionManager,
   Platform,
 } from 'react-native';
 import {
@@ -71,6 +70,7 @@ import {
   savePersistedHomeAnalysis,
   savePersistedHomeSplits,
 } from './localPersistence';
+import { scheduleAfterFirstPaint } from '../ui/afterFirstPaint';
 
 const RESOURCE_TTL_MS = 60_000;
 
@@ -208,18 +208,6 @@ function currentHomeAnalysisParams(
     days: 7,
     endDate: localDateKey(new Date()),
     timezoneOffsetMinutes: new Date().getTimezoneOffset(),
-  };
-}
-
-/** Let the authenticated Home shell commit before starting network/analysis work. */
-function runAfterFirstPaint(task: () => void): () => void {
-  let interaction: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
-  const frame = requestAnimationFrame(() => {
-    interaction = InteractionManager.runAfterInteractions(task);
-  });
-  return () => {
-    cancelAnimationFrame(frame);
-    interaction?.cancel();
   };
 }
 
@@ -1433,7 +1421,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       .catch(() => {})
       .finally(() => {
         if (cancelled || generation !== generationRef.current) return;
-        cancelRefresh = runAfterFirstPaint(() => void loadSplits(true));
+        cancelRefresh = scheduleAfterFirstPaint(() => void loadSplits(true));
       });
     return () => {
       cancelled = true;
@@ -1467,7 +1455,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       .catch(() => {})
       .finally(() => {
         if (cancelled || generation !== generationRef.current) return;
-        cancelRefresh = runAfterFirstPaint(() => void loadStimulus(true));
+        cancelRefresh = scheduleAfterFirstPaint(() => void loadStimulus(true));
       });
     return () => {
       cancelled = true;
