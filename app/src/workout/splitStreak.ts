@@ -26,23 +26,37 @@ function entryFromLocal(workout: CompletedWorkout): SplitLogEntry | null {
   return { splitId: workout.splitId, sessionId: workout.sessionId ?? null, completedAt };
 }
 
+function eventKey(entry: SplitLogEntry): string {
+  return `${entry.splitId}:${entry.sessionId ?? ''}:${entry.completedAt}`;
+}
+
 /**
- * Combine server summaries with device workouts that have not synced yet.
- * Synced local entries are skipped — their server copy already counts.
+ * Combine server summaries with persisted device workouts. Local history is
+ * the startup source even after sync; once summaries load, remote ids and an
+ * exact split/session/time key prevent the same workout from counting twice.
  */
 export function mergeSplitLogs(
   summaries: readonly WorkoutSummaryResponse[],
   localHistory: readonly CompletedWorkout[]
 ): SplitLogEntry[] {
   const entries: SplitLogEntry[] = [];
+  const remoteIds = new Set<string>();
+  const seenEvents = new Set<string>();
   for (const summary of summaries) {
     const entry = entryFromSummary(summary);
-    if (entry) entries.push(entry);
+    if (!entry) continue;
+    remoteIds.add(summary.id);
+    seenEvents.add(eventKey(entry));
+    entries.push(entry);
   }
   for (const workout of localHistory) {
-    if (workout.syncStatus === 'synced' || !workout.syncStatus) continue;
     const entry = entryFromLocal(workout);
-    if (entry) entries.push(entry);
+    if (!entry) continue;
+    if (workout.remoteId && remoteIds.has(workout.remoteId)) continue;
+    const key = eventKey(entry);
+    if (seenEvents.has(key)) continue;
+    seenEvents.add(key);
+    entries.push(entry);
   }
   return entries.sort((left, right) => right.completedAt - left.completedAt);
 }

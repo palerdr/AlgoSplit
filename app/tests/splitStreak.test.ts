@@ -110,28 +110,52 @@ function localWorkout(
 }
 
 describe('split streak and quick start', () => {
-  it('merges remote summaries with unsynced local workouts, newest first', () => {
+  it('merges remote summaries with local workouts, deduplicating synced copies', () => {
+    const syncedAt = daysAgo(2);
     const logs = mergeSplitLogs(
       [
         summary({ id: 'w-1', completed_at: daysAgo(5) }),
-        summary({ id: 'w-2', completed_at: daysAgo(2), session_id: 'session-2' }),
+        summary({ id: 'w-2', completed_at: syncedAt, session_id: 'session-2' }),
         summary({ id: 'w-free', completed_at: daysAgo(1), split_id: null }),
       ],
       [
         localWorkout({ date: daysAgo(0.5) }),
-        localWorkout({ date: daysAgo(0.25), syncStatus: 'synced' }),
+        localWorkout({
+          date: syncedAt,
+          sessionId: 'session-2',
+          syncStatus: 'synced',
+          remoteId: 'w-2',
+        }),
         localWorkout({ date: daysAgo(0.1), splitId: undefined }),
       ]
     );
 
-    // The free workout, the already-synced copy, and the unattributed local
-    // entry all stay out; order is newest-first.
+    // The free workout, the duplicate synced copy, and the unattributed local
+    // entry stay out; order is newest-first.
     expect(logs.map((entry) => entry.sessionId)).toEqual([
       'session-1',
       'session-2',
       'session-1',
     ]);
     expect(logs[0].completedAt).toBeGreaterThan(logs[2].completedAt);
+  });
+
+  it('uses persisted synced workouts before server summaries load', () => {
+    const logs = mergeSplitLogs(
+      [],
+      [
+        localWorkout({ date: daysAgo(1), syncStatus: 'synced', remoteId: 'w-1' }),
+        localWorkout({
+          date: daysAgo(3),
+          sessionId: 'session-2',
+          syncStatus: 'synced',
+          remoteId: 'w-2',
+        }),
+      ]
+    );
+
+    expect(splitWorkoutStreak(split(), logs, NOW)).toBe(2);
+    expect(logs.map((entry) => entry.sessionId)).toEqual(['session-1', 'session-2']);
   });
 
   it('uses the cycle length as the streak tolerance, floored at a week', () => {

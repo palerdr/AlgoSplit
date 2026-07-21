@@ -281,6 +281,24 @@ export default function HomeScreen({
   // ── Active split: streak + the workout a quick start launches ──
   const activeSplit =
     account.splits.data.find((split) => split.id === account.activeSplitId) ?? null;
+
+  // Persisted local history paints the streak immediately. Reconcile after
+  // first paint for workouts logged on another device; this request never
+  // gates the Home shell and only runs when the widget has an active split.
+  useEffect(() => {
+    if (account.status !== 'authenticated' || !activeSplit?.id) return;
+    let interaction: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+    const frame = requestAnimationFrame(() => {
+      interaction = InteractionManager.runAfterInteractions(() => {
+        void account.ensureWorkoutSummaries();
+      });
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      interaction?.cancel();
+    };
+  }, [account.status, account.ensureWorkoutSummaries, activeSplit?.id]);
+
   const splitLogs = React.useMemo(
     () => mergeSplitLogs(account.workoutSummaries.data.workouts, history),
     [account.workoutSummaries.data.workouts, history]
