@@ -1,4 +1,5 @@
 import api.routes.workouts as workouts_routes
+import api.analysis_routes as analysis_routes
 
 
 class _UndefinedClientRequestIdColumn(Exception):
@@ -7,6 +8,48 @@ class _UndefinedClientRequestIdColumn(Exception):
 
     def __init__(self):
         super().__init__(self.message)
+
+
+def test_logging_workout_refreshes_existing_durable_analysis_snapshot(
+    client, fake_supabase, auth_user, monkeypatch
+):
+    monkeypatch.setattr(
+        workouts_routes,
+        "get_supabase_client_with_token",
+        lambda _token: fake_supabase,
+    )
+    monkeypatch.setattr(
+        analysis_routes,
+        "get_supabase_client_with_token",
+        lambda _token: fake_supabase,
+    )
+    analysis_routes.invalidate_analysis_cache(auth_user.id)
+    initial = client.post(
+        "/api/analyze-workouts?days=7&end_date=2026-07-21&timezone_offset_minutes=240"
+    )
+    assert initial.status_code == 200
+    assert initial.json()["summary"]["total_sets"] == 0
+
+    logged = client.post(
+        "/api/workouts",
+        json={
+            "client_request_id": "snapshot-refresh-1",
+            "session_name": "Push Day",
+            "completed_at": "2026-07-21T13:00:00Z",
+            "exercises": [
+                {
+                    "exercise_name": "Bench Press",
+                    "sets_completed": 3,
+                    "reps": [8, 8, 8],
+                    "weight": [135, 135, 135],
+                }
+            ],
+        },
+    )
+
+    assert logged.status_code == 201
+    assert len(fake_supabase.tables["analysis_snapshots"]) == 1
+    assert fake_supabase.tables["analysis_snapshots"][0]["response"]["summary"]["total_sets"] > 0
 
 
 class _LegacyWorkoutLogsQuery:

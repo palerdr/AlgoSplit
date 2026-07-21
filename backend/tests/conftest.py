@@ -178,6 +178,8 @@ class FakeTableQuery:
         self._select_fields: str | None = "*"
         self._count_mode: str | None = None
         self._insert_rows: list[dict[str, Any]] | None = None
+        self._upsert_rows: list[dict[str, Any]] | None = None
+        self._on_conflict: list[str] = []
         self._update_row: dict[str, Any] | None = None
         self._filters: list[tuple[str, str, Any]] = []
         self._order_by: tuple[str, bool] | None = None
@@ -196,6 +198,18 @@ class FakeTableQuery:
         if isinstance(rows, dict):
             rows = [rows]
         self._insert_rows = [copy.deepcopy(row) for row in rows]
+        return self
+
+    def upsert(
+        self,
+        rows: dict[str, Any] | list[dict[str, Any]],
+        on_conflict: str = "",
+    ) -> "FakeTableQuery":
+        self._op = "upsert"
+        if isinstance(rows, dict):
+            rows = [rows]
+        self._upsert_rows = [copy.deepcopy(row) for row in rows]
+        self._on_conflict = [column.strip() for column in on_conflict.split(",") if column.strip()]
         return self
 
     def update(self, row: dict[str, Any]) -> "FakeTableQuery":
@@ -239,6 +253,8 @@ class FakeTableQuery:
     def execute(self) -> FakeResult:
         if self._op == "insert":
             return FakeResult(self._execute_insert())
+        if self._op == "upsert":
+            return FakeResult(self._execute_upsert())
         if self._op == "update":
             return FakeResult(self._execute_update())
         if self._op == "delete":
@@ -344,6 +360,30 @@ class FakeTableQuery:
             inserted.append(copy.deepcopy(new_row))
         return inserted
 
+    def _execute_upsert(self) -> list[dict[str, Any]]:
+        if self._upsert_rows is None:
+            return []
+        upserted: list[dict[str, Any]] = []
+        for candidate in self._upsert_rows:
+            existing = next(
+                (
+                    row
+                    for row in self.client.tables[self.table_name]
+                    if self._on_conflict
+                    and all(row.get(column) == candidate.get(column) for column in self._on_conflict)
+                ),
+                None,
+            )
+            if existing is None:
+                original_insert = self._insert_rows
+                self._insert_rows = [candidate]
+                upserted.extend(self._execute_insert())
+                self._insert_rows = original_insert
+                continue
+            existing.update(copy.deepcopy(candidate))
+            upserted.append(copy.deepcopy(existing))
+        return upserted
+
     def _execute_update(self) -> list[dict[str, Any]]:
         if self._update_row is None:
             return []
@@ -409,6 +449,7 @@ class FakeSupabaseClient:
             "session_template_exercises": [],
             "program_sessions": [],
             "program_session_exercises": [],
+            "analysis_snapshots": [],
         }
         self._ids: dict[str, int] = {name: 0 for name in self.tables}
 

@@ -87,6 +87,36 @@ def test_analyze_workouts_honors_client_timezone_offset(client, fake_supabase, a
     assert len(body["muscles"]) > 0
 
 
+def test_analyze_workouts_reuses_durable_snapshot_after_memory_cache_is_cleared(
+    client, fake_supabase, auth_user, monkeypatch
+):
+    monkeypatch.setattr(
+        analysis_routes,
+        "get_supabase_client_with_token",
+        lambda _token: fake_supabase,
+    )
+    analysis_routes.invalidate_analysis_cache(auth_user.id)
+
+    first = client.post(
+        "/api/analyze-workouts?days=7&end_date=2026-07-21&timezone_offset_minutes=240"
+    )
+    assert first.status_code == 200
+    assert len(fake_supabase.tables["analysis_snapshots"]) == 1
+
+    analysis_routes.invalidate_analysis_cache(auth_user.id)
+    monkeypatch.setattr(
+        analysis_routes,
+        "_compute_workout_analysis",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("snapshot missed")),
+    )
+    second = client.post(
+        "/api/analyze-workouts?days=7&end_date=2026-07-21&timezone_offset_minutes=240"
+    )
+
+    assert second.status_code == 200
+    assert second.json() == first.json()
+
+
 def test_analyze_workouts_exposes_recovery_readiness(client, fake_supabase, auth_user, monkeypatch):
     """Every muscle in the response carries a `recovery_readiness` field. Trained
     muscles get a 0..1 fraction (the same time-since/recovery-window ratio the

@@ -7,6 +7,8 @@ import {
   accountStorageKey,
   analysisPreferencesKey,
   demoStorageKey,
+  homeAnalysisCacheKey,
+  homeSplitsCacheKey,
   normalizeAnalysisPreferences,
 } from '../src/state/localPersistence';
 import { recoveryTokenFromUrl } from '../src/auth/recoveryLink';
@@ -77,6 +79,26 @@ describe('local account isolation', () => {
     expect(demoStorageKey()).not.toBe(accountStorageKey('demo'));
     expect(analysisPreferencesKey('user-a')).not.toBe(analysisPreferencesKey('user-b'));
     expect(analysisPreferencesKey('user-a')).not.toBe(accountStorageKey('user-a'));
+    expect(homeSplitsCacheKey('user-a')).not.toBe(homeSplitsCacheKey('user-b'));
+    expect(
+      homeAnalysisCacheKey('user-a', {
+        days: 7,
+        endDate: '2026-07-21',
+        timezoneOffsetMinutes: 240,
+        stimulusDuration: 48,
+        maintenanceVolume: 3,
+        dataset: 'schoenfeld',
+      })
+    ).not.toBe(
+      homeAnalysisCacheKey('user-a', {
+        days: 7,
+        endDate: '2026-07-21',
+        timezoneOffsetMinutes: 240,
+        stimulusDuration: 72,
+        maintenanceVolume: 3,
+        dataset: 'schoenfeld',
+      })
+    );
   });
 
   it('sanitizes persisted analysis defaults to backend-supported ranges', () => {

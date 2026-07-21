@@ -8,9 +8,18 @@ from schemas.programs import DiagnosticsRequest
 from schemas.auth import ErrorResponse
 from api.dependencies import get_current_user, AuthUser
 from schemas.models import SplitRequest, SessionInput, ExerciseInput
-from api.analysis_routes import _run_split_analysis
 
 router = APIRouter(prefix="/api/programs/{program_id}/diagnostics", tags=["Program Diagnostics"])
+_run_split_analysis = None
+
+
+def run_analysis(split_request: SplitRequest, current_user: AuthUser, supabase):
+    """Load the simulation route only for diagnostics requests."""
+    implementation = _run_split_analysis
+    if implementation is None:
+        from api.analysis_routes import _run_split_analysis as implementation
+
+    return implementation(split_request, current_user.id, supabase)
 
 
 async def get_session_exercises(supabase, session_data: dict) -> list:
@@ -81,7 +90,7 @@ async def run_diagnostics(
                 dataset=program.get("dataset", "schoenfeld"),
             )
 
-            return _run_split_analysis(split_request, current_user.id, supabase)
+            return run_analysis(split_request, current_user, supabase)
 
         elif request.level == "micro":
             if not request.target_id:
@@ -132,7 +141,7 @@ async def run_diagnostics(
                 dataset=program.get("dataset", "schoenfeld"),
             )
 
-            return _run_split_analysis(split_request, current_user.id, supabase)
+            return run_analysis(split_request, current_user, supabase)
         elif request.level == "meso":
             if not request.target_id:
                 raise HTTPException(status_code=400, detail="target_id required for meso diagnostics")
@@ -189,7 +198,7 @@ async def run_diagnostics(
                     maintenance_volume=program.get("maintenance_volume", 4),
                     dataset=program.get("dataset", "schoenfeld"),
                 )
-                result = _run_split_analysis(split_request, current_user.id, supabase)
+                result = run_analysis(split_request, current_user, supabase)
                 weekly_results.append({"week_index": micro["week_index"], "analysis": result})
 
             # Build progression data: region_id -> [week0_net, week1_net, ...]
@@ -275,7 +284,7 @@ async def run_diagnostics(
                         maintenance_volume=program.get("maintenance_volume", 4),
                         dataset=program.get("dataset", "schoenfeld"),
                     )
-                    result = _run_split_analysis(split_request, current_user.id, supabase)
+                    result = run_analysis(split_request, current_user, supabase)
                     week_count += 1
                     for muscle in result.muscles:
                         if muscle.region_id not in all_muscle_stimulus:

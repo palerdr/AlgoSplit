@@ -1,5 +1,7 @@
 export const LEGACY_APP_STORAGE_KEY = 'fitapp:v1';
 const APP_STORAGE_PREFIX = 'algosplit:v2';
+const HOME_SPLITS_CACHE_SEGMENT = 'homeSplits';
+const HOME_ANALYSIS_CACHE_SEGMENT = 'homeAnalysis';
 
 export type AnalysisDataset = 'schoenfeld' | 'pelland' | 'average';
 
@@ -7,6 +9,17 @@ export interface AnalysisPreferences {
   stimulusDuration: number;
   maintenanceVolume: number;
   dataset: AnalysisDataset;
+}
+
+export interface HomeAnalysisCacheParams extends AnalysisPreferences {
+  days: number;
+  endDate: string;
+  timezoneOffsetMinutes: number;
+}
+
+export interface PersistedHomeResource<T> {
+  data: T;
+  savedAt: number;
 }
 
 export const DEFAULT_ANALYSIS_PREFERENCES: AnalysisPreferences = {
@@ -29,6 +42,72 @@ export function analysisPreferencesKey(userId: string): string {
 
 export function activeSplitKey(userId: string): string {
   return `${APP_STORAGE_PREFIX}:activeSplit:${encodeURIComponent(userId)}`;
+}
+
+export function homeSplitsCacheKey(userId: string): string {
+  return `${APP_STORAGE_PREFIX}:${HOME_SPLITS_CACHE_SEGMENT}:${encodeURIComponent(userId)}`;
+}
+
+function homeAnalysisCachePrefix(userId: string): string {
+  return `${APP_STORAGE_PREFIX}:${HOME_ANALYSIS_CACHE_SEGMENT}:${encodeURIComponent(userId)}:`;
+}
+
+export function homeAnalysisCacheKey(
+  userId: string,
+  params: HomeAnalysisCacheParams
+): string {
+  const normalized = normalizeAnalysisPreferences(params);
+  return `${homeAnalysisCachePrefix(userId)}${[
+    Math.max(1, Math.round(params.days)),
+    params.endDate,
+    Math.round(params.timezoneOffsetMinutes),
+    normalized.stimulusDuration,
+    normalized.maintenanceVolume,
+    normalized.dataset,
+  ].map(encodeURIComponent).join(':')}`;
+}
+
+async function loadPersistedResource<T>(key: string): Promise<PersistedHomeResource<T> | null> {
+  const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
+  const raw = await AsyncStorage.getItem(key);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<PersistedHomeResource<T>>;
+    if (!('data' in parsed) || !Number.isFinite(parsed.savedAt)) return null;
+    return parsed as PersistedHomeResource<T>;
+  } catch {
+    return null;
+  }
+}
+
+async function savePersistedResource<T>(key: string, data: T): Promise<void> {
+  const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
+  await AsyncStorage.setItem(key, JSON.stringify({ data, savedAt: Date.now() }));
+}
+
+export function loadPersistedHomeSplits<T>(
+  userId: string
+): Promise<PersistedHomeResource<T> | null> {
+  return loadPersistedResource<T>(homeSplitsCacheKey(userId));
+}
+
+export function savePersistedHomeSplits<T>(userId: string, data: T): Promise<void> {
+  return savePersistedResource(homeSplitsCacheKey(userId), data);
+}
+
+export function loadPersistedHomeAnalysis<T>(
+  userId: string,
+  params: HomeAnalysisCacheParams
+): Promise<PersistedHomeResource<T> | null> {
+  return loadPersistedResource<T>(homeAnalysisCacheKey(userId, params));
+}
+
+export function savePersistedHomeAnalysis<T>(
+  userId: string,
+  params: HomeAnalysisCacheParams,
+  data: T
+): Promise<void> {
+  return savePersistedResource(homeAnalysisCacheKey(userId, params), data);
 }
 
 /** Per-device choice of which split is "active" (drives home-screen streak/quick start). */
@@ -94,11 +173,16 @@ export async function saveAnalysisPreferences(
 /** Remove local account-owned workout data during logout or account deletion. */
 export async function clearPersistedAccountData(userId: string): Promise<void> {
   const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
-  await Promise.all([
-    AsyncStorage.removeItem(accountStorageKey(userId)),
-    AsyncStorage.removeItem(analysisPreferencesKey(userId)),
-    AsyncStorage.removeItem(activeSplitKey(userId)),
-  ]);
+  const keys = await AsyncStorage.getAllKeys();
+  const analysisPrefix = homeAnalysisCachePrefix(userId);
+  const accountKeys = [
+    accountStorageKey(userId),
+    analysisPreferencesKey(userId),
+    activeSplitKey(userId),
+    homeSplitsCacheKey(userId),
+    ...keys.filter((key) => key.startsWith(analysisPrefix)),
+  ];
+  await AsyncStorage.multiRemove(accountKeys);
 }
 
 /** The pre-account global cache could contain another person's data. */
