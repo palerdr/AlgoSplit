@@ -19,3 +19,4 @@
 \ir ../migrations/015_backend_audit_advisor_followup.sql
 \ir ../migrations/016_durable_analysis_snapshots.sql
 \ir ../migrations/017_repair_workout_idempotency_schema.sql
+\ir ../migrations/018_split_shares.sql

@@ -13,6 +13,10 @@ def test_openapi_contains_core_paths():
         "/auth/logout-all",
         "/api/splits",
         "/api/splits/{split_id}",
+        "/api/splits/{split_id}/shares",
+        "/api/splits/{split_id}/shares/status",
+        "/api/split-shares/{token}",
+        "/api/split-shares/{token}/copy",
         "/api/splits/{split_id}/analyze",
         "/api/analyze-split",
     ]:

@@ -33,6 +33,7 @@ import {
   analysis,
   backendConfigured,
   sessionTemplates as sessionTemplatesApi,
+  splitShares as splitSharesApi,
   splits as splitsApi,
   workouts as workoutsApi,
 } from '../api/backend';
@@ -125,6 +126,7 @@ interface AccountState {
   ensureSplits: () => Promise<void>;
   refreshSplits: () => Promise<void>;
   createSplit: (split: SplitCreate) => Promise<SplitResponse>;
+  copySharedSplit: (token: string) => Promise<SplitResponse>;
   replaceSplit: (splitId: string, split: SplitCreate) => Promise<SplitResponse>;
   deleteSplit: (splitId: string) => Promise<void>;
   deleteWorkout: (workoutId: string) => Promise<void>;
@@ -893,6 +895,27 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
     [markSignedOut]
   );
 
+  const copySharedSplit = useCallback(
+    async (token: string) => {
+      try {
+        const saved = await splitSharesApi.copy(token);
+        clearSplitAnalysisCache();
+        setSplitResource((previous) => ({
+          data: [saved, ...previous.data.filter((candidate) => candidate.id !== saved.id)],
+          loading: false,
+          loaded: true,
+          error: null,
+          fetchedAt: Date.now(),
+        }));
+        return saved;
+      } catch (error) {
+        if (isSignedOutError(error)) markSignedOut();
+        throw error;
+      }
+    },
+    [markSignedOut]
+  );
+
   const replaceSplit = useCallback(
     async (splitId: string, split: SplitCreate) => {
       try {
@@ -1505,6 +1528,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       ensureSplits,
       refreshSplits,
       createSplit,
+      copySharedSplit,
       replaceSplit,
       deleteSplit,
       deleteWorkout,
@@ -1563,6 +1587,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       ensureSplits,
       refreshSplits,
       createSplit,
+      copySharedSplit,
       replaceSplit,
       deleteSplit,
       deleteWorkout,

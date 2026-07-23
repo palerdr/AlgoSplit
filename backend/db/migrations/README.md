@@ -14,7 +14,7 @@ This directory contains SQL migration files for setting up the AlgoSplit databas
    - `003_create_exercise_overrides.sql`
    - `004_setup_rls_policies.sql`
    - `005_create_triggers.sql`
-   - Continue through `017_repair_workout_idempotency_schema.sql`. For a clean database,
+   - Continue through `018_split_shares.sql`. For a clean database,
      prefer the ordered bootstrap file in `backend/db/bootstrap`.
 
 4. After running all migrations, verify the tables were created:
@@ -57,6 +57,7 @@ This directory contains SQL migration files for setting up the AlgoSplit databas
 | `015_backend_audit_advisor_followup.sql` | Adds the recovery-use FK index and explicit backend-only policy |
 | `016_durable_analysis_snapshots.sql` | Stores parameter-keyed workout analysis snapshots with per-user RLS |
 | `017_repair_workout_idempotency_schema.sql` | Repairs and verifies the workout RPC's idempotency columns and indexes on legacy databases |
+| `018_split_shares.sql` | Adds immutable, expiring split-share snapshots with reviewed, idempotent recipient copies |
 
 ## Schema Overview
 

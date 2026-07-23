@@ -2,7 +2,7 @@
  * Complete typed client for the AlgoSplit FastAPI backend.
  *
  * Covers EVERY endpoint mounted in backend/main.py:365-389:
- *   auth, splits, imports (split import preview), workouts, exercise
+ *   auth, splits, split shares, imports (split import preview), workouts, exercise
  *   overrides, custom exercises, comparisons, programs, session templates,
  *   program sessions, program diagnostics, periodization, meso templates,
  *   bodyweight, analysis, plus the root/health/keepalive endpoints.
@@ -748,6 +748,43 @@ export interface SplitResponse {
 export interface SplitListResponse {
   splits: SplitResponse[];
   total: number;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Split share types (backend/schemas/split_shares.py)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * One newly-created share. The opaque token is returned only at creation
+ * time; the owner status endpoint deliberately never exposes past tokens.
+ */
+export interface SplitShareCreateResponse {
+  token: string;
+  expires_at: string;
+  active_count: number;
+  /** Account-scoped exercises that recipients must review before copying. */
+  review_exercises: string[];
+}
+
+/** Non-secret owner view of how many links currently grant access. */
+export interface SplitShareStatusResponse {
+  active_count: number;
+}
+
+/** Result of revoking every active share for one split. */
+export interface SplitShareRevokeResponse {
+  revoked_count: number;
+}
+
+/**
+ * Public, read-only snapshot. `SplitCreate` contains schedule metadata only:
+ * no database IDs, owner identity, workout history, or account-scoped data.
+ */
+export interface SharedSplitPreviewResponse {
+  split: SplitCreate;
+  expires_at: string;
+  /** Exercises whose custom definitions or overrides are not portable. */
+  review_exercises: string[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2095,6 +2132,60 @@ export const splits = {
       `/api/splits/${encodeURIComponent(splitId)}/analyze${qs({
         include_breakdowns: includeBreakdowns,
       })}`
+    );
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// splitShares — owner management + public immutable split snapshots
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const splitShares = {
+  /** POST /api/splits/{id}/shares — create an expiring immutable snapshot. */
+  create(splitId: string): Promise<SplitShareCreateResponse> {
+    return request<SplitShareCreateResponse>(
+      'POST',
+      `/api/splits/${encodeURIComponent(splitId)}/shares`
+    );
+  },
+
+  /** GET /api/splits/{id}/shares/status — count active links without exposing tokens. */
+  status(splitId: string): Promise<SplitShareStatusResponse> {
+    return request<SplitShareStatusResponse>(
+      'GET',
+      `/api/splits/${encodeURIComponent(splitId)}/shares/status`
+    );
+  },
+
+  /** DELETE /api/splits/{id}/shares — revoke every active link for the split. */
+  revokeAll(splitId: string): Promise<SplitShareRevokeResponse> {
+    return request<SplitShareRevokeResponse>(
+      'DELETE',
+      `/api/splits/${encodeURIComponent(splitId)}/shares`
+    );
+  },
+
+  /**
+   * GET /api/split-shares/{token} — anonymous preview. Invalid, expired, and
+   * revoked links intentionally share the same generic 404 response.
+   */
+  getPublic(token: string): Promise<SharedSplitPreviewResponse> {
+    return request<SharedSplitPreviewResponse>(
+      'GET',
+      `/api/split-shares/${encodeURIComponent(token)}`,
+      undefined,
+      false
+    );
+  },
+
+  /**
+   * POST /api/split-shares/{token}/copy — atomically revalidate and copy the
+   * snapshot for the authenticated recipient.
+   */
+  copy(token: string): Promise<SplitResponse> {
+    return request<SplitResponse>(
+      'POST',
+      `/api/split-shares/${encodeURIComponent(token)}/copy`
     );
   },
 };

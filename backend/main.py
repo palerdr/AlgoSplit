@@ -108,6 +108,7 @@ async def safe_http_exception_handler(_: Request, exc: HTTPException):
         safe_service_messages = {
             "Database performance migration 012 is required before using this endpoint.",
             "Exercise validation is temporarily unavailable. Please retry.",
+            "Split sharing is temporarily unavailable.",
             AUTH_SERVICE_UNAVAILABLE,
         }
         if exc.status_code == 503 and exc.detail in safe_service_messages:
@@ -143,6 +144,7 @@ RATE_LIMIT_ENABLED = os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true"
 # Rule order matters; first match wins.
 RATE_LIMIT_RULES = [
     RateLimitRule(prefixes=["/auth/login", "/auth/signup", "/auth/forgot-password", "/auth/reset-password"], limit=5, window=60, scope="ip"),
+    RateLimitRule(prefixes=["/api/split-shares/"], limit=30, window=60, scope="ip"),
     RateLimitRule(
         prefixes=["/api/analyze-split", "/api/parse-exercise", "/api/analyze-workouts"],
         limit=200,
@@ -407,7 +409,7 @@ from api.routes import (
     auth_router, splits_router, imports_router, workouts_router, overrides_router,
     custom_exercises_router, comparisons_router,
     programs_router, session_templates_router, program_sessions_router, program_diagnostics_router,
-    periodization_router, meso_templates_router, bodyweight_router,
+    periodization_router, meso_templates_router, bodyweight_router, split_shares_router,
 )
 
 # Include routers
@@ -425,4 +427,5 @@ app.include_router(program_diagnostics_router)  # Program diagnostics router (ha
 app.include_router(periodization_router)  # Periodization router (has its own /api/programs/{id}/periodization prefix)
 app.include_router(meso_templates_router)  # Meso templates router (has its own /api/meso-templates prefix)
 app.include_router(bodyweight_router)  # Bodyweight tracking router (has its own /api/bodyweight prefix)
+app.include_router(split_shares_router)  # Immutable split sharing and public token lookup
 app.include_router(analysis_routes.router, prefix="/api", tags=["analysis"])  # Analysis endpoints

@@ -26,7 +26,34 @@ import { authCardWidth } from '../auth/authLayout';
 import SocialProviderIcon from '../ui/SocialProviderIcon';
 import StartupSplash from '../ui/StartupSplash';
 
-export default function AuthScreen() {
+interface AuthScreenProps {
+  contextMessage?: string;
+  onBack?: () => void;
+}
+
+function SharedPreviewBack({
+  onPress,
+  floating = false,
+}: {
+  onPress?: () => void;
+  floating?: boolean;
+}) {
+  if (!onPress) return null;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Back to shared split"
+      onPress={onPress}
+      hitSlop={8}
+      style={[styles.contextBack, floating && styles.contextBackFloating]}
+    >
+      <Text style={styles.contextBackText}>‹ Shared split</Text>
+    </Pressable>
+  );
+}
+
+export default function AuthScreen({ contextMessage, onBack }: AuthScreenProps = {}) {
   const account = useAccountState();
   const [mode, setMode] = useState<'login' | 'signup' | 'forgot'>('login');
   const [email, setEmail] = useState('');
@@ -98,7 +125,12 @@ export default function AuthScreen() {
   if (showPrivacy) return <PrivacyScreen onBack={() => setShowPrivacy(false)} />;
 
   if (account.status === 'checking') {
-    return <StartupSplash />;
+    return (
+      <View style={styles.root}>
+        <StartupSplash />
+        <SharedPreviewBack onPress={onBack} floating />
+      </View>
+    );
   }
 
   if (account.status === 'unconfigured') {
@@ -106,6 +138,7 @@ export default function AuthScreen() {
       <View style={styles.staticContainer}>
         <FadeIn style={[styles.cardWrap, { width: boundedCardWidth }]}>
           <Glass style={styles.card}>
+            <SharedPreviewBack onPress={onBack} />
             <Text style={styles.brand}>AlgoSplit</Text>
             <Text style={styles.title}>Backend not configured</Text>
             <Text style={styles.body}>
@@ -122,6 +155,7 @@ export default function AuthScreen() {
       <View style={styles.staticContainer}>
         <FadeIn style={[styles.cardWrap, { width: boundedCardWidth }]}>
           <Glass style={styles.card}>
+            <SharedPreviewBack onPress={onBack} />
             <Text style={styles.brand}>AlgoSplit</Text>
             <Text style={styles.title}>Account connection failed</Text>
             <Text style={styles.body}>{account.sessionError ?? 'Could not reach the backend.'}</Text>
@@ -149,6 +183,7 @@ export default function AuthScreen() {
       >
         <FadeIn style={[styles.cardWrap, { width: boundedCardWidth }]}>
           <Glass style={styles.card}>
+          <SharedPreviewBack onPress={onBack} />
           <Text style={styles.brand}>AlgoSplit</Text>
           <Text style={styles.title}>
             {mode === 'login'
@@ -164,6 +199,7 @@ export default function AuthScreen() {
                 ? 'Create an account to keep your training data in sync.'
                 : 'Enter your email and we will send a password reset link if the account exists.'}
           </Text>
+          {contextMessage ? <Text style={styles.contextMessage}>{contextMessage}</Text> : null}
 
           {(error || account.sessionError) && (
             <Text style={styles.error}>{error ?? account.sessionError}</Text>
@@ -323,6 +359,30 @@ const styles = StyleSheet.create({
     width: '100%',
     borderRadius: 28,
     padding: 24,
+  },
+  contextBack: {
+    alignSelf: 'flex-start',
+    minHeight: 34,
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  contextBackFloating: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 52 : 28,
+    left: 24,
+    zIndex: 1,
+    marginBottom: 0,
+  },
+  contextBackText: {
+    color: theme.textDim,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  contextMessage: {
+    color: theme.accent,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 10,
   },
   brand: {
     color: theme.accent,

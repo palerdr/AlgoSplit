@@ -1,7 +1,8 @@
 import copy
+import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ os.environ.setdefault("AUTH_EXPOSE_ACCESS_TOKEN", "true")
 from api.dependencies import AuthUser, get_current_user
 import api.routes.auth as auth_routes
 import api.routes.session_templates as session_templates_routes
+import api.routes.split_shares as split_shares_routes
 import api.routes.splits as splits_routes
 from main import app, rate_limiter
 
@@ -409,11 +411,28 @@ class FakeTableQuery:
 
         if self.table_name == "splits":
             split_ids = {row["id"] for row in deleted}
+            shares_to_delete = [
+                share
+                for share in self.client.tables["split_shares"]
+                if share["source_split_id"] in split_ids
+            ]
+            share_ids = {share["id"] for share in shares_to_delete}
             sessions_to_delete = [s for s in self.client.tables["sessions"] if s["split_id"] in split_ids]
             session_ids = {s["id"] for s in sessions_to_delete}
             self.client.tables["sessions"] = [s for s in self.client.tables["sessions"] if s["id"] not in session_ids]
             self.client.tables["exercises"] = [
                 ex for ex in self.client.tables["exercises"] if ex["session_id"] not in session_ids
+            ]
+            self.client.tables["split_shares"] = [
+                share
+                for share in self.client.tables["split_shares"]
+                if share["id"] not in share_ids
+            ]
+            self.client.tables["split_share_copies"] = [
+                mapping
+                for mapping in self.client.tables["split_share_copies"]
+                if mapping["share_id"] not in share_ids
+                and mapping["copied_split_id"] not in split_ids
             ]
         elif self.table_name == "sessions":
             session_ids = {row["id"] for row in deleted}
@@ -450,6 +469,10 @@ class FakeSupabaseClient:
             "program_sessions": [],
             "program_session_exercises": [],
             "analysis_snapshots": [],
+            "split_shares": [],
+            "split_share_copies": [],
+            "custom_exercises": [],
+            "exercise_overrides": [],
         }
         self._ids: dict[str, int] = {name: 0 for name in self.tables}
 
@@ -478,7 +501,320 @@ class FakeSupabaseClient:
         )
         return payload
 
+    def _split_share_snapshot(self, split: dict[str, Any]) -> dict[str, Any]:
+        sessions = sorted(
+            [
+                row
+                for row in self.tables["sessions"]
+                if row["split_id"] == split["id"]
+            ],
+            key=lambda row: (row["day_number"], row["id"]),
+        )
+        return {
+            "name": split["name"],
+            "cycle_length": split.get("cycle_length"),
+            "stimulus_duration": split["stimulus_duration"],
+            "maintenance_volume": split["maintenance_volume"],
+            "dataset": split["dataset"],
+            "sessions": [
+                {
+                    "name": session["name"],
+                    "day_number": session["day_number"],
+                    "exercises": [
+                        {
+                            "name": exercise["exercise_name"],
+                            "sets": exercise["sets"],
+                            "unilateral": exercise.get("unilateral", False),
+                            "resistance_profile": exercise.get("resistance_profile"),
+                        }
+                        for exercise in sorted(
+                            [
+                                row
+                                for row in self.tables["exercises"]
+                                if row["session_id"] == session["id"]
+                            ],
+                            key=lambda row: (row["order_index"], row["id"]),
+                        )
+                    ],
+                }
+                for session in sessions
+            ],
+        }
+
+    def _split_response_payload(self, split_id: str) -> dict[str, Any] | None:
+        split = next(
+            (row for row in self.tables["splits"] if row["id"] == split_id),
+            None,
+        )
+        if split is None:
+            return None
+        response = copy.deepcopy(split)
+        response["sessions"] = sorted(
+            [
+                self._session_payload(row)
+                for row in self.tables["sessions"]
+                if row["split_id"] == split_id
+            ],
+            key=lambda row: row["day_number"],
+        )
+        return response
+
     def execute_rpc(self, function_name: str, params: dict[str, Any]):
+        if function_name == "create_split_share":
+            split = next(
+                (
+                    row
+                    for row in self.tables["splits"]
+                    if row["id"] == params["p_split_id"]
+                    and row["user_id"] == "user-123"
+                ),
+                None,
+            )
+            if split is None:
+                raise FakeRpcError("P0002", "split_not_found")
+            snapshot = self._split_share_snapshot(split)
+            if not snapshot["sessions"]:
+                raise FakeRpcError("22023", "split_not_shareable")
+            try:
+                from schemas.splits import SplitCreate
+
+                SplitCreate.model_validate(snapshot)
+            except Exception as exc:
+                raise FakeRpcError("22023", "split_not_shareable") from exc
+            snapshot_bytes = json.dumps(
+                snapshot,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            if len(snapshot_bytes) > 65536:
+                raise FakeRpcError("54000", "snapshot_too_large")
+            if any(
+                row["token_hash"] == params["p_token_hash"]
+                for row in self.tables["split_shares"]
+            ):
+                raise FakeRpcError("23505", "duplicate token hash")
+
+            created_at = datetime.now(timezone.utc)
+            self.tables["split_shares"] = [
+                row
+                for row in self.tables["split_shares"]
+                if row["user_id"] != "user-123"
+                or datetime.fromisoformat(row["expires_at"].replace("Z", "+00:00"))
+                > created_at
+            ]
+            active_for_user = [
+                row
+                for row in self.tables["split_shares"]
+                if row["user_id"] == "user-123"
+            ]
+            active_for_split = [
+                row
+                for row in active_for_user
+                if row["source_split_id"] == split["id"]
+            ]
+            if len(active_for_user) >= 20 or len(active_for_split) >= 5:
+                raise FakeRpcError("P0001", "share_limit_reached")
+
+            snapshot_names = {
+                exercise["name"]
+                for session in snapshot["sessions"]
+                for exercise in session["exercises"]
+            }
+            owner_scoped_names = {
+                row["exercise_name"].strip().lower()
+                for table_name in ("custom_exercises", "exercise_overrides")
+                for row in self.tables[table_name]
+                if row["user_id"] == "user-123"
+            }
+            nonportable_exercises = sorted(
+                name
+                for name in snapshot_names
+                if name.strip().lower() in owner_scoped_names
+            )
+            expires_at = created_at + timedelta(days=30)
+            self.tables["split_shares"].append(
+                {
+                    "id": self.next_id("split_shares"),
+                    "user_id": "user-123",
+                    "source_split_id": split["id"],
+                    "token_hash": params["p_token_hash"],
+                    "snapshot": copy.deepcopy(snapshot),
+                    "nonportable_exercises": nonportable_exercises,
+                    "created_at": created_at.isoformat().replace("+00:00", "Z"),
+                    "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+                }
+            )
+            active_count = sum(
+                1
+                for row in self.tables["split_shares"]
+                if row["user_id"] == "user-123"
+                and row["source_split_id"] == split["id"]
+                and datetime.fromisoformat(
+                    row["expires_at"].replace("Z", "+00:00")
+                )
+                > datetime.now(timezone.utc)
+            )
+            return {
+                "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+                "active_count": active_count,
+                "review_exercises": nonportable_exercises,
+            }
+
+        if function_name == "get_split_share_status":
+            split = next(
+                (
+                    row
+                    for row in self.tables["splits"]
+                    if row["id"] == params["p_split_id"]
+                    and row["user_id"] == "user-123"
+                ),
+                None,
+            )
+            if split is None:
+                raise FakeRpcError("P0002", "split_not_found")
+            now = datetime.now(timezone.utc)
+            return {
+                "active_count": sum(
+                    1
+                    for row in self.tables["split_shares"]
+                    if row["user_id"] == "user-123"
+                    and row["source_split_id"] == split["id"]
+                    and datetime.fromisoformat(
+                        row["expires_at"].replace("Z", "+00:00")
+                    )
+                    > now
+                )
+            }
+
+        if function_name == "revoke_split_shares":
+            split = next(
+                (
+                    row
+                    for row in self.tables["splits"]
+                    if row["id"] == params["p_split_id"]
+                    and row["user_id"] == "user-123"
+                ),
+                None,
+            )
+            if split is None:
+                raise FakeRpcError("P0002", "split_not_found")
+            revoked = [
+                row
+                for row in self.tables["split_shares"]
+                if row["user_id"] == "user-123"
+                and row["source_split_id"] == split["id"]
+            ]
+            revoked_ids = {row["id"] for row in revoked}
+            self.tables["split_shares"] = [
+                row
+                for row in self.tables["split_shares"]
+                if row["id"] not in revoked_ids
+            ]
+            self.tables["split_share_copies"] = [
+                row
+                for row in self.tables["split_share_copies"]
+                if row["share_id"] not in revoked_ids
+            ]
+            return {"revoked_count": len(revoked)}
+
+        if function_name == "get_public_split_share":
+            now = datetime.now(timezone.utc)
+            share = next(
+                (
+                    row
+                    for row in self.tables["split_shares"]
+                    if row["token_hash"] == params["p_token_hash"]
+                    and datetime.fromisoformat(
+                        row["expires_at"].replace("Z", "+00:00")
+                    )
+                    > now
+                ),
+                None,
+            )
+            if share is None:
+                return None
+            return {
+                "split": copy.deepcopy(share["snapshot"]),
+                "expires_at": share["expires_at"],
+                "review_exercises": copy.deepcopy(
+                    share.get("nonportable_exercises", [])
+                ),
+            }
+
+        if function_name == "copy_split_share":
+            now = datetime.now(timezone.utc)
+            share = next(
+                (
+                    row
+                    for row in self.tables["split_shares"]
+                    if row["token_hash"] == params["p_token_hash"]
+                    and datetime.fromisoformat(
+                        row["expires_at"].replace("Z", "+00:00")
+                    )
+                    > now
+                ),
+                None,
+            )
+            if share is None:
+                raise FakeRpcError("P0002", "shared_split_not_found")
+
+            existing_mapping = next(
+                (
+                    row
+                    for row in self.tables["split_share_copies"]
+                    if row["share_id"] == share["id"]
+                    and row["recipient_user_id"] == "user-123"
+                ),
+                None,
+            )
+            if existing_mapping is not None:
+                existing = self._split_response_payload(
+                    existing_mapping["copied_split_id"]
+                )
+                if existing is not None:
+                    return existing
+
+            snapshot_names = {
+                exercise["name"]
+                for session in share["snapshot"]["sessions"]
+                for exercise in session["exercises"]
+            }
+            recipient_scoped_names = {
+                row["exercise_name"].strip().lower()
+                for table_name in ("custom_exercises", "exercise_overrides")
+                for row in self.tables[table_name]
+                if row["user_id"] == "user-123"
+            }
+            review_exercises = sorted(
+                set(share.get("nonportable_exercises", [])).union(
+                    name
+                    for name in snapshot_names
+                    if name.strip().lower() in recipient_scoped_names
+                )
+            )
+            if review_exercises:
+                raise FakeRpcError(
+                    "P0001",
+                    "share_review_required:" + json.dumps(
+                        review_exercises,
+                        separators=(",", ":"),
+                    ),
+                )
+
+            copied = self.execute_rpc(
+                "create_split_full",
+                {"p_split": copy.deepcopy(share["snapshot"])},
+            )
+            self.tables["split_share_copies"].append(
+                {
+                    "share_id": share["id"],
+                    "recipient_user_id": "user-123",
+                    "copied_split_id": copied["id"],
+                    "created_at": _utc_now_iso(),
+                }
+            )
+            return copied
+
         if function_name == "create_split_full":
             payload = params["p_split"]
             now = _utc_now_iso()
@@ -496,12 +832,7 @@ class FakeSupabaseClient:
                     "p_name": session["name"], "p_day_number": session["day_number"],
                     "p_exercises": session.get("exercises", []),
                 })
-            response = copy.deepcopy(split)
-            response["sessions"] = sorted(
-                [self._session_payload(row) for row in self.tables["sessions"] if row["split_id"] == split["id"]],
-                key=lambda row: row["day_number"],
-            )
-            return response
+            return self._split_response_payload(split["id"])
 
         if function_name == "save_session_template_full":
             payload = params["p_template"]
@@ -708,6 +1039,16 @@ def auth_user() -> AuthUser:
 def client(monkeypatch: pytest.MonkeyPatch, fake_supabase: FakeSupabaseClient, auth_user: AuthUser):
     monkeypatch.setattr(auth_routes, "get_supabase_auth_client", lambda: fake_supabase.auth)
     monkeypatch.setattr(splits_routes, "get_supabase_client_with_token", lambda _token: fake_supabase)
+    monkeypatch.setattr(
+        split_shares_routes,
+        "get_supabase_client_with_token",
+        lambda _token: fake_supabase,
+    )
+    monkeypatch.setattr(
+        split_shares_routes,
+        "get_supabase_admin",
+        lambda: fake_supabase,
+    )
     monkeypatch.setattr(
         session_templates_routes, "get_supabase_client_with_token", lambda _token: fake_supabase
     )

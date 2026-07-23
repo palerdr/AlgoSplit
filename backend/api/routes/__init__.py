@@ -16,6 +16,7 @@ from .program_diagnostics import router as program_diagnostics_router
 from .periodization import router as periodization_router
 from .meso_templates import router as meso_templates_router
 from .bodyweight import router as bodyweight_router
+from .split_shares import router as split_shares_router
 
 __all__ = [
     "auth_router",
@@ -32,4 +33,5 @@ __all__ = [
     "periodization_router",
     "meso_templates_router",
     "bodyweight_router",
+    "split_shares_router",
 ]

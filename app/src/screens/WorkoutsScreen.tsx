@@ -24,6 +24,9 @@ import { theme } from '../theme';
 import Glass from '../ui/Glass';
 import FadeIn from '../ui/FadeIn';
 import DeleteConfirmationModal from '../ui/DeleteConfirmationModal';
+import PopupContent from '../ui/PopupContent';
+import PopupLayer from '../ui/PopupLayer';
+import SplitShareModal from '../ui/SplitShareModal';
 import SplitWizard from '../components/workouts/SplitWizard';
 import WorkoutEditor from '../components/workouts/WorkoutEditor';
 
@@ -31,6 +34,8 @@ interface WorkoutsScreenProps {
   onBack: () => void;
   startInSplitCreation?: boolean;
   onActiveSplitSet?: (splitId: string) => void;
+  initialSplitId?: string | null;
+  onInitialSplitHandled?: () => void;
 }
 
 type DeleteTarget = { splitId: string; name: string };
@@ -349,13 +354,15 @@ export default function WorkoutsScreen({
   onBack,
   startInSplitCreation = false,
   onActiveSplitSet,
+  initialSplitId = null,
+  onInitialSplitHandled,
 }: WorkoutsScreenProps) {
   const account = useAccountState();
   const groups = useMemo(
     () => accountWorkoutEditorGroups(account.splits.data),
     [account.splits.data]
   );
-  const [selectedSplitId, setSelectedSplitId] = useState<string | null>(null);
+  const [selectedSplitId, setSelectedSplitId] = useState<string | null>(initialSplitId);
   const [mode, setMode] = useState<Mode>(startInSplitCreation ? 'newSplit' : 'browse');
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingRestDay, setEditingRestDay] = useState<number | undefined>(undefined);
@@ -366,11 +373,19 @@ export default function WorkoutsScreen({
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [splitActionsOpen, setSplitActionsOpen] = useState(false);
 
   const selectedGroup = groups.find((group) => group.id === selectedSplitId) ?? null;
   const editingSplit = account.splits.data.find((split) => split.id === selectedSplitId) ?? null;
   const editingSession =
     editingSplit?.sessions.find((session) => session.id === editingSessionId) ?? undefined;
+
+  useEffect(() => {
+    if (!initialSplitId || !groups.some((group) => group.id === initialSplitId)) return;
+    setSelectedSplitId(initialSplitId);
+    onInitialSplitHandled?.();
+  }, [groups, initialSplitId, onInitialSplitHandled]);
 
   useEffect(() => {
     if (account.status === 'authenticated') {
@@ -515,6 +530,8 @@ export default function WorkoutsScreen({
               tick();
               setDeleteTarget(null);
               setActionError(null);
+              setShareOpen(false);
+              setSplitActionsOpen(false);
               setSelectedSplitId(null);
             }}
             hitSlop={8}
@@ -527,20 +544,35 @@ export default function WorkoutsScreen({
               </View>
             </Glass>
           </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Delete ${selectedGroup.name} split`}
-            onPress={() => {
-              tick();
-              setActionError(null);
-              setDeleteTarget({ splitId: selectedGroup.id, name: selectedGroup.name });
-            }}
-            disabled={deleting}
-          >
-            <Glass style={styles.headerDeleteButton} interactive>
-              <Text style={styles.headerDeleteText}>Delete</Text>
-            </Glass>
-          </Pressable>
+          <View style={styles.headerActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Share ${selectedGroup.name} split`}
+              onPress={() => {
+                tick();
+                setSplitActionsOpen(false);
+                setShareOpen(true);
+              }}
+            >
+              <Glass style={styles.headerShareButton} interactive>
+                <Text style={styles.headerShareText}>Share</Text>
+              </Glass>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${selectedGroup.name} split actions`}
+              onPress={() => {
+                tick();
+                setShareOpen(false);
+                setSplitActionsOpen(true);
+              }}
+              disabled={deleting}
+            >
+              <Glass style={styles.headerMoreButton} interactive>
+                <Text style={styles.headerMoreText}>•••</Text>
+              </Glass>
+            </Pressable>
+          </View>
         </View>
         <Text style={styles.title}>{selectedGroup.name}</Text>
 
@@ -639,6 +671,60 @@ export default function WorkoutsScreen({
           }}
           onConfirm={confirmDelete}
         />
+        <SplitShareModal
+          visible={shareOpen}
+          split={editingSplit}
+          onDismiss={() => setShareOpen(false)}
+        />
+        <PopupLayer
+          visible={splitActionsOpen}
+          onDismiss={() => setSplitActionsOpen(false)}
+          accessibilityLabel={`${selectedGroup.name} split actions`}
+          maxWidth={420}
+        >
+          <Glass style={styles.actionsCard}>
+            <PopupContent>
+              <View style={styles.actionsHeader}>
+                <View style={styles.actionsHeaderCopy}>
+                  <Text accessibilityRole="header" style={styles.actionsTitle}>
+                    Split actions
+                  </Text>
+                  <Text style={styles.actionsSubtitle} numberOfLines={1}>
+                    {selectedGroup.name}
+                  </Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Close split actions"
+                  onPress={() => setSplitActionsOpen(false)}
+                  hitSlop={10}
+                >
+                  <Text style={styles.actionsClose}>×</Text>
+                </Pressable>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Delete ${selectedGroup.name} split`}
+                onPress={() => {
+                  tick();
+                  setSplitActionsOpen(false);
+                  setActionError(null);
+                  setDeleteTarget({ splitId: selectedGroup.id, name: selectedGroup.name });
+                }}
+                disabled={deleting}
+                style={styles.deleteAction}
+              >
+                <View style={styles.deleteActionCopy}>
+                  <Text style={styles.deleteActionTitle}>Delete split</Text>
+                  <Text style={styles.deleteActionBody}>
+                    Permanently remove this schedule and its workout days.
+                  </Text>
+                </View>
+                <Text style={styles.deleteActionChevron}>›</Text>
+              </Pressable>
+            </PopupContent>
+          </Glass>
+        </PopupLayer>
       </View>
     );
   }
@@ -919,15 +1005,93 @@ const styles = StyleSheet.create({
     color: theme.textDim,
     fontSize: 20,
   },
-  headerDeleteButton: {
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerShareButton: {
     borderRadius: 17,
     paddingVertical: 8,
     paddingHorizontal: 16,
   },
-  headerDeleteText: {
-    color: '#E27878',
+  headerShareText: {
+    color: theme.accent,
     fontSize: 13,
     fontWeight: '700',
+  },
+  headerMoreButton: {
+    width: 40,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerMoreText: {
+    color: theme.textDim,
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginTop: -4,
+  },
+  actionsCard: {
+    borderRadius: 22,
+    padding: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  actionsHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 14,
+  },
+  actionsHeaderCopy: {
+    flex: 1,
+  },
+  actionsTitle: {
+    color: theme.text,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  actionsSubtitle: {
+    color: theme.textDim,
+    fontSize: 11,
+    marginTop: 4,
+  },
+  actionsClose: {
+    color: theme.textDim,
+    fontSize: 28,
+    lineHeight: 28,
+    fontWeight: '300',
+  },
+  deleteAction: {
+    minHeight: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 18,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.12)',
+  },
+  deleteActionCopy: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  deleteActionTitle: {
+    color: '#E27878',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  deleteActionBody: {
+    color: theme.textDim,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
+  },
+  deleteActionChevron: {
+    color: '#E27878',
+    fontSize: 20,
   },
   activeBadge: {
     color: theme.accent,

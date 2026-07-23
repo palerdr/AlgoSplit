@@ -18,7 +18,7 @@ changing the repository layout.
 ## Prerequisites
 
 - Apply the Supabase migrations in `backend/db/migrations` through migration
-  `014_backend_audit_repair.sql`.
+  `018_split_shares.sql`.
 - Keep `backend/uv.lock` committed and synchronized with
   `backend/pyproject.toml`.
 - Never upload either local `.env` file to GitHub. Enter production secrets in
@@ -134,14 +134,15 @@ login; browser and native clients rotate the short-lived token instead.
 
 ## Release sequence
 
-1. Open a pull request from the release branch to `main`.
-2. Wait for CI and both Vercel preview deployments.
-3. Merge the pull request.
-4. In each Vercel project, open Settings, Environments, Production, then Branch
+1. Apply the additive Supabase migrations through `018_split_shares.sql`.
+2. Open a pull request from the release branch to `main`.
+3. Wait for CI and both Vercel preview deployments.
+4. Merge the pull request.
+5. In each Vercel project, open Settings, Environments, Production, then Branch
    Tracking and select `main`.
-5. Promote or redeploy the merged `main` commit in both projects.
-6. Confirm both production deployments show the same Git commit.
-7. Run the production smoke tests below before removing old infrastructure.
+6. Promote or redeploy the merged `main` commit in both projects.
+7. Confirm both production deployments show the same Git commit.
+8. Run the production smoke tests below before removing old infrastructure.
 
 ## Production smoke tests
 

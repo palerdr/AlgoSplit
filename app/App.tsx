@@ -14,9 +14,17 @@ import AuthScreen from './src/screens/AuthScreen';
 import AccountScreen from './src/screens/AccountScreen';
 import PrivacyScreen from './src/screens/PrivacyScreen';
 import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
+import SharedSplitScreen from './src/screens/SharedSplitScreen';
 import WorkoutLaunchSplash from './src/ui/WorkoutLaunchSplash';
 import WorkoutOrderDeck, { WorkoutOrderDeckItem } from './src/ui/WorkoutOrderDeck';
 import { recoveryTokenFromUrl } from './src/auth/recoveryLink';
+import {
+  cleanSharedSplitUrl,
+  clearPendingSharedSplit,
+  loadPendingSharedSplit,
+  savePendingSharedSplit,
+  sharedSplitTokenFromUrl,
+} from './src/sharing/sharedSplitLink';
 
 // Deliberately barebones navigation: one state value, no navigator dependency.
 // Screens hand off through a quick, subtle fade: a dark overlay fades over the
@@ -62,6 +70,11 @@ function Root() {
   } | null>(null);
   const activeSplitLandingTokenRef = useRef(0);
   const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
+  const [sharedSplitToken, setSharedSplitToken] = useState<string | null>(null);
+  const sharedSplitTokenRef = useRef<string | null>(null);
+  const [sharedSplitAuthRequested, setSharedSplitAuthRequested] = useState(false);
+  const [sharedSplitAutoSave, setSharedSplitAutoSave] = useState(false);
+  const [workoutsLandingSplitId, setWorkoutsLandingSplitId] = useState<string | null>(null);
   const pendingRef = useRef<Screen | null>(null);
   const anim = useRef(new Animated.Value(1)).current;
   const [workoutLaunch, setWorkoutLaunch] = useState<RootWorkoutLaunch | null>(null);
@@ -296,22 +309,140 @@ function Root() {
   }, [account.authReturnScreen, account.clearAuthReturnScreen, account.status]);
 
   useEffect(() => {
-    const handleUrl = (url: string | null) => {
-      const token = recoveryTokenFromUrl(url);
-      if (!token) return;
+    let live = true;
+    let urlNavigationGeneration = 0;
+
+    const resetTransientNavigation = () => {
       pendingRef.current = null;
       workoutLaunchRef.current = null;
       workoutOrderDraggingRef.current = false;
       setWorkoutLaunch(null);
-      setRecoveryToken(token);
     };
-    Linking.getInitialURL().then(handleUrl).catch(() => {});
-    const subscription = Linking.addEventListener('url', ({ url }) => handleUrl(url));
-    return () => subscription.remove();
+
+    const openUrl = (
+      url: string | null,
+      pendingShare: Awaited<ReturnType<typeof loadPendingSharedSplit>> = null
+    ) => {
+      const recovery = recoveryTokenFromUrl(url);
+      if (recovery) {
+        resetTransientNavigation();
+        sharedSplitTokenRef.current = null;
+        setSharedSplitToken(null);
+        setSharedSplitAuthRequested(false);
+        setSharedSplitAutoSave(false);
+        void clearPendingSharedSplit();
+        setRecoveryToken(recovery);
+        return;
+      }
+
+      const urlShareToken = sharedSplitTokenFromUrl(url);
+      const shareToken = urlShareToken ?? pendingShare?.token ?? null;
+      if (!shareToken) return;
+      const continueSave = Boolean(
+        pendingShare?.saveAfterAuth && pendingShare.token === shareToken
+      );
+      resetTransientNavigation();
+      setRecoveryToken(null);
+      sharedSplitTokenRef.current = shareToken;
+      setSharedSplitToken(shareToken);
+      setSharedSplitAuthRequested(continueSave);
+      setSharedSplitAutoSave(continueSave);
+      if (!continueSave) void clearPendingSharedSplit();
+    };
+
+    const bootstrapGeneration = urlNavigationGeneration;
+    Promise.all([Linking.getInitialURL(), loadPendingSharedSplit()])
+      .then(([url, pendingShare]) => {
+        if (live && urlNavigationGeneration === bootstrapGeneration) {
+          openUrl(url, pendingShare);
+        }
+      })
+      .catch(() => {});
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      urlNavigationGeneration += 1;
+      openUrl(url);
+    });
+    return () => {
+      live = false;
+      subscription.remove();
+    };
   }, []);
 
   if (recoveryToken) {
     return <ResetPasswordScreen token={recoveryToken} onDone={() => setRecoveryToken(null)} />;
+  }
+
+  const closeSharedSplit = () => {
+    sharedSplitTokenRef.current = null;
+    setSharedSplitToken(null);
+    setSharedSplitAuthRequested(false);
+    setSharedSplitAutoSave(false);
+    void clearPendingSharedSplit();
+    cleanSharedSplitUrl();
+  };
+
+  if (sharedSplitToken) {
+    if (sharedSplitAuthRequested && account.status !== 'authenticated') {
+      return (
+        <AuthScreen
+          contextMessage="Sign in to save an independent copy of this shared split."
+          onBack={() => {
+            setSharedSplitAuthRequested(false);
+            setSharedSplitAutoSave(false);
+            void clearPendingSharedSplit(sharedSplitToken);
+          }}
+        />
+      );
+    }
+    return (
+      <SharedSplitScreen
+        token={sharedSplitToken}
+        accountStatus={account.status}
+        autoSave={sharedSplitAutoSave}
+        onRequireSignIn={() => {
+          setSharedSplitAuthRequested(true);
+          setSharedSplitAutoSave(true);
+          void savePendingSharedSplit({
+            token: sharedSplitToken,
+            saveAfterAuth: true,
+          });
+        }}
+        onSaveStarted={async (token) => {
+          // A sign-in continuation is a one-shot intent. Confirm its durable
+          // removal before POSTing so a lost response/restart cannot replay it.
+          const cleared = await clearPendingSharedSplit(token);
+          if (!cleared) {
+            throw new Error('Could not safely clear the pending shared split');
+          }
+          if (sharedSplitTokenRef.current === token) {
+            setSharedSplitAutoSave(false);
+          }
+        }}
+        onCopy={account.copySharedSplit}
+        onUnavailable={async (token) => {
+          await clearPendingSharedSplit(token);
+          if (sharedSplitTokenRef.current === token) {
+            setSharedSplitAuthRequested(false);
+            setSharedSplitAutoSave(false);
+          }
+        }}
+        onSaved={(savedSplit) => {
+          // A newer deep link updates the ref before React commits its render.
+          // Never let the previous capability close or navigate that new view.
+          if (sharedSplitTokenRef.current !== sharedSplitToken) return;
+          setWorkoutsLandingSplitId(savedSplit.id);
+          closeSharedSplit();
+          pendingRef.current = null;
+          workoutLaunchRef.current = null;
+          workoutOrderDraggingRef.current = false;
+          setWorkoutLaunch(null);
+          anim.stopAnimation();
+          anim.setValue(1);
+          setShown('workouts');
+        }}
+        onBack={closeSharedSplit}
+      />
+    );
   }
 
   if (account.status !== 'authenticated') return <AuthScreen />;
@@ -357,6 +488,8 @@ function Root() {
           <WorkoutsScreen
             onBack={() => go('home')}
             onActiveSplitSet={landNewActiveSplit}
+            initialSplitId={workoutsLandingSplitId}
+            onInitialSplitHandled={() => setWorkoutsLandingSplitId(null)}
           />
         );
       case 'workouts-new-split':
