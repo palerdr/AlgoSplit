@@ -266,10 +266,12 @@ struct AlgoSplitRestActivityWidget: Widget {
         }
       }
     } compactLeading: {
-      EmptyView()
+      Image(systemName: "checkmark.circle.fill")
+        .font(.system(size: 13, weight: .semibold))
+        .foregroundStyle(RestStyle.accent)
     } compactTrailing: {
-      Image(systemName: "checkmark")
-        .font(.system(size: 13, weight: .bold))
+      Text("SET")
+        .font(.system(size: 12, weight: .bold, design: .rounded))
         .foregroundStyle(RestStyle.accent)
     } minimal: {
       Image(systemName: "checkmark")
