@@ -125,12 +125,19 @@ func handleRestActivityForegroundActivation() async {
   }
   await MainActor.run { RestActivityPendingStart.timing = nil }
 
+  let scheduledAlertID = UserDefaults.standard.string(
+    forKey: RestActivityConstants.scheduledAlertIDKey
+  )
   for activity in Activity<RestActivityAttributes>.activities {
     let state = activity.content.state
-    let deadline = Date(timeIntervalSince1970: state.endsAtMs / 1_000)
+    let deadlinePassed =
+      Date(timeIntervalSince1970: state.endsAtMs / 1_000).timeIntervalSinceNow <= 0
+    // The scheduled buzz alert carries isComplete before it fires; ending it
+    // here would silently drop the completion alert for a still-running rest.
+    if activity.id == scheduledAlertID && !deadlinePassed { continue }
     // isComplete covers app-driven completion; a passed deadline covers the
     // staleDate flip that happens while the app is suspended.
-    if state.isComplete || deadline.timeIntervalSinceNow <= 0 {
+    if state.isComplete || deadlinePassed {
       await activity.end(nil, dismissalPolicy: .immediate)
     }
   }

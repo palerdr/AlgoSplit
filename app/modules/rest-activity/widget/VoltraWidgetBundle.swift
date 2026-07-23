@@ -76,8 +76,13 @@ private struct RestCountdown: View {
 /// Date-relative dial that fills as the rest elapses — full ring means the
 /// rest is over. The system animates it with no widget refreshes, so it stays
 /// live even when music demotes the activity to a lone minimal glyph.
+///
+/// The fixed frame is load-bearing: date-relative views request unbounded
+/// size, and compact content that exceeds the island's budget makes iOS drop
+/// the activity from the island entirely.
 private struct RestProgressDial: View {
   let interval: ClosedRange<Date>
+  var size: CGFloat = 22
 
   var body: some View {
     ProgressView(
@@ -88,6 +93,7 @@ private struct RestProgressDial: View {
     )
     .progressViewStyle(.circular)
     .tint(RestStyle.accent)
+    .frame(width: size, height: size)
   }
 }
 
