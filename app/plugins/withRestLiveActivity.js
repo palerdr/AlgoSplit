@@ -20,7 +20,7 @@ function withRestLiveActivity(config, options = {}) {
       const templatePath = path.join(
         projectRoot,
         'modules',
-        'rest-completion-alert',
+        'rest-activity',
         'widget',
         'VoltraWidgetBundle.swift'
       );

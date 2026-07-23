@@ -1,20 +1,4 @@
-import React from 'react';
-import { Voltra, renderLiveActivityToString } from '@use-voltra/ios';
-import {
-  isLiveActivityActive,
-  startLiveActivity,
-  stopLiveActivity,
-  updateLiveActivity,
-  type LiveActivityVariants,
-} from '@use-voltra/ios-client';
-import { theme } from '../theme';
-import {
-  cancelScheduledRestCompletionAlert,
-  presentRestCompletionAlert,
-  scheduleRestCompletionAlert,
-} from './restCompletionAlert';
-
-const REST_ACTIVITY_NAME = 'algosplit-rest-timer';
+import RestActivity from '../../modules/rest-activity';
 
 interface RestLiveActivityTiming {
   startedAtMs: number;
@@ -35,248 +19,31 @@ function enqueueLifecycle(operation: () => Promise<void>): Promise<void> {
   return lifecycleQueue;
 }
 
-function countdown(startedAtMs: number, endsAtMs: number, fontSize: number) {
-  return (
-    <Voltra.Timer
-      startAtMs={startedAtMs}
-      endAtMs={endsAtMs}
-      direction="down"
-      showHours={false}
-      style={{
-        color: theme.text,
-        fontSize,
-        fontWeight: '600',
-        fontVariant: ['tabular-nums'],
-      }}
-    />
-  );
-}
-
-export function createRestLiveActivityVariants({
-  startedAtMs,
-  endsAtMs,
-  nextUp,
-}: RestLiveActivityTiming): LiveActivityVariants {
-  const nextUpLabel = nextUp?.trim() || 'Continue workout';
-
-  return {
-    lockScreen: {
-      activityBackgroundTint: theme.bg,
-      content: (
-        <Voltra.HStack
-          alignment="center"
-          spacing={16}
-          style={{ paddingHorizontal: 16, paddingVertical: 14 }}
-        >
-          <Voltra.VStack alignment="leading" spacing={4}>
-            <Voltra.HStack alignment="center" spacing={6}>
-              <Voltra.Symbol
-                name="timer"
-                size={13}
-                weight="semibold"
-                tintColor={theme.accent}
-              />
-              <Voltra.Text
-                style={{ color: theme.textDim, fontSize: 12, fontWeight: '600' }}
-              >
-                REST
-              </Voltra.Text>
-            </Voltra.HStack>
-            {countdown(startedAtMs, endsAtMs, 30)}
-          </Voltra.VStack>
-          <Voltra.Spacer />
-          <Voltra.VStack alignment="trailing" spacing={4}>
-            <Voltra.Text style={{ color: theme.textDim, fontSize: 12, fontWeight: '600' }}>
-              NEXT SET
-            </Voltra.Text>
-            <Voltra.Text
-              numberOfLines={1}
-              style={{ color: theme.text, fontSize: 16, fontWeight: '600' }}
-            >
-              {nextUpLabel}
-            </Voltra.Text>
-          </Voltra.VStack>
-        </Voltra.HStack>
-      ),
-    },
-    island: {
-      keylineTint: theme.accent,
-      compact: {
-        trailing: countdown(startedAtMs, endsAtMs, 13),
-      },
-      minimal: (
-        <Voltra.Symbol
-          name="timer"
-          size={14}
-          weight="semibold"
-          tintColor={theme.accent}
-        />
-      ),
-      expanded: {
-        center: (
-          <Voltra.HStack
-            alignment="center"
-            spacing={10}
-            style={{ paddingHorizontal: 16, paddingVertical: 8 }}
-          >
-            <Voltra.Symbol
-              name="timer"
-              size={19}
-              weight="semibold"
-              tintColor={theme.accent}
-            />
-            <Voltra.Text style={{ color: theme.textDim, fontSize: 14, fontWeight: '600' }}>
-              Rest
-            </Voltra.Text>
-            <Voltra.Spacer />
-            {countdown(startedAtMs, endsAtMs, 24)}
-          </Voltra.HStack>
-        ),
-      },
-    },
-  };
-}
-
-export function createRestCompletionLiveActivityVariants(): LiveActivityVariants {
-  return {
-    lockScreen: {
-      activityBackgroundTint: theme.bg,
-      content: (
-        <Voltra.Link destination="algosplit://">
-          <Voltra.HStack
-            alignment="center"
-            spacing={10}
-            style={{ paddingHorizontal: 16, paddingVertical: 14 }}
-          >
-            <Voltra.Symbol
-              name="checkmark.circle.fill"
-              size={22}
-              weight="semibold"
-              tintColor={theme.accent}
-            />
-            <Voltra.VStack alignment="leading" spacing={2}>
-              <Voltra.Text style={{ color: theme.text, fontSize: 17, fontWeight: '700' }}>
-                Time for your set
-              </Voltra.Text>
-              <Voltra.Text style={{ color: theme.textDim, fontSize: 13, fontWeight: '500' }}>
-                Back to workout
-              </Voltra.Text>
-            </Voltra.VStack>
-            <Voltra.Spacer />
-            <Voltra.Symbol
-              name="chevron.right"
-              size={14}
-              weight="semibold"
-              tintColor={theme.textDim}
-            />
-          </Voltra.HStack>
-        </Voltra.Link>
-      ),
-    },
-    island: {
-      keylineTint: theme.accent,
-      compact: {
-        trailing: (
-          <Voltra.Symbol
-            name="checkmark"
-            size={14}
-            weight="bold"
-            tintColor={theme.accent}
-          />
-        ),
-      },
-      minimal: (
-        <Voltra.Symbol
-          name="checkmark"
-          size={13}
-          weight="bold"
-          tintColor={theme.accent}
-        />
-      ),
-      expanded: {
-        center: (
-          <Voltra.HStack
-            alignment="center"
-            spacing={9}
-            style={{ paddingHorizontal: 16, paddingVertical: 6 }}
-          >
-            <Voltra.Symbol
-              name="checkmark.circle.fill"
-              size={22}
-              weight="semibold"
-              tintColor={theme.accent}
-            />
-            <Voltra.Text style={{ color: theme.text, fontSize: 18, fontWeight: '700' }}>
-              Time for your set
-            </Voltra.Text>
-          </Voltra.HStack>
-        ),
-        bottom: (
-          <Voltra.Link destination="algosplit://">
-            <Voltra.HStack
-              alignment="center"
-              spacing={7}
-              style={{ paddingHorizontal: 16, paddingVertical: 8 }}
-            >
-              <Voltra.Text style={{ color: theme.accent, fontSize: 15, fontWeight: '700' }}>
-                Back to workout
-              </Voltra.Text>
-              <Voltra.Symbol
-                name="arrow.right"
-                size={13}
-                weight="semibold"
-                tintColor={theme.accent}
-              />
-            </Voltra.HStack>
-          </Voltra.Link>
-        ),
-      },
-    },
-  };
-}
-
+/**
+ * Starts the rest Live Activity. The native side owns everything else:
+ * replacing stale activities, the staleDate-driven completion flip at the
+ * deadline, and the scheduled completion alert.
+ */
 export function startRestLiveActivity({
   startedAtMs,
   endsAtMs,
   nextUp,
 }: RestLiveActivityTiming): Promise<void> {
   return enqueueLifecycle(async () => {
-    await cancelScheduledRestCompletionAlert();
-
-    await startLiveActivity(
-      createRestLiveActivityVariants({ startedAtMs, endsAtMs, nextUp }),
-      {
-        activityName: REST_ACTIVITY_NAME,
-        deepLinkUrl: 'algosplit://',
-        staleDate: endsAtMs,
-        relevanceScore: 0.8,
-      }
-    );
-
-    await scheduleRestCompletionAlert(
-      endsAtMs,
-      renderLiveActivityToString(createRestCompletionLiveActivityVariants())
-    );
+    await RestActivity.start(startedAtMs, endsAtMs, nextUp);
   });
 }
 
+/** Flips the activity to "Time for your set" and alerts. */
 export function completeRestLiveActivity(): Promise<void> {
   return enqueueLifecycle(async () => {
-    await cancelScheduledRestCompletionAlert();
-    if (!isLiveActivityActive(REST_ACTIVITY_NAME)) return;
-    await updateLiveActivity(
-      REST_ACTIVITY_NAME,
-      createRestCompletionLiveActivityVariants(),
-      { relevanceScore: 1 }
-    );
-    await presentRestCompletionAlert();
+    await RestActivity.complete();
   });
 }
 
+/** Dismisses every rest activity immediately (skip, cancel, unmount). */
 export function endRestLiveActivity(): Promise<void> {
   return enqueueLifecycle(async () => {
-    await cancelScheduledRestCompletionAlert();
-    if (!isLiveActivityActive(REST_ACTIVITY_NAME)) return;
-    await stopLiveActivity(REST_ACTIVITY_NAME, { dismissalPolicy: 'immediate' });
+    await RestActivity.end();
   });
 }

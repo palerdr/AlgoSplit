@@ -2,15 +2,13 @@ import Dispatch
 import ExpoModulesCore
 import UIKit
 
-public final class RestCompletionTerminationSubscriber: ExpoAppDelegateSubscriber {
+public final class RestActivityTerminationSubscriber: ExpoAppDelegateSubscriber {
   public func applicationWillTerminate(_ application: UIApplication) {
-    guard #available(iOS 16.4, *) else { return }
-
     let cleanupFinished = DispatchSemaphore(value: 0)
 
     Task.detached(priority: .userInitiated) {
       defer { cleanupFinished.signal() }
-      await endAllRestLiveActivitiesImmediately()
+      await endAllRestActivitiesImmediately()
     }
 
     // UIApplication gives final cleanup only a few seconds. Waiting here keeps

@@ -1,8 +1,8 @@
 Pod::Spec.new do |s|
-  s.name           = 'RestCompletionAlert'
+  s.name           = 'RestActivity'
   s.version        = '1.0.0'
-  s.summary        = 'AlgoSplit rest Live Activity completion bridge'
-  s.description    = 'Presents a standard ActivityKit completion alert for the active rest Live Activity.'
+  s.summary        = 'AlgoSplit rest-timer Live Activity lifecycle'
+  s.description    = 'Starts, completes, and ends the rest-timer Live Activity with typed ActivityKit state.'
   s.author         = 'AlgoSplit'
   s.homepage       = 'https://github.com/palerdr/AlgoSplit'
   s.platforms      = { :ios => '16.4' }
@@ -11,7 +11,6 @@ Pod::Spec.new do |s|
   s.swift_version  = '5.9'
 
   s.dependency 'ExpoModulesCore'
-  s.dependency 'Voltra'
   s.frameworks = 'ActivityKit'
 
   s.pod_target_xcconfig = {
