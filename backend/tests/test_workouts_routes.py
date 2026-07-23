@@ -10,6 +10,49 @@ class _UndefinedClientRequestIdColumn(Exception):
         super().__init__(self.message)
 
 
+class _MissingIdempotencyColumnRpcClient:
+    def rpc(self, function_name, params):
+        assert function_name == "log_workout_full"
+        assert params["p_workout"]["client_request_id"] == "schema-drift-1"
+        return self
+
+    def execute(self):
+        error = _UndefinedClientRequestIdColumn()
+        error.message = 'column "client_request_id" does not exist'
+        raise error
+
+
+def test_log_workout_reports_incomplete_idempotency_schema(
+    client, monkeypatch
+):
+    monkeypatch.setattr(
+        workouts_routes,
+        "get_supabase_client_with_token",
+        lambda _token: _MissingIdempotencyColumnRpcClient(),
+    )
+
+    response = client.post(
+        "/api/workouts",
+        json={
+            "client_request_id": "schema-drift-1",
+            "session_name": "Push Day",
+            "completed_at": "2026-07-22T12:00:00Z",
+            "exercises": [
+                {
+                    "exercise_name": "Bench Press",
+                    "sets_completed": 1,
+                    "reps": [8],
+                    "weight": [185],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Internal server error"
+    assert response.json()["request_id"]
+
+
 def test_logging_workout_refreshes_existing_durable_analysis_snapshot(
     client, fake_supabase, auth_user, monkeypatch
 ):
