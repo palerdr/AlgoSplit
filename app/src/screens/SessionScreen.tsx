@@ -527,7 +527,12 @@ function SetSegment({
           ]}
         />
       )}
-      {focused && <View pointerEvents="none" style={styles.segmentFocusRing} />}
+      {focused && (
+        <View
+          pointerEvents="none"
+          style={[styles.segmentFocusRing, status === 'done' && styles.segmentFocusRingDone]}
+        />
+      )}
     </View>
   );
 }
@@ -1942,6 +1947,12 @@ const styles = StyleSheet.create({
     borderRadius: 2,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(241,236,228,0.48)',
+  },
+  // The accent fill hides the focused-track background, so completed pills
+  // need a stronger ring to read as the currently browsed set.
+  segmentFocusRingDone: {
+    borderWidth: 1,
+    borderColor: 'rgba(241,236,228,0.9)',
   },
   segmentFill: {
     height: '100%',

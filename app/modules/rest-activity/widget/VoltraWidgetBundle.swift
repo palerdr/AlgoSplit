@@ -73,6 +73,24 @@ private struct RestCountdown: View {
   }
 }
 
+/// Date-relative dial that fills as the rest elapses — full ring means the
+/// rest is over. The system animates it with no widget refreshes, so it stays
+/// live even when music demotes the activity to a lone minimal glyph.
+private struct RestProgressDial: View {
+  let interval: ClosedRange<Date>
+
+  var body: some View {
+    ProgressView(
+      timerInterval: interval,
+      countsDown: false,
+      label: { EmptyView() },
+      currentValueLabel: { EmptyView() }
+    )
+    .progressViewStyle(.circular)
+    .tint(RestStyle.accent)
+  }
+}
+
 private struct RestBadge: View {
   var fontSize: CGFloat = 12
 
@@ -208,9 +226,7 @@ struct AlgoSplitRestActivityWidget: Widget {
         .widgetURL(RestStyle.deepLink)
       }
     } compactLeading: {
-      Image(systemName: "timer")
-        .font(.system(size: 13, weight: .semibold))
-        .foregroundStyle(RestStyle.accent)
+      RestProgressDial(interval: state.interval)
     } compactTrailing: {
       RestCountdown(
         interval: state.interval,
@@ -219,9 +235,7 @@ struct AlgoSplitRestActivityWidget: Widget {
         color: RestStyle.text
       )
     } minimal: {
-      Image(systemName: "timer")
-        .font(.system(size: 13, weight: .semibold))
-        .foregroundStyle(RestStyle.accent)
+      RestProgressDial(interval: state.interval)
     }
     .keylineTint(RestStyle.accent)
   }
