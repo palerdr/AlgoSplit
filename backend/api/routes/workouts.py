@@ -189,12 +189,11 @@ def workout_exercise_rows(workout: WorkoutLogCreate, workout_log_id: str) -> lis
 
 
 def _missing_client_request_id_column(exc: Exception) -> bool:
-    """Recognize production databases that have not applied migration 011."""
+    """Recognize an incomplete workout idempotency schema."""
     code = str(getattr(exc, "code", ""))
     message = str(getattr(exc, "message", exc)).lower()
     return (
         code in {"42703", "PGRST204"}
-        and "workout_logs" in message
         and "client_request_id" in message
     )
 
@@ -312,6 +311,7 @@ def build_workout_summary_response(
     responses={
         400: {"model": ErrorResponse, "description": "Invalid workout data"},
         401: {"model": ErrorResponse, "description": "Not authenticated"},
+        503: {"model": ErrorResponse, "description": "Workout storage unavailable"},
         500: {"model": ErrorResponse, "description": "Server error"},
     },
     summary="Log a completed workout",
@@ -346,6 +346,14 @@ def log_workout(
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="client_request_id was already used for a different workout",
+                ) from exc
+            if _missing_client_request_id_column(exc):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=(
+                        "Workout storage is temporarily unavailable because the "
+                        "database schema is incomplete"
+                    ),
                 ) from exc
             raise
 

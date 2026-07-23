@@ -17,3 +17,5 @@
 \ir ../migrations/013_extend_split_cycle_to_14_days.sql
 \ir ../migrations/014_backend_audit_repair.sql
 \ir ../migrations/015_backend_audit_advisor_followup.sql
+\ir ../migrations/016_durable_analysis_snapshots.sql
+\ir ../migrations/017_repair_workout_idempotency_schema.sql
