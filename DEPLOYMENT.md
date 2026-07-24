@@ -15,6 +15,20 @@ The current API alias retains `staging` in its name, but both projects track
 `main` as their production branch. Custom domains can be attached later without
 changing the repository layout.
 
+### Cross-project preview behavior
+
+Frontend and backend pull requests produce independent Vercel previews. The
+frontend project's committed same-origin rewrites still target the production
+API alias, so a frontend preview does not automatically call the backend preview
+from the same Git branch. New API routes will return route-level `404 Not Found`
+from the frontend preview until the backend change is merged or the projects are
+explicitly paired with branch-scoped routing.
+
+Do not interpret that route-level 404 as missing user data. Feature screens
+should distinguish it from endpoint-specific responses such as
+`Profile not created`, and reviewers should confirm the deployment ID receiving
+the request in Vercel runtime logs.
+
 ## Prerequisites
 
 - Apply the Supabase migrations in `backend/db/migrations` through migration

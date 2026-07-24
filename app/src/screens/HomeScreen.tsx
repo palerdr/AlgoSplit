@@ -57,6 +57,7 @@ interface HomeScreenProps {
   onWorkouts: () => void;
   onCreateSplit: () => void;
   onAccount: () => void;
+  onFriends: () => void;
   activeSplitLanding: { splitId: string; token: number } | null;
   onActiveSplitLandingHandled: () => void;
 }
@@ -222,6 +223,7 @@ export default function HomeScreen({
   onWorkouts,
   onCreateSplit,
   onAccount,
+  onFriends,
   activeSplitLanding,
   onActiveSplitLandingHandled,
 }: HomeScreenProps) {
@@ -828,6 +830,11 @@ export default function HomeScreen({
             <Text style={styles.smallButtonText}>Workouts</Text>
           </Glass>
         </Pressable>
+        <Pressable onPress={() => { tick(); onFriends(); }}>
+          <Glass style={styles.smallButton} interactive>
+            <Text style={styles.smallButtonText}>Friends</Text>
+          </Glass>
+        </Pressable>
         <Pressable onPress={() => { tick(); onAccount(); }}>
           <Glass style={styles.smallButton} interactive>
             <Text style={styles.smallButtonText}>Account</Text>
@@ -1231,12 +1238,12 @@ const styles = StyleSheet.create({
   },
   smallButton: {
     borderRadius: 22,
-    paddingVertical: 11,
-    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
   smallButtonText: {
     color: theme.text,
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '600',
   },
   scrim: {

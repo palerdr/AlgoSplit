@@ -15,6 +15,11 @@ import AccountScreen from './src/screens/AccountScreen';
 import PrivacyScreen from './src/screens/PrivacyScreen';
 import ResetPasswordScreen from './src/screens/ResetPasswordScreen';
 import SharedSplitScreen from './src/screens/SharedSplitScreen';
+import FriendsScreen from './src/screens/FriendsScreen';
+import FriendProfileScreen from './src/screens/FriendProfileScreen';
+import CompareFriendScreen from './src/screens/CompareFriendScreen';
+import SharedSplitsScreen from './src/screens/SharedSplitsScreen';
+import type { Friendship } from './src/api/backend';
 import WorkoutLaunchSplash from './src/ui/WorkoutLaunchSplash';
 import WorkoutOrderDeck, { WorkoutOrderDeckItem } from './src/ui/WorkoutOrderDeck';
 import { recoveryTokenFromUrl } from './src/auth/recoveryLink';
@@ -40,7 +45,11 @@ type Screen =
   | 'workouts'
   | 'workouts-new-split'
   | 'account'
-  | 'privacy';
+  | 'privacy'
+  | 'friends'
+  | 'friend-profile'
+  | 'friend-compare'
+  | 'friend-splits';
 
 interface RootWorkoutLaunch {
   key: number;
@@ -75,6 +84,7 @@ function Root() {
   const [sharedSplitAuthRequested, setSharedSplitAuthRequested] = useState(false);
   const [sharedSplitAutoSave, setSharedSplitAutoSave] = useState(false);
   const [workoutsLandingSplitId, setWorkoutsLandingSplitId] = useState<string | null>(null);
+  const [activeFriend, setActiveFriend] = useState<Friendship | null>(null);
   const pendingRef = useRef<Screen | null>(null);
   const anim = useRef(new Animated.Value(1)).current;
   const [workoutLaunch, setWorkoutLaunch] = useState<RootWorkoutLaunch | null>(null);
@@ -296,6 +306,7 @@ function Root() {
       setShown('home');
       setCelebratePending(false);
       setActiveSplitLanding(null);
+      setActiveFriend(null);
       return;
     }
     if (account.authReturnScreen) {
@@ -467,6 +478,7 @@ function Root() {
             onWorkouts={() => go('workouts')}
             onCreateSplit={() => go('workouts-new-split')}
             onAccount={() => go('account')}
+            onFriends={() => go('friends')}
             activeSplitLanding={activeSplitLanding}
             onActiveSplitLandingHandled={() => setActiveSplitLanding(null)}
           />
@@ -504,6 +516,43 @@ function Root() {
         return <AccountScreen onBack={() => go('home')} onPrivacy={() => go('privacy')} />;
       case 'privacy':
         return <PrivacyScreen onBack={() => go('account')} />;
+      case 'friends':
+        return (
+          <FriendsScreen
+            onBack={() => go('home')}
+            onFriend={(friend) => {
+              setActiveFriend(friend);
+              go('friend-profile');
+            }}
+          />
+        );
+      case 'friend-profile':
+        return activeFriend ? (
+          <FriendProfileScreen
+            friend={activeFriend}
+            onBack={() => go('friends')}
+            onCompare={() => go('friend-compare')}
+            onSharedSplits={() => go('friend-splits')}
+            onRemoved={() => {
+              setActiveFriend(null);
+              go('friends');
+            }}
+          />
+        ) : (
+          <FriendsScreen onBack={() => go('home')} onFriend={setActiveFriend} />
+        );
+      case 'friend-compare':
+        return activeFriend ? (
+          <CompareFriendScreen friend={activeFriend} onBack={() => go('friend-profile')} />
+        ) : (
+          <FriendsScreen onBack={() => go('home')} onFriend={setActiveFriend} />
+        );
+      case 'friend-splits':
+        return activeFriend ? (
+          <SharedSplitsScreen friend={activeFriend} onBack={() => go('friend-profile')} />
+        ) : (
+          <FriendsScreen onBack={() => go('home')} onFriend={setActiveFriend} />
+        );
     }
   })();
 
