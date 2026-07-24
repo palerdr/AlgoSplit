@@ -1,4 +1,5 @@
 import ActivityKit
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -42,6 +43,27 @@ private extension RestActivityAttributes.ContentState {
   var nextUpLabel: String {
     let trimmed = nextUp?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     return trimmed.isEmpty ? "Continue workout" : trimmed
+  }
+}
+
+// Dismisses the rest Live Activity from its own ✕ button, without opening
+// the app. LiveActivityIntent runs in the app's process in the background.
+//
+// This struct is duplicated VERBATIM in the app module
+// (modules/rest-activity/ios/EndRestActivityIntent.swift) — Apple requires
+// LiveActivityIntent code to be included in both the app and the widget
+// extension targets. The two copies must stay byte-for-byte identical.
+@available(iOS 17.2, *)
+struct EndRestActivityIntent: LiveActivityIntent {
+  static let title: LocalizedStringResource = "Dismiss Rest Timer"
+  static let isDiscoverable = false
+
+  func perform() async throws -> some IntentResult {
+    UserDefaults.standard.removeObject(forKey: "algosplit.rest.scheduled-alert-id")
+    for activity in Activity<RestActivityAttributes>.activities {
+      await activity.end(nil, dismissalPolicy: .immediate)
+    }
+    return .result()
   }
 }
 
@@ -112,6 +134,24 @@ private struct RestBadge: View {
   }
 }
 
+/// ✕ that ends the activity in place. Buttons take precedence over the
+/// surrounding widgetURL tap, so this dismisses without opening the app.
+/// Renders nothing before iOS 17.2 (no interactive Live Activity buttons).
+private struct RestDismissButton: View {
+  var body: some View {
+    if #available(iOS 17.2, *) {
+      Button(intent: EndRestActivityIntent()) {
+        Image(systemName: "xmark")
+          .font(.system(size: 12, weight: .bold))
+          .foregroundStyle(RestStyle.secondary)
+          .frame(width: 28, height: 28)
+          .background(.white.opacity(0.1), in: Circle())
+      }
+      .buttonStyle(.plain)
+    }
+  }
+}
+
 // MARK: - Lock Screen
 
 private struct RestLockScreenRunningView: View {
@@ -160,6 +200,7 @@ private struct RestLockScreenCompleteView: View {
           .foregroundStyle(RestStyle.secondary)
       }
       Spacer()
+      RestDismissButton()
       Image(systemName: "chevron.right")
         .font(.system(size: 14, weight: .semibold))
         .foregroundStyle(RestStyle.secondary)
@@ -260,16 +301,21 @@ struct AlgoSplitRestActivityWidget: Widget {
         .padding(.vertical, 4)
       }
       DynamicIslandExpandedRegion(.bottom) {
-        Link(destination: RestStyle.deepLink) {
-          HStack(spacing: 7) {
-            Text("Back to workout")
-              .font(.system(size: 15, weight: .bold))
-            Image(systemName: "arrow.right")
-              .font(.system(size: 13, weight: .semibold))
+        HStack {
+          Link(destination: RestStyle.deepLink) {
+            HStack(spacing: 7) {
+              Text("Back to workout")
+                .font(.system(size: 15, weight: .bold))
+              Image(systemName: "arrow.right")
+                .font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundStyle(RestStyle.accent)
+            .padding(.vertical, 6)
           }
-          .foregroundStyle(RestStyle.accent)
-          .padding(.vertical, 6)
+          Spacer()
+          RestDismissButton()
         }
+        .padding(.horizontal, 6)
       }
     } compactLeading: {
       Image(systemName: "checkmark.circle.fill")
