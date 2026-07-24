@@ -294,9 +294,6 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
         <FadeIn>
           <Text style={styles.eyebrow}>SOCIAL</Text>
           <Text style={styles.title}>Friends</Text>
-          <Text style={styles.subtitle}>
-            Mutual connections, private by default. No global profile directory.
-          </Text>
         </FadeIn>
 
         {busy === 'load' && !profile && !profileMissing ? (
@@ -517,8 +514,7 @@ const styles = StyleSheet.create({
   backChip: { borderRadius: 18, paddingHorizontal: 13, paddingVertical: 8 },
   backText: { color: theme.text, fontSize: 14, fontWeight: '600' },
   eyebrow: { color: theme.accent, fontSize: 11, fontWeight: '800', letterSpacing: 1.8 },
-  title: { color: theme.text, fontSize: 34, lineHeight: 40, fontWeight: '800', marginTop: 5 },
-  subtitle: { color: theme.textDim, fontSize: 14, lineHeight: 20, marginTop: 7, marginBottom: 22 },
+  title: { color: theme.text, fontSize: 34, lineHeight: 40, fontWeight: '800', marginTop: 5, marginBottom: 22 },
   loader: { marginTop: 60 },
   card: { borderRadius: 24, padding: 18, marginBottom: 16 },
   profileCard: { borderRadius: 24, padding: 16, marginBottom: 16, flexDirection: 'row', alignItems: 'center', gap: 13 },
