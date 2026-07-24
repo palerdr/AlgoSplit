@@ -78,10 +78,9 @@ export default function FriendProfileScreen({
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.identity}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{friend.profile.display_name[0]?.toUpperCase()}</Text>
+            <Text style={styles.avatarText}>{friend.profile.handle[0]?.toUpperCase()}</Text>
           </View>
-          <Text style={styles.title}>{friend.profile.display_name}</Text>
-          <Text style={styles.handle}>@{friend.profile.handle}</Text>
+          <Text style={styles.title}>@{friend.profile.handle}</Text>
         </View>
 
         {loading ? (
@@ -168,7 +167,7 @@ export default function FriendProfileScreen({
           <Glass style={styles.emptyCard}>
             <Text style={styles.cardTitle}>Stimulus Body is private</Text>
             <Text style={styles.emptyText}>
-              {error ?? `${friend.profile.display_name} has not published a snapshot yet.`}
+              {error ?? `@${friend.profile.handle} has not published a snapshot yet.`}
             </Text>
           </Glass>
         )}
@@ -178,7 +177,7 @@ export default function FriendProfileScreen({
         <View style={styles.confirmOverlay}>
           <Glass style={styles.confirmCard}>
             <Text style={styles.cardTitle}>
-              {confirm === 'block' ? `Block ${friend.profile.display_name}?` : 'Remove friend?'}
+              {confirm === 'block' ? `Block @${friend.profile.handle}?` : 'Remove friend?'}
             </Text>
             <Text style={styles.emptyText}>
               Shared snapshots and splits disappear immediately.

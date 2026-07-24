@@ -10,7 +10,6 @@ from core.muscle_regions import get_all_muscle_regions
 
 class ProfileUpsert(BaseModel):
     handle: str = Field(..., min_length=3, max_length=24, pattern=r"^[A-Za-z0-9_]+$")
-    display_name: str = Field(..., min_length=1, max_length=60)
     avatar_url: Optional[str] = Field(default=None, max_length=2048)
     discoverable: bool = True
 
@@ -18,11 +17,6 @@ class ProfileUpsert(BaseModel):
     @classmethod
     def normalize_handle(cls, value: str) -> str:
         return value.strip().lower()
-
-    @field_validator("display_name")
-    @classmethod
-    def normalize_display_name(cls, value: str) -> str:
-        return value.strip()
 
 
 class ProfileResponse(BaseModel):

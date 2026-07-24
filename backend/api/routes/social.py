@@ -82,6 +82,21 @@ def _profile_response(row: dict[str, Any], *, include_private: bool = False) -> 
     )
 
 
+def _reject_own_handle(supabase, user_id: str, handle: str) -> None:
+    own_profile = (
+        supabase.table("profiles")
+        .select("handle")
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    if own_profile.data and own_profile.data[0]["handle"] == handle.strip().lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That is your username. You cannot add yourself.",
+        )
+
+
 def _friendship_response(
     row: dict[str, Any],
     profile: dict[str, Any],
@@ -120,7 +135,14 @@ def put_profile(
     current_user: AuthUser = Depends(get_current_user),
 ):
     supabase = _client(current_user)
-    row = {"user_id": current_user.id, **payload.model_dump(mode="json")}
+    profile_data = payload.model_dump(mode="json")
+    row = {
+        "user_id": current_user.id,
+        **profile_data,
+        # The MVP has one public identity field. Keep the legacy column
+        # populated for response compatibility without exposing a second name.
+        "display_name": payload.handle,
+    }
     try:
         result = supabase.table("profiles").upsert(row, on_conflict="user_id").execute()
         supabase.table("friend_visibility_settings").upsert(
@@ -145,7 +167,9 @@ def lookup_profile(
     handle: str = Query(..., min_length=3, max_length=24, pattern=r"^[A-Za-z0-9_]+$"),
     current_user: AuthUser = Depends(get_current_user),
 ):
-    result = _client(current_user).rpc(
+    supabase = _client(current_user)
+    _reject_own_handle(supabase, current_user.id, handle)
+    result = supabase.rpc(
         "lookup_profile_by_handle",
         {"p_handle": handle.strip().lower()},
     ).execute()
@@ -190,6 +214,7 @@ def request_friend(
     current_user: AuthUser = Depends(get_current_user),
 ):
     supabase = _client(current_user)
+    _reject_own_handle(supabase, current_user.id, payload.handle)
     lookup = supabase.rpc(
         "lookup_profile_by_handle",
         {"p_handle": payload.handle},

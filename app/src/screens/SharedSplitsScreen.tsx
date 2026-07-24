@@ -108,7 +108,7 @@ export default function SharedSplitsScreen({ friend, onBack }: SharedSplitsScree
   return (
     <View style={styles.container}>
       <Pressable onPress={onBack} hitSlop={8} style={styles.backWrap}>
-        <Glass style={styles.navChip} interactive><Text style={styles.navText}>‹ {friend.profile.display_name}</Text></Glass>
+        <Glass style={styles.navChip} interactive><Text style={styles.navText}>‹ @{friend.profile.handle}</Text></Glass>
       </Pressable>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.eyebrow}>PUBLISHED VERSIONS</Text>
@@ -121,7 +121,7 @@ export default function SharedSplitsScreen({ friend, onBack }: SharedSplitsScree
         {shares?.length === 0 && (
           <Glass style={styles.emptyCard}>
             <Text style={styles.emptyTitle}>Nothing shared yet</Text>
-            <Text style={styles.emptyText}>{friend.profile.display_name} has no visible published splits.</Text>
+            <Text style={styles.emptyText}>@{friend.profile.handle} has no visible published splits.</Text>
           </Glass>
         )}
         {shares?.map((share) => <SharedSplitCard key={share.id} share={share} />)}

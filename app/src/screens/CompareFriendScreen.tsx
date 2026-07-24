@@ -49,11 +49,11 @@ export default function CompareFriendScreen({ friend, onBack }: CompareFriendScr
   return (
     <View style={styles.container}>
       <Pressable onPress={onBack} hitSlop={8} style={styles.backWrap}>
-        <Glass style={styles.navChip} interactive><Text style={styles.navText}>‹ {friend.profile.display_name}</Text></Glass>
+        <Glass style={styles.navChip} interactive><Text style={styles.navText}>‹ @{friend.profile.handle}</Text></Glass>
       </Pressable>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.eyebrow}>COMPARE</Text>
-        <Text style={styles.title}>Me vs. {friend.profile.display_name}</Text>
+        <Text style={styles.title}>Me vs. @{friend.profile.handle}</Text>
         <Text style={styles.subtitle}>Differences use each person’s latest published calculation window.</Text>
 
         {!comparison && !error && <ActivityIndicator color={theme.accent} style={styles.loader} />}
@@ -77,7 +77,7 @@ export default function CompareFriendScreen({ friend, onBack }: CompareFriendScr
                 </Suspense>
               </Glass>
               <Glass style={[styles.mapCard, { width: mapWidth }]}>
-                <Text style={styles.mapName}>{friend.profile.display_name}</Text>
+                <Text style={styles.mapName}>@{friend.profile.handle}</Text>
                 <Suspense fallback={<ActivityIndicator color={theme.accent} />}>
                   <BodyHeatmap
                     width={mapWidth}

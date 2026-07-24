@@ -803,7 +803,6 @@ export interface SocialProfile {
 
 export interface SocialProfileUpdate {
   handle: string;
-  display_name: string;
   avatar_url?: string | null;
   discoverable?: boolean;
 }

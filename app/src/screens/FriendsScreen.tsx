@@ -11,7 +11,6 @@ import {
   View,
 } from 'react-native';
 import {
-  BackendError,
   FriendVisibility,
   Friendship,
   SocialProfile,
@@ -22,6 +21,12 @@ import FadeIn from '../ui/FadeIn';
 import Glass from '../ui/Glass';
 import { useAccountState } from '../state/AccountState';
 import { useAppState } from '../state/AppState';
+import {
+  isProfileNotCreated,
+  isValidUsername,
+  normalizeUsername,
+  socialApiUnavailableMessage,
+} from '../social/usernames';
 
 interface FriendsScreenProps {
   onBack: () => void;
@@ -36,11 +41,7 @@ const DEFAULT_VISIBILITY: FriendVisibility = {
 };
 
 function Avatar({ profile, size = 46 }: { profile: SocialProfile; size?: number }) {
-  const initials = profile.display_name
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join('');
+  const initials = profile.handle.slice(0, 2).toUpperCase();
   return (
     <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2 }]}>
       <Text style={[styles.avatarText, { fontSize: size * 0.35 }]}>{initials || '?'}</Text>
@@ -63,8 +64,7 @@ function PersonRow({
     <Pressable onPress={onPress} disabled={!onPress} style={styles.personRow}>
       <Avatar profile={item.profile} />
       <View style={styles.personCopy}>
-        <Text style={styles.personName}>{item.profile.display_name}</Text>
-        <Text style={styles.handle}>@{item.profile.handle}</Text>
+        <Text style={styles.personName}>@{item.profile.handle}</Text>
       </View>
       {secondaryAction && (
         <Pressable onPress={secondaryAction.onPress} hitSlop={8}>
@@ -86,7 +86,6 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
   const app = useAppState();
   const [profile, setProfile] = useState<SocialProfile | null>(null);
   const [profileMissing, setProfileMissing] = useState(false);
-  const [displayName, setDisplayName] = useState('');
   const [handle, setHandle] = useState('');
   const [visibility, setVisibility] = useState<FriendVisibility>(DEFAULT_VISIBILITY);
   const [friends, setFriends] = useState<Friendship[]>([]);
@@ -103,7 +102,6 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
     try {
       const ownProfile = await social.profile();
       setProfile(ownProfile);
-      setDisplayName(ownProfile.display_name);
       setHandle(ownProfile.handle);
       setProfileMissing(false);
       const [list, settings] = await Promise.all([
@@ -120,10 +118,10 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
         shared_splits: settings.shared_splits,
       });
     } catch (cause) {
-      if (cause instanceof BackendError && cause.status === 404) {
+      if (isProfileNotCreated(cause)) {
         setProfileMissing(true);
       } else {
-        setMessage(cause instanceof Error ? cause.message : 'Friends could not be loaded.');
+        setMessage(socialApiUnavailableMessage(cause));
       }
     } finally {
       setBusy(null);
@@ -209,15 +207,14 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
     try {
       const saved = await social.saveProfile({
         handle,
-        display_name: displayName,
         discoverable: true,
       });
       setProfile(saved);
       setProfileMissing(false);
-      setMessage('Profile ready. Friends can now find your exact username.');
+      setMessage('Username ready. Friends can now find you by exact username.');
       await load();
     } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : 'Profile could not be saved.');
+      setMessage(socialApiUnavailableMessage(cause));
       setBusy(null);
     }
   };
@@ -234,7 +231,7 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
   };
 
   const search = async () => {
-    const normalized = query.trim().replace(/^@/, '');
+    const normalized = normalizeUsername(query);
     if (!normalized) return;
     setBusy('search');
     setFound(null);
@@ -309,29 +306,23 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
             <Glass style={styles.card}>
               <Text style={styles.cardTitle}>Create your friend profile</Text>
               <Text style={styles.cardBody}>
-                Friends can find this exact username. Your email and workout history stay private.
+                Choose one unique username. Friends must enter it exactly; your email and workout
+                history stay private.
               </Text>
               <TextInput
-                value={displayName}
-                onChangeText={setDisplayName}
-                placeholder="Display name"
-                placeholderTextColor={theme.textDim}
-                style={styles.input}
-                maxLength={60}
-              />
-              <TextInput
                 value={handle}
-                onChangeText={setHandle}
+                onChangeText={(value) => setHandle(normalizeUsername(value))}
                 autoCapitalize="none"
                 autoCorrect={false}
-                placeholder="username"
+                placeholder="Username"
                 placeholderTextColor={theme.textDim}
                 style={styles.input}
                 maxLength={24}
               />
+              <Text style={styles.inputHint}>3–24 letters, numbers, or underscores.</Text>
               <Pressable
                 onPress={saveProfile}
-                disabled={busy === 'profile' || displayName.trim().length === 0 || handle.length < 3}
+                disabled={busy === 'profile' || !isValidUsername(handle)}
                 style={styles.primaryButton}
               >
                 <Text style={styles.primaryButtonText}>
@@ -346,8 +337,7 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
               <Glass style={styles.profileCard}>
                 <Avatar profile={profile} size={58} />
                 <View style={styles.personCopy}>
-                  <Text style={styles.profileName}>{profile.display_name}</Text>
-                  <Text style={styles.handle}>@{profile.handle}</Text>
+                  <Text style={styles.profileName}>@{profile.handle}</Text>
                 </View>
                 <Pressable
                   onPress={() =>
@@ -369,7 +359,7 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
                   <TextInput
                     value={query}
                     onChangeText={(value) => {
-                      setQuery(value);
+                      setQuery(normalizeUsername(value));
                       setFound(null);
                     }}
                     onSubmitEditing={search}
@@ -389,8 +379,7 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
                   <View style={styles.searchResult}>
                     <Avatar profile={found} />
                     <View style={styles.personCopy}>
-                      <Text style={styles.personName}>{found.display_name}</Text>
-                      <Text style={styles.handle}>@{found.handle}</Text>
+                      <Text style={styles.personName}>@{found.handle}</Text>
                     </View>
                     <Pressable onPress={sendRequest} style={styles.smallAction}>
                       <Text style={styles.smallActionText}>
@@ -544,6 +533,7 @@ const styles = StyleSheet.create({
   inviteButton: { borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.08)', paddingHorizontal: 14, paddingVertical: 9 },
   inviteText: { color: theme.text, fontSize: 13, fontWeight: '700' },
   input: { color: theme.text, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: theme.border, borderRadius: 15, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, marginBottom: 10 },
+  inputHint: { color: theme.textDim, fontSize: 11, marginTop: -3, marginBottom: 10, marginLeft: 2 },
   primaryButton: { backgroundColor: theme.accent, borderRadius: 16, paddingVertical: 13, alignItems: 'center', marginTop: 3 },
   primaryButtonText: { color: '#07150b', fontSize: 14, fontWeight: '800' },
   sectionLabel: { color: theme.textDim, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 11 },
