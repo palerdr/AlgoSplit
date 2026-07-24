@@ -20,3 +20,8 @@
 \ir ../migrations/016_durable_analysis_snapshots.sql
 \ir ../migrations/017_repair_workout_idempotency_schema.sql
 \ir ../migrations/018_split_shares.sql
+\ir ../migrations/019_social_friends_mvp.sql
+\ir ../migrations/020_social_friends_advisor_followup.sql
+\ir ../migrations/021_social_friends_privilege_hardening.sql
+\ir ../migrations/022_reconcile_social_split_share_name.sql
+\ir ../migrations/023_split_share_function_privilege_hardening.sql

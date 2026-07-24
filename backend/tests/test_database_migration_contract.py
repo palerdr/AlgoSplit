@@ -67,3 +67,92 @@ def test_split_sharing_migration_is_additive_and_immutable():
     assert "GRANT EXECUTE ON FUNCTION public.copy_split_share(TEXT) TO authenticated" in migration
     assert "GRANT EXECUTE ON FUNCTION public.get_public_split_share(TEXT) TO anon" not in migration
     assert "GRANT SELECT ON public.split_shares TO anon" not in migration
+
+
+def test_social_migration_is_in_clean_bootstrap_order():
+    bootstrap = BOOTSTRAP.read_text()
+    public_share_position = bootstrap.index("018_split_shares.sql")
+    social_position = bootstrap.index("019_social_friends_mvp.sql")
+    advisor_position = bootstrap.index("020_social_friends_advisor_followup.sql")
+    privilege_position = bootstrap.index("021_social_friends_privilege_hardening.sql")
+    reconcile_position = bootstrap.index("022_reconcile_social_split_share_name.sql")
+    function_privilege_position = bootstrap.index(
+        "023_split_share_function_privilege_hardening.sql"
+    )
+    assert (
+        public_share_position
+        < social_position
+        < advisor_position
+        < privilege_position
+        < reconcile_position
+        < function_privilege_position
+    )
+
+
+def test_social_publications_are_rls_protected_and_do_not_read_raw_workouts():
+    migration = (MIGRATIONS_DIR / "019_social_friends_mvp.sql").read_text()
+
+    for table in [
+        "profiles",
+        "friendships",
+        "friend_visibility_settings",
+        "social_stimulus_snapshots",
+        "social_weekly_activity_cards",
+        "social_lift_trends",
+        "social_split_shares",
+    ]:
+        assert f"ALTER TABLE public.{table} ENABLE ROW LEVEL SECURITY" in migration
+
+    assert "FROM public.analysis_snapshots" not in migration
+    assert "FROM public.workout_logs" not in migration
+    assert "FROM public.workout_exercises" not in migration
+    assert "published split versions are immutable" in migration
+    assert "lookup_profile_by_handle_exact" in migration
+    assert "REVOKE ALL ON SCHEMA private FROM PUBLIC, anon, authenticated" in migration
+
+
+def test_social_followups_remove_exposed_definer_and_legacy_broad_grants():
+    advisor = (
+        MIGRATIONS_DIR / "020_social_friends_advisor_followup.sql"
+    ).read_text()
+    privileges = (
+        MIGRATIONS_DIR / "021_social_friends_privilege_hardening.sql"
+    ).read_text()
+
+    assert "SECURITY INVOKER" in advisor
+    assert "DROP FUNCTION private.lookup_profile_by_handle_exact(TEXT)" in advisor
+    assert "CREATE INDEX friendships_blocked_by_idx" in advisor
+    assert "REVOKE ALL PRIVILEGES ON TABLE public.profiles" in privileges
+    assert "FROM anon, authenticated" in privileges
+    assert "GRANT SELECT, INSERT, DELETE" in privileges
+    assert "TRUNCATE" not in privileges.split("GRANT", 1)[1]
+
+
+def test_social_split_share_reconciliation_is_narrow_and_idempotent():
+    migration = (
+        MIGRATIONS_DIR / "022_reconcile_social_split_share_name.sql"
+    ).read_text()
+
+    assert "to_regclass('public.social_split_shares') IS NULL" in migration
+    assert "column_name = 'split_version'" in migration
+    assert "column_name = 'token_hash'" in migration
+    assert "ALTER TABLE public.split_shares RENAME TO social_split_shares" in migration
+    assert "RENAME CONSTRAINT split_shares_pkey TO social_split_shares_pkey" in migration
+
+
+def test_split_share_owner_rpcs_revoke_direct_anon_execute():
+    clean_install = (MIGRATIONS_DIR / "018_split_shares.sql").read_text()
+    hardening = (
+        MIGRATIONS_DIR / "023_split_share_function_privilege_hardening.sql"
+    ).read_text()
+
+    for function_signature in [
+        "public.create_split_share(UUID, TEXT)",
+        "public.get_split_share_status(UUID)",
+        "public.revoke_split_shares(UUID)",
+    ]:
+        assert function_signature in clean_install
+        assert function_signature in hardening
+
+    assert hardening.count("FROM PUBLIC, anon, authenticated") == 3
+    assert hardening.count("TO authenticated") == 3

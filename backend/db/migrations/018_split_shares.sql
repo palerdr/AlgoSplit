@@ -584,9 +584,12 @@ END
 $function$;
 
 REVOKE ALL ON FUNCTION public.reject_split_share_updates() FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.create_split_share(UUID, TEXT) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.get_split_share_status(UUID) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.revoke_split_shares(UUID) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.create_split_share(UUID, TEXT)
+    FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.get_split_share_status(UUID)
+    FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.revoke_split_shares(UUID)
+    FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.get_public_split_share(TEXT)
     FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.copy_split_share(TEXT)

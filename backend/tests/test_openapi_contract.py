@@ -19,6 +19,15 @@ def test_openapi_contains_core_paths():
         "/api/split-shares/{token}/copy",
         "/api/splits/{split_id}/analyze",
         "/api/analyze-split",
+        "/api/profile",
+        "/api/friends",
+        "/api/friends/requests",
+        "/api/friends/requests/{request_id}/accept",
+        "/api/friends/{friend_id}/snapshot",
+        "/api/friends/{friend_id}/compare",
+        "/api/splits/{split_id}/share",
+        "/api/friends/{friend_id}/shared-splits",
+        "/api/shared-splits/{share_id}/copy",
     ]:
         assert required in paths
 

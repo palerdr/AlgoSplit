@@ -146,6 +146,12 @@ RATE_LIMIT_RULES = [
     RateLimitRule(prefixes=["/auth/login", "/auth/signup", "/auth/forgot-password", "/auth/reset-password"], limit=5, window=60, scope="ip"),
     RateLimitRule(prefixes=["/api/split-shares/"], limit=30, window=60, scope="ip"),
     RateLimitRule(
+        prefixes=["/api/profiles/lookup", "/api/friends/requests"],
+        limit=30,
+        window=60,
+        scope="user_or_ip",
+    ),
+    RateLimitRule(
         prefixes=["/api/analyze-split", "/api/parse-exercise", "/api/analyze-workouts"],
         limit=200,
         window=60,
@@ -410,6 +416,7 @@ from api.routes import (
     custom_exercises_router, comparisons_router,
     programs_router, session_templates_router, program_sessions_router, program_diagnostics_router,
     periodization_router, meso_templates_router, bodyweight_router, split_shares_router,
+    periodization_router, meso_templates_router, bodyweight_router, split_shares_router, social_router,
 )
 
 # Include routers
@@ -428,4 +435,5 @@ app.include_router(periodization_router)  # Periodization router (has its own /a
 app.include_router(meso_templates_router)  # Meso templates router (has its own /api/meso-templates prefix)
 app.include_router(bodyweight_router)  # Bodyweight tracking router (has its own /api/bodyweight prefix)
 app.include_router(split_shares_router)  # Immutable split sharing and public token lookup
+app.include_router(social_router)  # Privacy-first profiles, friendships, snapshots, and split shares
 app.include_router(analysis_routes.router, prefix="/api", tags=["analysis"])  # Analysis endpoints

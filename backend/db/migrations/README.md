@@ -14,7 +14,7 @@ This directory contains SQL migration files for setting up the AlgoSplit databas
    - `003_create_exercise_overrides.sql`
    - `004_setup_rls_policies.sql`
    - `005_create_triggers.sql`
-   - Continue through `018_split_shares.sql`. For a clean database,
+   - Continue through `023_split_share_function_privilege_hardening.sql`. For a clean database,
      prefer the ordered bootstrap file in `backend/db/bootstrap`.
 
 4. After running all migrations, verify the tables were created:
@@ -58,6 +58,11 @@ This directory contains SQL migration files for setting up the AlgoSplit databas
 | `016_durable_analysis_snapshots.sql` | Stores parameter-keyed workout analysis snapshots with per-user RLS |
 | `017_repair_workout_idempotency_schema.sql` | Repairs and verifies the workout RPC's idempotency columns and indexes on legacy databases |
 | `018_split_shares.sql` | Adds immutable, expiring split-share snapshots with reviewed, idempotent recipient copies |
+| `019_social_friends_mvp.sql` | Adds private profiles, mutual friendships, per-feature visibility, immutable social snapshots, and friend-scoped split shares |
+| `020_social_friends_advisor_followup.sql` | Replaces the exposed definer lookup bridge with exact-match RLS context and indexes friendship blocks |
+| `021_social_friends_privilege_hardening.sql` | Revokes legacy broad Data API grants and applies least-privilege access to social tables |
+| `022_reconcile_social_split_share_name.sql` | Renames the early friend-share table on projects that received the social MVP before public link sharing |
+| `023_split_share_function_privilege_hardening.sql` | Removes direct anonymous execution grants from owner-only split-share RPCs |
 
 ## Schema Overview
 

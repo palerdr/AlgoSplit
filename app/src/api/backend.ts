@@ -788,6 +788,135 @@ export interface SharedSplitPreviewResponse {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Social types (backend/schemas/social.py)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export interface SocialProfile {
+  user_id: string;
+  handle: string;
+  display_name: string;
+  avatar_url: string | null;
+  discoverable?: boolean | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface SocialProfileUpdate {
+  handle: string;
+  display_name: string;
+  avatar_url?: string | null;
+  discoverable?: boolean;
+}
+
+export interface FriendVisibility {
+  stimulus_body: boolean;
+  weekly_activity: boolean;
+  lift_progress: boolean;
+  shared_splits: boolean;
+}
+
+export interface FriendVisibilityResponse extends FriendVisibility {
+  owner_id: string;
+  updated_at: string;
+}
+
+export type FriendshipState = 'pending' | 'accepted' | 'declined' | 'blocked';
+export type FriendshipDirection = 'incoming' | 'outgoing' | 'friend';
+
+export interface Friendship {
+  id: string;
+  friend_id: string;
+  state: FriendshipState;
+  direction: FriendshipDirection;
+  profile: SocialProfile;
+  requested_at: string;
+  responded_at: string | null;
+}
+
+export interface FriendList {
+  friends: Friendship[];
+  incoming: Friendship[];
+  outgoing: Friendship[];
+}
+
+export interface WeeklyActivityCard {
+  id: string;
+  week_start: string;
+  week_end: string;
+  workouts_completed: number;
+  planned_workouts: number | null;
+  consistency_percent: number;
+  snapshot_date: string | null;
+  published_at: string;
+}
+
+export interface LiftTrend {
+  id: string;
+  exercise_name: string;
+  change_percent: number;
+  period_label: string;
+  published_at: string;
+}
+
+export interface SocialSnapshot {
+  id: string;
+  owner_id: string;
+  region_stimulus: Record<string, number>;
+  calculation_window_start: string;
+  calculation_window_end: string;
+  calculation_settings: Record<string, unknown>;
+  source_analysis_updated_at: string | null;
+  published_at: string;
+  weekly_activity: WeeklyActivityCard | null;
+  lift_trends: LiftTrend[];
+}
+
+export interface SocialPublishRequest {
+  region_stimulus: Record<string, number>;
+  calculation_window_start: string;
+  calculation_window_end: string;
+  calculation_settings?: Record<string, unknown>;
+  source_analysis_updated_at?: string | null;
+  weekly_activity?: Omit<WeeklyActivityCard, 'id' | 'published_at'> | null;
+  lift_trends?: Array<Omit<LiftTrend, 'id' | 'published_at'>>;
+}
+
+export type RegionDifferenceState = 'ahead' | 'behind' | 'similar';
+
+export interface RegionDifference {
+  region_id: string;
+  me: number;
+  friend: number;
+  delta: number;
+  state: RegionDifferenceState;
+}
+
+export interface SocialComparison {
+  me: SocialSnapshot;
+  friend: SocialSnapshot;
+  regions: RegionDifference[];
+  ahead_count: number;
+  behind_count: number;
+  similar_count: number;
+  explanation: string;
+}
+
+export interface SplitShare {
+  id: string;
+  owner_id: string;
+  recipient_id: string | null;
+  split_name: string;
+  split_version: SplitCreate;
+  analysis_version: AnalysisResponse | null;
+  published_at: string;
+  revoked_at: string | null;
+}
+
+export interface SharedSplitList {
+  shares: SplitShare[];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Analysis types (backend/schemas/models.py)
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -2427,6 +2556,109 @@ export const comparisons = {
   /** DELETE /api/comparisons/{id} — delete a comparison (api/routes/comparisons.py:266). 204. */
   remove(comparisonId: string): Promise<void> {
     return request<void>('DELETE', `/api/comparisons/${encodeURIComponent(comparisonId)}`);
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// social — backend/api/routes/social.py
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const social = {
+  profile(): Promise<SocialProfile> {
+    return request<SocialProfile>('GET', '/api/profile');
+  },
+
+  saveProfile(profile: SocialProfileUpdate): Promise<SocialProfile> {
+    return request<SocialProfile>('PUT', '/api/profile', profile);
+  },
+
+  lookup(handle: string): Promise<SocialProfile> {
+    return request<SocialProfile>(
+      'GET',
+      `/api/profiles/lookup${qs({ handle })}`
+    );
+  },
+
+  visibility(): Promise<FriendVisibilityResponse> {
+    return request<FriendVisibilityResponse>('GET', '/api/profile/visibility');
+  },
+
+  saveVisibility(settings: FriendVisibility): Promise<FriendVisibilityResponse> {
+    return request<FriendVisibilityResponse>('PUT', '/api/profile/visibility', settings);
+  },
+
+  friends(): Promise<FriendList> {
+    return request<FriendList>('GET', '/api/friends');
+  },
+
+  request(handle: string): Promise<Friendship> {
+    return request<Friendship>('POST', '/api/friends/requests', { handle });
+  },
+
+  accept(requestId: string): Promise<Friendship> {
+    return request<Friendship>(
+      'POST',
+      `/api/friends/requests/${encodeURIComponent(requestId)}/accept`
+    );
+  },
+
+  decline(requestId: string): Promise<Friendship> {
+    return request<Friendship>(
+      'POST',
+      `/api/friends/requests/${encodeURIComponent(requestId)}/decline`
+    );
+  },
+
+  remove(friendId: string): Promise<void> {
+    return request<void>('DELETE', `/api/friends/${encodeURIComponent(friendId)}`);
+  },
+
+  block(friendId: string): Promise<void> {
+    return request<void>('POST', `/api/friends/${encodeURIComponent(friendId)}/block`);
+  },
+
+  publishSnapshot(payload: SocialPublishRequest): Promise<SocialSnapshot> {
+    return request<SocialSnapshot>('POST', '/api/social/snapshots/publish', payload);
+  },
+
+  snapshot(friendId: string): Promise<SocialSnapshot> {
+    return request<SocialSnapshot>(
+      'GET',
+      `/api/friends/${encodeURIComponent(friendId)}/snapshot`
+    );
+  },
+
+  compare(friendId: string): Promise<SocialComparison> {
+    return request<SocialComparison>(
+      'GET',
+      `/api/friends/${encodeURIComponent(friendId)}/compare`
+    );
+  },
+
+  shareSplit(splitId: string, recipientId?: string | null): Promise<SplitShare> {
+    return request<SplitShare>(
+      'POST',
+      `/api/splits/${encodeURIComponent(splitId)}/share`,
+      { recipient_id: recipientId ?? null }
+    );
+  },
+
+  sharedSplits(friendId: string): Promise<SharedSplitList> {
+    return request<SharedSplitList>(
+      'GET',
+      `/api/friends/${encodeURIComponent(friendId)}/shared-splits`
+    );
+  },
+
+  copySplit(shareId: string): Promise<SplitResponse> {
+    return request<SplitResponse>(
+      'POST',
+      `/api/shared-splits/${encodeURIComponent(shareId)}/copy`
+    );
+  },
+
+  revokeSplit(shareId: string): Promise<void> {
+    return request<void>('DELETE', `/api/split-shares/${encodeURIComponent(shareId)}`);
   },
 };
 
