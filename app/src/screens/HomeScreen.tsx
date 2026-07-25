@@ -822,7 +822,7 @@ export default function HomeScreen({
       >
         <Pressable onPress={() => { tick(); onDetails(); }}>
           <Glass style={styles.smallButton} interactive>
-            <Text style={styles.smallButtonText}>Details</Text>
+            <Text style={styles.smallButtonText}>Analysis</Text>
           </Glass>
         </Pressable>
         <Pressable onPress={() => { tick(); onWorkouts(); }}>

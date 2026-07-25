@@ -618,7 +618,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       const generation = generationRef.current;
       setWorkoutOverview((previous) => ({ ...previous, loading: true, error: null }));
       const promise = workoutsApi
-        .overview(180)
+        .overview(105)
         .then((response) => {
           if (generation !== generationRef.current) return;
           const visibleWorkouts = response.workouts.filter(
