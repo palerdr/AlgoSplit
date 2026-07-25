@@ -3,6 +3,11 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useAppState } from '../state/AppState';
 import { rollingNet, stimulusScore } from '../analysis/stimulus';
+import {
+  buildTrainingDayCells,
+  TRAINING_GRID_DAYS,
+  type TrainingDayCell,
+} from '../analysis/trainingDays';
 import { useAccountState } from '../state/AccountState';
 import { animalLiftMultiplier, animalTierForWeight } from '../data/animalWeights';
 import { theme } from '../theme';
@@ -92,38 +97,19 @@ function ScoreBar({ score, loading }: { score: number | null; loading: boolean }
   );
 }
 
-// ── GitHub-style training grid (last 15 weeks) ────────────────────
-const GRID_WEEKS = 15;
+// ── Training-day grid (last five weeks) ───────────────────────────
+const GRID_WEEKS = TRAINING_GRID_DAYS / 7;
 
 function TrainingGrid({ history }: { history: OverviewWorkout[] }) {
-  const byDay = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const w of history) {
-      const d = new Date(w.date);
-      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-      map.set(key, (map.get(key) ?? 0) + w.volume);
-    }
-    return map;
-  }, [history]);
+  const days = useMemo(
+    () => buildTrainingDayCells(history.map((workout) => workout.date)),
+    [history]
+  );
 
-  // Walk calendar days (not fixed 24h ticks) so DST transitions don't shift
-  // a column of cells onto the wrong day.
-  const dayKeys = useMemo(() => {
-    const keys: string[] = [];
-    const d = new Date();
-    for (let i = 0; i < GRID_WEEKS * 7; i++) {
-      keys.push(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
-      d.setDate(d.getDate() - 1);
-    }
-    return keys; // index = daysAgo
-  }, []);
-
-  const cellFor = (daysAgo: number) => {
-    const key = dayKeys[daysAgo] ?? '';
-    const volume = byDay.get(key) ?? 0;
-    if (volume <= 0) return styles.gridCellEmpty;
-    if (volume >= 14000) return styles.gridCellHigh;
-    if (volume >= 9000) return styles.gridCellMid;
+  const cellStyle = (day: TrainingDayCell) => {
+    if (day.workoutCount <= 0) return styles.gridCellEmpty;
+    if (day.workoutCount >= 3) return styles.gridCellHigh;
+    if (day.workoutCount === 2) return styles.gridCellMid;
     return styles.gridCellLow;
   };
 
@@ -132,8 +118,19 @@ function TrainingGrid({ history }: { history: OverviewWorkout[] }) {
       {Array.from({ length: GRID_WEEKS }, (_, col) => (
         <View key={col} style={styles.gridCol}>
           {Array.from({ length: 7 }, (_, row) => {
-            const daysAgo = (GRID_WEEKS - 1 - col) * 7 + (6 - row);
-            return <View key={row} style={[styles.gridCell, cellFor(daysAgo)]} />;
+            const day = days[col * 7 + row];
+            const workoutLabel =
+              day.workoutCount === 0
+                ? 'No workouts'
+                : `${day.workoutCount} ${day.workoutCount === 1 ? 'workout' : 'workouts'}`;
+            return (
+              <View
+                key={day.key}
+                accessible
+                accessibilityLabel={`${day.date.toLocaleDateString()}: ${workoutLabel}`}
+                style={[styles.gridCell, cellStyle(day)]}
+              />
+            );
           })}
         </View>
       ))}
@@ -424,7 +421,7 @@ export default function DetailsScreen({ onBack }: DetailsScreenProps) {
         <VolumeChart history={overviewHistory} />
       </FadeIn>
 
-      <Text style={styles.sectionLabel}>Training days</Text>
+      <Text style={styles.sectionLabel}>Training days · last 5 weeks</Text>
       <FadeIn delay={225}>
         <Glass style={styles.gridCard}>
           <TrainingGrid history={overviewHistory} />
@@ -440,7 +437,7 @@ export default function DetailsScreen({ onBack }: DetailsScreenProps) {
           <Text style={styles.backText}>‹ Home</Text>
         </Glass>
       </Pressable>
-      <Text style={styles.title}>Details</Text>
+      <Text style={styles.title}>Analysis</Text>
 
       {/* Tabs */}
       <View style={styles.tabRow}>
