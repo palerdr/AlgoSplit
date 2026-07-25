@@ -1,9 +1,15 @@
-export const TRAINING_GRID_DAYS = 35;
+export const TRAINING_GRID_DAYS = 105;
+
+export interface TrainingDayWorkout {
+  completedAt: string;
+  volume: number;
+}
 
 export interface TrainingDayCell {
   key: string;
   date: Date;
   workoutCount: number;
+  volume: number;
 }
 
 export function localTrainingDayKey(date: Date): string {
@@ -18,18 +24,24 @@ export function localTrainingDayKey(date: Date): string {
  * timestamps. Calendar arithmetic keeps local training days stable across DST.
  */
 export function buildTrainingDayCells(
-  completedAt: readonly string[],
+  workouts: readonly TrainingDayWorkout[],
   now = new Date(),
   dayCount = TRAINING_GRID_DAYS
 ): TrainingDayCell[] {
   const safeDayCount = Math.max(1, Math.floor(dayCount));
-  const counts = new Map<string, number>();
+  const aggregates = new Map<string, { workoutCount: number; volume: number }>();
 
-  for (const value of completedAt) {
-    const date = new Date(value);
+  for (const workout of workouts) {
+    const date = new Date(workout.completedAt);
     if (!Number.isFinite(date.getTime())) continue;
     const key = localTrainingDayKey(date);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
+    const previous = aggregates.get(key);
+    aggregates.set(key, {
+      workoutCount: (previous?.workoutCount ?? 0) + 1,
+      volume:
+        (previous?.volume ?? 0) +
+        (Number.isFinite(workout.volume) ? Math.max(0, workout.volume) : 0),
+    });
   }
 
   return Array.from({ length: safeDayCount }, (_, index) => {
@@ -40,7 +52,8 @@ export function buildTrainingDayCells(
     return {
       key,
       date,
-      workoutCount: counts.get(key) ?? 0,
+      workoutCount: aggregates.get(key)?.workoutCount ?? 0,
+      volume: aggregates.get(key)?.volume ?? 0,
     };
   });
 }

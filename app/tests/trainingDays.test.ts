@@ -7,7 +7,7 @@ import {
 describe('training-day calendar', () => {
   const now = new Date(2026, 6, 24, 12);
 
-  it('maps actual workout timestamps into the last five weeks', () => {
+  it('maps actual workout timestamps and volume into the last 15 weeks', () => {
     const yesterday = new Date(now);
     yesterday.setDate(yesterday.getDate() - 1);
     const outsideWindow = new Date(now);
@@ -15,23 +15,27 @@ describe('training-day calendar', () => {
 
     const cells = buildTrainingDayCells(
       [
-        now.toISOString(),
-        yesterday.toISOString(),
-        yesterday.toISOString(),
-        outsideWindow.toISOString(),
-        'not-a-date',
+        { completedAt: now.toISOString(), volume: 8_000 },
+        { completedAt: yesterday.toISOString(), volume: 6_000 },
+        { completedAt: yesterday.toISOString(), volume: 4_000 },
+        { completedAt: outsideWindow.toISOString(), volume: 20_000 },
+        { completedAt: 'not-a-date', volume: 50_000 },
       ],
       now
     );
 
     expect(cells).toHaveLength(TRAINING_GRID_DAYS);
-    expect(cells[0].key).toBe(localTrainingDayKey(new Date(2026, 5, 20, 12)));
+    const oldestDay = new Date(now);
+    oldestDay.setDate(oldestDay.getDate() - (TRAINING_GRID_DAYS - 1));
+    expect(cells[0].key).toBe(localTrainingDayKey(oldestDay));
     expect(cells.at(-1)).toMatchObject({
       key: localTrainingDayKey(now),
       workoutCount: 1,
+      volume: 8_000,
     });
     expect(cells.find((cell) => cell.key === localTrainingDayKey(yesterday))).toMatchObject({
       workoutCount: 2,
+      volume: 10_000,
     });
     expect(cells.some((cell) => cell.key === localTrainingDayKey(outsideWindow))).toBe(false);
   });

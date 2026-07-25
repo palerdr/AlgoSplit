@@ -97,19 +97,25 @@ function ScoreBar({ score, loading }: { score: number | null; loading: boolean }
   );
 }
 
-// ── Training-day grid (last five weeks) ───────────────────────────
+// ── GitHub-style training grid (last 15 weeks) ────────────────────
 const GRID_WEEKS = TRAINING_GRID_DAYS / 7;
 
 function TrainingGrid({ history }: { history: OverviewWorkout[] }) {
   const days = useMemo(
-    () => buildTrainingDayCells(history.map((workout) => workout.date)),
+    () =>
+      buildTrainingDayCells(
+        history.map((workout) => ({
+          completedAt: workout.date,
+          volume: workout.volume,
+        }))
+      ),
     [history]
   );
 
   const cellStyle = (day: TrainingDayCell) => {
-    if (day.workoutCount <= 0) return styles.gridCellEmpty;
-    if (day.workoutCount >= 3) return styles.gridCellHigh;
-    if (day.workoutCount === 2) return styles.gridCellMid;
+    if (day.volume <= 0) return styles.gridCellEmpty;
+    if (day.volume >= 14000) return styles.gridCellHigh;
+    if (day.volume >= 9000) return styles.gridCellMid;
     return styles.gridCellLow;
   };
 
@@ -421,7 +427,7 @@ export default function DetailsScreen({ onBack }: DetailsScreenProps) {
         <VolumeChart history={overviewHistory} />
       </FadeIn>
 
-      <Text style={styles.sectionLabel}>Training days · last 5 weeks</Text>
+      <Text style={styles.sectionLabel}>Training days</Text>
       <FadeIn delay={225}>
         <Glass style={styles.gridCard}>
           <TrainingGrid history={overviewHistory} />
