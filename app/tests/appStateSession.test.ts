@@ -4,6 +4,10 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
 );
 
+jest.mock('../src/workout/restLiveActivity', () => ({
+  endRestLiveActivity: jest.fn(async () => undefined),
+}));
+
 const mockAsyncStorage = require(
   '@react-native-async-storage/async-storage/jest/async-storage-mock'
 ) as { clear: () => Promise<unknown> };
@@ -25,6 +29,7 @@ import {
 } from '../src/state/AppState';
 import type { AccountWorkoutPlan } from '../src/workout/splitSessions';
 import { sessionWarmupPending } from '../src/workout/sessionState';
+import { endRestLiveActivity } from '../src/workout/restLiveActivity';
 
 const TestRenderer = require('react-test-renderer') as {
   act: (callback: () => void | Promise<void>) => Promise<void>;
@@ -57,6 +62,7 @@ function plan(sets: number[]): AccountWorkoutPlan {
 describe('AppState live session integration', () => {
   beforeEach(async () => {
     await mockAsyncStorage.clear();
+    jest.mocked(endRestLiveActivity).mockClear();
   });
 
   it('starts planned work as one stable live block per prescribed set', async () => {
@@ -212,6 +218,42 @@ describe('AppState live session integration', () => {
     await TestRenderer.act(async () => currentState.editExercise(0, first.exercise));
     expect(currentState.session).toBe(completed);
     expect(currentState.session?.exercises).toHaveLength(2);
+    await TestRenderer.act(async () => renderer!.unmount());
+  });
+
+  it('releases the rest Live Activity when a workout finishes or is discarded', async () => {
+    let renderer: ReturnType<typeof TestRenderer.create>;
+    await TestRenderer.act(async () => {
+      renderer = TestRenderer.create(
+        React.createElement(AppStateProvider, null, React.createElement(Probe))
+      );
+      await Promise.resolve();
+    });
+    await TestRenderer.act(async () => currentState.startPlannedSession(plan([1])));
+    const first = currentState.session!.exercises[0];
+    await TestRenderer.act(async () => {
+      currentState.completeSet(
+        { weight: 100, reps: 10 },
+        {
+          exerciseIndex: 0,
+          exerciseId: first.exercise.id,
+          sessionExerciseId: first.sessionExerciseId,
+          kind: 'working',
+        }
+      );
+    });
+    await TestRenderer.act(async () => {
+      expect(currentState.finishSession()).toBe(true);
+      await Promise.resolve();
+    });
+    expect(endRestLiveActivity).toHaveBeenCalledTimes(1);
+
+    await TestRenderer.act(async () => currentState.startPlannedSession(plan([1])));
+    await TestRenderer.act(async () => {
+      currentState.discardSession();
+      await Promise.resolve();
+    });
+    expect(endRestLiveActivity).toHaveBeenCalledTimes(2);
     await TestRenderer.act(async () => renderer!.unmount());
   });
 });

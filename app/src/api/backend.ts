@@ -462,7 +462,19 @@ async function request<T>(
     !AUTH_ROUTES_WITHOUT_REFRESH.has(path) &&
     (await nativeTokenStore.needsRefresh())
   ) {
-    await refreshOnce();
+    let outcome: RefreshOutcome | null = null;
+    try {
+      outcome = await refreshOnce();
+    } catch (error) {
+      // Refresh five minutes early, but do not strand an otherwise valid
+      // workout write when the app resumes through a brief connectivity or
+      // protected-storage hiccup. The server can still accept the current
+      // access token and a real 401 below will retry the refresh once.
+      if (await nativeTokenStore.needsRefresh(0)) throw error;
+    }
+    if (outcome === 'invalid') {
+      throw new BackendError(401, 'Your session has expired. Please sign in again.');
+    }
   }
 
   const isMutation = method !== 'GET' && method !== 'HEAD';

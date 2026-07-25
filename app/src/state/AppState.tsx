@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { queueFailedWorkoutRetries, syncWorkout } from '../api/sync';
+import { endRestLiveActivity } from '../workout/restLiveActivity';
 import { BackendError } from '../api/backend';
 import { useAccountState } from './AccountState';
 import {
@@ -1026,10 +1027,17 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setLastCompleted(done);
       setHistory((h) => [done, ...h]);
       setSession(null);
+      // A completed rest reminder is deliberately kept in the Dynamic Island
+      // while the workout continues. The session lifecycle owns the final
+      // teardown so every finish path releases that system surface.
+      void endRestLiveActivity();
       return true;
     },
 
-    discardSession: () => setSession(null),
+    discardSession: () => {
+      void endRestLiveActivity();
+      setSession(null);
+    },
   };
 
   return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;

@@ -171,6 +171,33 @@ describe('native authentication lifecycle', () => {
     expect(fetchMock.mock.calls[1][0]).toBe('http://localhost:8000/auth/user');
   });
 
+  it('uses a still-valid access token when an early refresh is temporarily unavailable', async () => {
+    await nativeTokenStore.save('expiring-access', 'refresh-1', 60);
+    const fetchMock = jest
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(response(200, { id: 'user-1', email: 'user@example.com' }));
+
+    await expect(auth.me()).resolves.toMatchObject({ id: 'user-1' });
+
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/auth/refresh');
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      headers: expect.objectContaining({ Authorization: 'Bearer expiring-access' }),
+    });
+  });
+
+  it('does not use an expired access token when its refresh is unavailable', async () => {
+    await nativeTokenStore.save('expired-access', 'refresh-1', 0);
+    const fetchMock = jest
+      .spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new Error('offline'));
+
+    await expect(auth.me()).rejects.toThrow(
+      'Account service is temporarily unavailable. Please try again later.'
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('deduplicates concurrent native refreshes', async () => {
     await nativeTokenStore.save('expired-access', 'refresh-1', 0);
     let userRequests = 0;

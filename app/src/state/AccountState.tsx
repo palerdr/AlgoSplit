@@ -1375,7 +1375,11 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
             markSignedOut();
             return;
           }
-          setStatus('error');
+          // A known user remains authenticated when a proactive refresh fails
+          // for a transient reason. Switching to `error` here replaced an
+          // active workout with the auth screen and looked like a logout even
+          // though the retained credentials worked on the next activation.
+          setStatus('authenticated');
           setSessionError(
             authErrorMessageForDisplay(error, 'Could not reconnect to your account. Try again.')
           );
