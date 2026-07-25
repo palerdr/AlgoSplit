@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -14,6 +14,7 @@ import {
   FriendVisibility,
   Friendship,
   SocialProfile,
+  SocialSnapshot,
   social,
 } from '../api/backend';
 import { theme } from '../theme';
@@ -27,10 +28,18 @@ import {
   normalizeUsername,
   socialApiUnavailableMessage,
 } from '../social/usernames';
+import { friendInviteShareContent } from '../social/friendInviteLink';
+import {
+  liftTrendCandidates,
+  localDateKey,
+  weeklyActivityPublication,
+} from '../social/publishing';
 
 interface FriendsScreenProps {
   onBack: () => void;
   onFriend: (friend: Friendship) => void;
+  invitedHandle?: string | null;
+  onInviteHandled?: (handle: string) => void;
 }
 
 const DEFAULT_VISIBILITY: FriendVisibility = {
@@ -56,8 +65,8 @@ function PersonRow({
   onPress,
 }: {
   item: Friendship;
-  action?: { label: string; onPress: () => void };
-  secondaryAction?: { label: string; onPress: () => void };
+  action?: { label: string; onPress?: () => void; disabled?: boolean };
+  secondaryAction?: { label: string; onPress: () => void; disabled?: boolean };
   onPress?: () => void;
 }) {
   return (
@@ -67,21 +76,38 @@ function PersonRow({
         <Text style={styles.personName}>@{item.profile.handle}</Text>
       </View>
       {secondaryAction && (
-        <Pressable onPress={secondaryAction.onPress} hitSlop={8}>
+        <Pressable
+          onPress={secondaryAction.onPress}
+          disabled={secondaryAction.disabled}
+          hitSlop={8}
+        >
           <Text style={styles.secondaryAction}>{secondaryAction.label}</Text>
         </Pressable>
       )}
-      {action && (
-        <Pressable onPress={action.onPress} style={styles.smallAction}>
+      {action?.onPress ? (
+        <Pressable
+          onPress={action.onPress}
+          disabled={action.disabled}
+          style={styles.smallAction}
+        >
           <Text style={styles.smallActionText}>{action.label}</Text>
         </Pressable>
-      )}
+      ) : action ? (
+        <View style={styles.statusBadge}>
+          <Text style={styles.statusText}>{action.label}</Text>
+        </View>
+      ) : null}
       {onPress && <Text style={styles.chevron}>›</Text>}
     </Pressable>
   );
 }
 
-export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) {
+export default function FriendsScreen({
+  onBack,
+  onFriend,
+  invitedHandle = null,
+  onInviteHandled,
+}: FriendsScreenProps) {
   const account = useAccountState();
   const app = useAppState();
   const [profile, setProfile] = useState<SocialProfile | null>(null);
@@ -93,8 +119,12 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
   const [outgoing, setOutgoing] = useState<Friendship[]>([]);
   const [query, setQuery] = useState('');
   const [found, setFound] = useState<SocialProfile | null>(null);
+  const [currentSnapshot, setCurrentSnapshot] = useState<SocialSnapshot | null>(null);
+  const [selectedLiftNames, setSelectedLiftNames] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>('load');
   const [message, setMessage] = useState<string | null>(null);
+  const attemptedInviteRef = useRef<string | null>(null);
+  const availableLiftTrends = useMemo(() => liftTrendCandidates(app.history), [app.history]);
 
   const load = useCallback(async () => {
     setBusy('load');
@@ -104,9 +134,10 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
       setProfile(ownProfile);
       setHandle(ownProfile.handle);
       setProfileMissing(false);
-      const [list, settings] = await Promise.all([
+      const [list, settings, published] = await Promise.all([
         social.friends(),
         social.visibility().catch(() => ({ ...DEFAULT_VISIBILITY })),
+        social.currentSnapshot().catch(() => null),
       ]);
       setFriends(list.friends);
       setIncoming(list.incoming);
@@ -117,6 +148,10 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
         lift_progress: settings.lift_progress,
         shared_splits: settings.shared_splits,
       });
+      setCurrentSnapshot(published);
+      setSelectedLiftNames(
+        published?.lift_trends.map((trend) => trend.exercise_name).slice(0, 5) ?? []
+      );
     } catch (cause) {
       if (isProfileNotCreated(cause)) {
         setProfileMissing(true);
@@ -134,6 +169,48 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
     void account.ensureSplits();
   }, [load]);
 
+  const lookupUsername = useCallback(async (
+    value: string,
+    fromInvite = false
+  ) => {
+    const normalized = normalizeUsername(value);
+    if (!isValidUsername(normalized)) return;
+    setBusy('search');
+    setFound(null);
+    setMessage(null);
+    try {
+      const result = await social.lookup(normalized);
+      setFound(result);
+      if (fromInvite) {
+        setMessage(`@${result.handle} invited you. Tap Add to send a friend request.`);
+        onInviteHandled?.(normalized);
+      }
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'Username not found.');
+      const status = (cause as { status?: unknown } | null)?.status;
+      if (fromInvite && typeof status === 'number' && status >= 400 && status < 500) {
+        onInviteHandled?.(normalized);
+      }
+    } finally {
+      setBusy(null);
+    }
+  }, [onInviteHandled]);
+
+  useEffect(() => {
+    const normalized = normalizeUsername(invitedHandle ?? '');
+    if (
+      !profile ||
+      busy === 'load' ||
+      !isValidUsername(normalized) ||
+      attemptedInviteRef.current === normalized
+    ) {
+      return;
+    }
+    attemptedInviteRef.current = normalized;
+    setQuery(normalized);
+    void lookupUsername(normalized, true);
+  }, [busy, invitedHandle, lookupUsername, profile]);
+
   const publishCurrentSnapshot = async () => {
     const analysis = account.recentStimulus.data;
     if (!analysis) {
@@ -145,23 +222,14 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
     const now = new Date();
     const start = new Date(now);
     start.setDate(start.getDate() - 6);
-    const dateKey = (date: Date) => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    };
-    const cutoff = now.getTime() - 7 * 86_400_000;
-    const workoutsThisWeek = app.history.filter(
-      (workout) => new Date(workout.date).getTime() >= cutoff
-    ).length;
+    const liftSelection = new Set(selectedLiftNames);
     try {
-      await social.publishSnapshot({
+      const published = await social.publishSnapshot({
         region_stimulus: Object.fromEntries(
           analysis.muscles.map((muscle) => [muscle.region_id, muscle.net_stimulus])
         ),
-        calculation_window_start: dateKey(start),
-        calculation_window_end: dateKey(now),
+        calculation_window_start: localDateKey(start),
+        calculation_window_end: localDateKey(now),
         calculation_settings: {
           stimulus_duration: analysis.stimulus_duration,
           maintenance_volume: analysis.maintenance_volume,
@@ -170,16 +238,14 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
         source_analysis_updated_at: account.recentStimulus.fetchedAt
           ? new Date(account.recentStimulus.fetchedAt).toISOString()
           : null,
-        weekly_activity: {
-          week_start: dateKey(start),
-          week_end: dateKey(now),
-          workouts_completed: workoutsThisWeek,
-          planned_workouts: null,
-          consistency_percent: Math.min(100, Math.round((workoutsThisWeek / 7) * 100)),
-          snapshot_date: dateKey(now),
-        },
-        lift_trends: [],
+        weekly_activity: weeklyActivityPublication(app.history, now),
+        lift_trends: visibility.lift_progress
+          ? availableLiftTrends
+              .filter((trend) => liftSelection.has(trend.exercise_name))
+              .slice(0, 5)
+          : [],
       });
+      setCurrentSnapshot(published);
       setMessage('A new sanitized Stimulus Body snapshot is now shared.');
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : 'Snapshot could not be published.');
@@ -211,8 +277,8 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
       });
       setProfile(saved);
       setProfileMissing(false);
-      setMessage('Username ready. Friends can now find you by exact username.');
       await load();
+      setMessage('Username ready. Friends can now find you by exact username.');
     } catch (cause) {
       setMessage(socialApiUnavailableMessage(cause));
       setBusy(null);
@@ -222,38 +288,31 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
   const updateVisibility = async (key: keyof FriendVisibility, value: boolean) => {
     const next = { ...visibility, [key]: value };
     setVisibility(next);
+    setBusy(`visibility:${key}`);
     try {
       await social.saveVisibility(next);
     } catch (cause) {
       setVisibility(visibility);
       setMessage(cause instanceof Error ? cause.message : 'Visibility could not be updated.');
-    }
-  };
-
-  const search = async () => {
-    const normalized = normalizeUsername(query);
-    if (!normalized) return;
-    setBusy('search');
-    setFound(null);
-    setMessage(null);
-    try {
-      setFound(await social.lookup(normalized));
-    } catch (cause) {
-      setMessage(cause instanceof Error ? cause.message : 'Username not found.');
     } finally {
       setBusy(null);
     }
   };
 
+  const search = async () => {
+    await lookupUsername(query);
+  };
+
   const sendRequest = async () => {
-    if (!found) return;
+    if (!found || busy === 'request') return;
     setBusy('request');
+    const requestedHandle = found.handle;
     try {
-      await social.request(found.handle);
+      await social.request(requestedHandle);
       setFound(null);
       setQuery('');
-      setMessage(`Request sent to @${found.handle}.`);
       await load();
+      setMessage(`Request sent to @${requestedHandle}.`);
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : 'Request could not be sent.');
       setBusy(null);
@@ -266,10 +325,32 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
       if (accept) await social.accept(item.id);
       else await social.decline(item.id);
       await load();
+      setMessage(accept ? `You and @${item.profile.handle} are now friends.` : 'Request declined.');
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : 'Request could not be updated.');
       setBusy(null);
     }
+  };
+
+  const shareInvite = async () => {
+    if (!profile || busy === 'invite') return;
+    setBusy('invite');
+    setMessage(null);
+    try {
+      await Share.share(friendInviteShareContent(profile.handle));
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'Invite could not be shared.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const toggleLiftSelection = (exerciseName: string, enabled: boolean) => {
+    setSelectedLiftNames((current) => {
+      if (!enabled) return current.filter((name) => name !== exerciseName);
+      if (current.includes(exerciseName) || current.length >= 5) return current;
+      return [...current, exerciseName];
+    });
   };
 
   const visibilityRows: Array<[keyof FriendVisibility, string, string]> = [
@@ -337,14 +418,15 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
                   <Text style={styles.profileName}>@{profile.handle}</Text>
                 </View>
                 <Pressable
-                  onPress={() =>
-                    Share.share({
-                      message: `Add me on AlgoSplit: @${profile.handle}`,
-                    })
-                  }
+                  onPress={shareInvite}
+                  disabled={busy === 'invite'}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Invite someone to add @${profile.handle}`}
                   style={styles.inviteButton}
                 >
-                  <Text style={styles.inviteText}>Invite</Text>
+                  <Text style={styles.inviteText}>
+                    {busy === 'invite' ? 'Opening…' : 'Invite'}
+                  </Text>
                 </Pressable>
               </Glass>
             </FadeIn>
@@ -366,7 +448,16 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
                     placeholderTextColor={theme.textDim}
                     style={[styles.input, styles.searchInput]}
                   />
-                  <Pressable onPress={search} style={styles.searchButton}>
+                  <Pressable
+                    onPress={search}
+                    disabled={busy === 'search' || !isValidUsername(query)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Find username"
+                    style={[
+                      styles.searchButton,
+                      (busy === 'search' || !isValidUsername(query)) && styles.disabledButton,
+                    ]}
+                  >
                     <Text style={styles.searchButtonText}>
                       {busy === 'search' ? '…' : 'Search'}
                     </Text>
@@ -378,7 +469,13 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
                     <View style={styles.personCopy}>
                       <Text style={styles.personName}>@{found.handle}</Text>
                     </View>
-                    <Pressable onPress={sendRequest} style={styles.smallAction}>
+                    <Pressable
+                      onPress={sendRequest}
+                      disabled={busy === 'request'}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Send friend request to @${found.handle}`}
+                      style={styles.smallAction}
+                    >
                       <Text style={styles.smallActionText}>
                         {busy === 'request' ? 'Sending…' : 'Add'}
                       </Text>
@@ -397,7 +494,11 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
                       key={item.id}
                       item={item}
                       secondaryAction={{ label: 'Decline', onPress: () => respond(item, false) }}
-                      action={{ label: busy === item.id ? '…' : 'Accept', onPress: () => respond(item, true) }}
+                      action={{
+                        label: busy === item.id ? '…' : 'Accept',
+                        onPress: () => respond(item, true),
+                        disabled: busy === item.id,
+                      }}
                     />
                   ))}
                 </Glass>
@@ -420,7 +521,7 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
                   <PersonRow
                     key={item.id}
                     item={item}
-                    action={{ label: 'Pending', onPress: () => {} }}
+                    action={{ label: 'Pending' }}
                   />
                 ))}
               </Glass>
@@ -438,6 +539,8 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
                     <Switch
                       value={visibility[key]}
                       onValueChange={(value) => updateVisibility(key, value)}
+                      disabled={busy?.startsWith('visibility:') ?? false}
+                      accessibilityLabel={`Let friends see ${label}`}
                       trackColor={{ false: theme.border, true: theme.accentDeep }}
                       thumbColor={visibility[key] ? theme.accent : '#bbb'}
                     />
@@ -446,6 +549,49 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
               </Glass>
             </FadeIn>
 
+            {visibility.lift_progress && (
+              <FadeIn delay={145}>
+                <Text style={styles.sectionHeading}>Choose lift trends</Text>
+                <Glass style={styles.listCard}>
+                  {availableLiftTrends.length === 0 ? (
+                    <Text style={styles.emptyText}>
+                      Complete the same weighted exercise twice within eight weeks to publish a trend.
+                    </Text>
+                  ) : (
+                    availableLiftTrends.slice(0, 8).map((trend) => {
+                      const selected = selectedLiftNames.includes(trend.exercise_name);
+                      return (
+                        <View key={trend.exercise_name} style={styles.visibilityRow}>
+                          <View style={styles.visibilityCopy}>
+                            <Text style={styles.personName}>{trend.exercise_name}</Text>
+                            <Text style={styles.visibilityDetail}>
+                              {trend.change_percent > 0 ? '+' : ''}
+                              {trend.change_percent.toFixed(1)}% · {trend.period_label}
+                            </Text>
+                          </View>
+                          <Switch
+                            value={selected}
+                            onValueChange={(value) =>
+                              toggleLiftSelection(trend.exercise_name, value)
+                            }
+                            disabled={!selected && selectedLiftNames.length >= 5}
+                            accessibilityLabel={`Publish ${trend.exercise_name} trend`}
+                            trackColor={{ false: theme.border, true: theme.accentDeep }}
+                            thumbColor={selected ? theme.accent : '#bbb'}
+                          />
+                        </View>
+                      );
+                    })
+                  )}
+                  {availableLiftTrends.length > 0 && (
+                    <Text style={styles.selectionNote}>
+                      Select up to five. Only the derived percentage and period are published.
+                    </Text>
+                  )}
+                </Glass>
+              </FadeIn>
+            )}
+
             <FadeIn delay={155}>
               <Text style={styles.sectionHeading}>Publish current snapshot</Text>
               <Glass style={styles.publishCard}>
@@ -453,16 +599,30 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
                 <Text style={styles.visibilityDetail}>
                   Publishes only the 29 derived region values and calculation window—never workout rows.
                 </Text>
+                {currentSnapshot && (
+                  <Text style={styles.publishedStatus}>
+                    Currently shared · updated {new Date(currentSnapshot.published_at).toLocaleString()}
+                    {'\n'}
+                    Window {currentSnapshot.calculation_window_start}–{currentSnapshot.calculation_window_end}
+                  </Text>
+                )}
                 <Pressable
                   onPress={publishCurrentSnapshot}
                   disabled={busy === 'snapshot' || !account.recentStimulus.data}
-                  style={styles.publishButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Publish current social snapshot"
+                  style={[
+                    styles.publishButton,
+                    (busy === 'snapshot' || !account.recentStimulus.data) && styles.disabledButton,
+                  ]}
                 >
                   <Text style={styles.publishButtonText}>
                     {busy === 'snapshot'
                       ? 'Publishing…'
                       : account.recentStimulus.data
-                        ? 'Publish current snapshot'
+                        ? currentSnapshot
+                          ? 'Publish updated snapshot'
+                          : 'Publish current snapshot'
                         : 'Stimulus Body unavailable'}
                   </Text>
                 </Pressable>
@@ -484,6 +644,8 @@ export default function FriendsScreen({ onBack, onFriend }: FriendsScreenProps) 
                       <Pressable
                         onPress={() => publishSplit(split.id, split.name)}
                         disabled={busy === `split:${split.id}`}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Publish ${split.name} to friends`}
                         style={styles.smallAction}
                       >
                         <Text style={styles.smallActionText}>
@@ -543,15 +705,20 @@ const styles = StyleSheet.create({
   personRow: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border },
   smallAction: { backgroundColor: theme.accentDeep, borderRadius: 13, paddingHorizontal: 12, paddingVertical: 8 },
   smallActionText: { color: theme.accent, fontSize: 12, fontWeight: '800' },
+  statusBadge: { backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 13, paddingHorizontal: 12, paddingVertical: 8 },
+  statusText: { color: theme.textDim, fontSize: 12, fontWeight: '700' },
   secondaryAction: { color: '#E27878', fontSize: 12, fontWeight: '700' },
   chevron: { color: theme.textDim, fontSize: 24, marginLeft: 3 },
   emptyText: { color: theme.textDim, fontSize: 13, lineHeight: 19, paddingVertical: 18 },
   visibilityRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border },
   visibilityCopy: { flex: 1 },
   visibilityDetail: { color: theme.textDim, fontSize: 11, marginTop: 3 },
+  selectionNote: { color: theme.textDim, fontSize: 10, lineHeight: 15, paddingVertical: 12 },
   message: { color: theme.accent, fontSize: 13, lineHeight: 19, textAlign: 'center', marginVertical: 8 },
   privacyNote: { color: theme.textDim, opacity: 0.75, fontSize: 11, lineHeight: 17, textAlign: 'center', marginTop: 9, paddingHorizontal: 18 },
   publishCard: { borderRadius: 24, padding: 18, marginBottom: 18 },
   publishButton: { backgroundColor: theme.accent, borderRadius: 15, alignItems: 'center', paddingVertical: 12, marginTop: 14 },
   publishButtonText: { color: '#07150b', fontSize: 13, fontWeight: '800' },
+  publishedStatus: { color: theme.accent, fontSize: 10, lineHeight: 15, marginTop: 12 },
+  disabledButton: { opacity: 0.45 },
 });

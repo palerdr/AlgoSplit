@@ -882,6 +882,11 @@ export interface SocialSnapshot {
   lift_trends: LiftTrend[];
 }
 
+export interface FriendActivity {
+  weekly_activity: WeeklyActivityCard | null;
+  lift_trends: LiftTrend[];
+}
+
 export interface SocialPublishRequest {
   region_stimulus: Record<string, number>;
   calculation_window_start: string;
@@ -2632,10 +2637,21 @@ export const social = {
     return request<SocialSnapshot>('POST', '/api/social/snapshots/publish', payload);
   },
 
+  currentSnapshot(): Promise<SocialSnapshot> {
+    return request<SocialSnapshot>('GET', '/api/social/snapshots/current');
+  },
+
   snapshot(friendId: string): Promise<SocialSnapshot> {
     return request<SocialSnapshot>(
       'GET',
       `/api/friends/${encodeURIComponent(friendId)}/snapshot`
+    );
+  },
+
+  activity(friendId: string): Promise<FriendActivity> {
+    return request<FriendActivity>(
+      'GET',
+      `/api/friends/${encodeURIComponent(friendId)}/activity`
     );
   },
 

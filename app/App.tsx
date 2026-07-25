@@ -30,6 +30,13 @@ import {
   savePendingSharedSplit,
   sharedSplitTokenFromUrl,
 } from './src/sharing/sharedSplitLink';
+import {
+  cleanFriendInviteUrl,
+  clearPendingFriendInvite,
+  friendInviteHandleFromUrl,
+  loadPendingFriendInvite,
+  savePendingFriendInvite,
+} from './src/social/friendInviteLink';
 
 // Deliberately barebones navigation: one state value, no navigator dependency.
 // Screens hand off through a quick, subtle fade: a dark overlay fades over the
@@ -83,6 +90,7 @@ function Root() {
   const sharedSplitTokenRef = useRef<string | null>(null);
   const [sharedSplitAuthRequested, setSharedSplitAuthRequested] = useState(false);
   const [sharedSplitAutoSave, setSharedSplitAutoSave] = useState(false);
+  const [friendInviteHandle, setFriendInviteHandle] = useState<string | null>(null);
   const [workoutsLandingSplitId, setWorkoutsLandingSplitId] = useState<string | null>(null);
   const [activeFriend, setActiveFriend] = useState<Friendship | null>(null);
   const pendingRef = useRef<Screen | null>(null);
@@ -320,6 +328,18 @@ function Root() {
   }, [account.authReturnScreen, account.clearAuthReturnScreen, account.status]);
 
   useEffect(() => {
+    if (account.status !== 'authenticated' || !friendInviteHandle) return;
+    pendingRef.current = null;
+    workoutLaunchRef.current = null;
+    workoutOrderDraggingRef.current = false;
+    setWorkoutLaunch(null);
+    setActiveFriend(null);
+    anim.stopAnimation();
+    anim.setValue(1);
+    setShown('friends');
+  }, [account.status, friendInviteHandle, anim]);
+
+  useEffect(() => {
     let live = true;
     let urlNavigationGeneration = 0;
 
@@ -332,7 +352,8 @@ function Root() {
 
     const openUrl = (
       url: string | null,
-      pendingShare: Awaited<ReturnType<typeof loadPendingSharedSplit>> = null
+      pendingShare: Awaited<ReturnType<typeof loadPendingSharedSplit>> = null,
+      pendingInvite: Awaited<ReturnType<typeof loadPendingFriendInvite>> = null
     ) => {
       const recovery = recoveryTokenFromUrl(url);
       if (recovery) {
@@ -342,30 +363,51 @@ function Root() {
         setSharedSplitAuthRequested(false);
         setSharedSplitAutoSave(false);
         void clearPendingSharedSplit();
+        setFriendInviteHandle(null);
+        void clearPendingFriendInvite();
         setRecoveryToken(recovery);
         return;
       }
 
       const urlShareToken = sharedSplitTokenFromUrl(url);
-      const shareToken = urlShareToken ?? pendingShare?.token ?? null;
-      if (!shareToken) return;
-      const continueSave = Boolean(
-        pendingShare?.saveAfterAuth && pendingShare.token === shareToken
-      );
+      const urlInviteHandle = friendInviteHandleFromUrl(url);
+      const shareToken = urlShareToken ?? (!urlInviteHandle ? pendingShare?.token : null) ?? null;
+      if (shareToken) {
+        const continueSave = Boolean(
+          pendingShare?.saveAfterAuth && pendingShare.token === shareToken
+        );
+        resetTransientNavigation();
+        setRecoveryToken(null);
+        sharedSplitTokenRef.current = shareToken;
+        setSharedSplitToken(shareToken);
+        setSharedSplitAuthRequested(continueSave);
+        setSharedSplitAutoSave(continueSave);
+        if (!continueSave) void clearPendingSharedSplit();
+        return;
+      }
+
+      const inviteHandle = urlInviteHandle ?? pendingInvite?.handle ?? null;
+      if (!inviteHandle) return;
       resetTransientNavigation();
       setRecoveryToken(null);
-      sharedSplitTokenRef.current = shareToken;
-      setSharedSplitToken(shareToken);
-      setSharedSplitAuthRequested(continueSave);
-      setSharedSplitAutoSave(continueSave);
-      if (!continueSave) void clearPendingSharedSplit();
+      sharedSplitTokenRef.current = null;
+      setSharedSplitToken(null);
+      setSharedSplitAuthRequested(false);
+      setSharedSplitAutoSave(false);
+      void clearPendingSharedSplit();
+      setFriendInviteHandle(inviteHandle);
+      if (urlInviteHandle) void savePendingFriendInvite(urlInviteHandle);
     };
 
     const bootstrapGeneration = urlNavigationGeneration;
-    Promise.all([Linking.getInitialURL(), loadPendingSharedSplit()])
-      .then(([url, pendingShare]) => {
+    Promise.all([
+      Linking.getInitialURL(),
+      loadPendingSharedSplit(),
+      loadPendingFriendInvite(),
+    ])
+      .then(([url, pendingShare, pendingInvite]) => {
         if (live && urlNavigationGeneration === bootstrapGeneration) {
-          openUrl(url, pendingShare);
+          openUrl(url, pendingShare, pendingInvite);
         }
       })
       .catch(() => {});
@@ -456,7 +498,22 @@ function Root() {
     );
   }
 
+  if (friendInviteHandle && account.status !== 'authenticated') {
+    return (
+      <AuthScreen
+        contextMessage={`Sign in or create an account to add @${friendInviteHandle} as a friend.`}
+      />
+    );
+  }
+
   if (account.status !== 'authenticated') return <AuthScreen />;
+
+  const completeFriendInvite = (handle: string) => {
+    if (friendInviteHandle !== handle) return;
+    setFriendInviteHandle(null);
+    void clearPendingFriendInvite(handle);
+    cleanFriendInviteUrl();
+  };
 
   const landNewActiveSplit = (splitId: string) => {
     setActiveSplitLanding({
@@ -520,6 +577,8 @@ function Root() {
         return (
           <FriendsScreen
             onBack={() => go('home')}
+            invitedHandle={friendInviteHandle}
+            onInviteHandled={completeFriendInvite}
             onFriend={(friend) => {
               setActiveFriend(friend);
               go('friend-profile');
@@ -539,19 +598,34 @@ function Root() {
             }}
           />
         ) : (
-          <FriendsScreen onBack={() => go('home')} onFriend={setActiveFriend} />
+          <FriendsScreen
+            onBack={() => go('home')}
+            invitedHandle={friendInviteHandle}
+            onInviteHandled={completeFriendInvite}
+            onFriend={setActiveFriend}
+          />
         );
       case 'friend-compare':
         return activeFriend ? (
           <CompareFriendScreen friend={activeFriend} onBack={() => go('friend-profile')} />
         ) : (
-          <FriendsScreen onBack={() => go('home')} onFriend={setActiveFriend} />
+          <FriendsScreen
+            onBack={() => go('home')}
+            invitedHandle={friendInviteHandle}
+            onInviteHandled={completeFriendInvite}
+            onFriend={setActiveFriend}
+          />
         );
       case 'friend-splits':
         return activeFriend ? (
           <SharedSplitsScreen friend={activeFriend} onBack={() => go('friend-profile')} />
         ) : (
-          <FriendsScreen onBack={() => go('home')} onFriend={setActiveFriend} />
+          <FriendsScreen
+            onBack={() => go('home')}
+            invitedHandle={friendInviteHandle}
+            onInviteHandled={completeFriendInvite}
+            onFriend={setActiveFriend}
+          />
         );
     }
   })();
