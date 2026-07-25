@@ -536,16 +536,15 @@ export default function FriendsScreen({
                       <Text style={styles.personName}>{label}</Text>
                       <Text style={styles.visibilityDetail}>{detail}</Text>
                     </View>
-                    <View style={styles.visibilitySwitchSlot}>
-                      <Switch
-                        value={visibility[key]}
-                        onValueChange={(value) => updateVisibility(key, value)}
-                        disabled={busy?.startsWith('visibility:') ?? false}
-                        accessibilityLabel={`Let friends see ${label}`}
-                        trackColor={{ false: theme.border, true: theme.accentDeep }}
-                        thumbColor={visibility[key] ? theme.accent : '#bbb'}
-                      />
-                    </View>
+                    <Switch
+                      style={styles.visibilitySwitch}
+                      value={visibility[key]}
+                      onValueChange={(value) => updateVisibility(key, value)}
+                      disabled={busy?.startsWith('visibility:') ?? false}
+                      accessibilityLabel={`Let friends see ${label}`}
+                      trackColor={{ false: theme.border, true: theme.accentDeep }}
+                      thumbColor={visibility[key] ? theme.accent : '#bbb'}
+                    />
                   </View>
                 ))}
               </Glass>
@@ -571,18 +570,17 @@ export default function FriendsScreen({
                               {trend.change_percent.toFixed(1)}% · {trend.period_label}
                             </Text>
                           </View>
-                          <View style={styles.visibilitySwitchSlot}>
-                            <Switch
-                              value={selected}
-                              onValueChange={(value) =>
-                                toggleLiftSelection(trend.exercise_name, value)
-                              }
-                              disabled={!selected && selectedLiftNames.length >= 5}
-                              accessibilityLabel={`Publish ${trend.exercise_name} trend`}
-                              trackColor={{ false: theme.border, true: theme.accentDeep }}
-                              thumbColor={selected ? theme.accent : '#bbb'}
-                            />
-                          </View>
+                          <Switch
+                            style={styles.visibilitySwitch}
+                            value={selected}
+                            onValueChange={(value) =>
+                              toggleLiftSelection(trend.exercise_name, value)
+                            }
+                            disabled={!selected && selectedLiftNames.length >= 5}
+                            accessibilityLabel={`Publish ${trend.exercise_name} trend`}
+                            trackColor={{ false: theme.border, true: theme.accentDeep }}
+                            thumbColor={selected ? theme.accent : '#bbb'}
+                          />
                         </View>
                       );
                     })
@@ -714,9 +712,9 @@ const styles = StyleSheet.create({
   secondaryAction: { color: '#E27878', fontSize: 12, fontWeight: '700' },
   chevron: { color: theme.textDim, fontSize: 24, marginLeft: 3 },
   emptyText: { color: theme.textDim, fontSize: 13, lineHeight: 19, paddingVertical: 18 },
-  visibilityRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border },
+  visibilityRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 10, paddingRight: 8, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.border },
   visibilityCopy: { flex: 1 },
-  visibilitySwitchSlot: { width: 52, flexShrink: 0, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
+  visibilitySwitch: { flexShrink: 0, alignSelf: 'center' },
   visibilityDetail: { color: theme.textDim, fontSize: 11, marginTop: 3 },
   selectionNote: { color: theme.textDim, fontSize: 10, lineHeight: 15, paddingVertical: 12 },
   message: { color: theme.accent, fontSize: 13, lineHeight: 19, textAlign: 'center', marginVertical: 8 },
