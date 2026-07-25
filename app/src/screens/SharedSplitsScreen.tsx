@@ -21,6 +21,7 @@ function SharedSplitCard({ share }: { share: SplitShare }) {
   const [expanded, setExpanded] = useState(false);
   const [copying, setCopying] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const sessions = share.split_version.sessions ?? [];
   const exerciseCount = sessions.reduce((total, session) => total + session.exercises.length, 0);
   const topRegions = useMemo(
@@ -32,9 +33,12 @@ function SharedSplitCard({ share }: { share: SplitShare }) {
 
   const copy = async () => {
     setCopying(true);
+    setCopyError(null);
     try {
       await social.copySplit(share.id);
       setSaved(true);
+    } catch (cause) {
+      setCopyError(cause instanceof Error ? cause.message : 'This split could not be saved.');
     } finally {
       setCopying(false);
     }
@@ -88,6 +92,7 @@ function SharedSplitCard({ share }: { share: SplitShare }) {
           {saved ? 'Saved to My Splits ✓' : copying ? 'Saving…' : 'Save a copy to My Splits'}
         </Text>
       </Pressable>
+      {copyError && <Text style={styles.copyError}>{copyError}</Text>}
       <Text style={styles.published}>
         Published {new Date(share.published_at).toLocaleDateString()}
       </Text>
@@ -159,6 +164,7 @@ const styles = StyleSheet.create({
   copySaved: { backgroundColor: 'rgba(65,196,110,0.13)', borderWidth: 1, borderColor: theme.accentDeep },
   copyText: { color: '#07150b', fontSize: 13, fontWeight: '800' },
   copySavedText: { color: theme.accent },
+  copyError: { color: '#E27878', fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: 9 },
   published: { color: theme.textDim, fontSize: 9, textAlign: 'center', marginTop: 9 },
   emptyCard: { borderRadius: 24, padding: 20 },
   emptyTitle: { color: theme.text, fontSize: 17, fontWeight: '700' },

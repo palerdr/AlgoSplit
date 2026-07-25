@@ -8,7 +8,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import { Friendship, SocialSnapshot, social } from '../api/backend';
+import { FriendActivity, Friendship, SocialSnapshot, social } from '../api/backend';
 import { levelsFromNet } from '../analysis/stimulus';
 import { theme } from '../theme';
 import Glass from '../ui/Glass';
@@ -36,16 +36,34 @@ export default function FriendProfileScreen({
 }: FriendProfileScreenProps) {
   const { width } = useWindowDimensions();
   const [snapshot, setSnapshot] = useState<SocialSnapshot | null>(null);
+  const [friendActivity, setFriendActivity] = useState<FriendActivity | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<'remove' | 'block' | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    social.snapshot(friend.friend_id)
-      .then(setSnapshot)
-      .catch((cause) => setError(cause instanceof Error ? cause.message : 'Snapshot unavailable.'))
-      .finally(() => setLoading(false));
+    let live = true;
+    Promise.allSettled([
+      social.snapshot(friend.friend_id),
+      social.activity(friend.friend_id),
+    ]).then(([snapshotResult, activityResult]) => {
+      if (!live) return;
+      if (snapshotResult.status === 'fulfilled') {
+        setSnapshot(snapshotResult.value);
+      } else {
+        setError(
+          snapshotResult.reason instanceof Error
+            ? snapshotResult.reason.message
+            : 'Snapshot unavailable.'
+        );
+      }
+      if (activityResult.status === 'fulfilled') setFriendActivity(activityResult.value);
+      setLoading(false);
+    });
+    return () => {
+      live = false;
+    };
   }, [friend.friend_id]);
 
   const endFriendship = async () => {
@@ -62,7 +80,8 @@ export default function FriendProfileScreen({
     }
   };
 
-  const activity = snapshot?.weekly_activity;
+  const activity = friendActivity?.weekly_activity;
+  const liftTrends = friendActivity?.lift_trends ?? [];
   const mapWidth = Math.min(width - 40, 430);
 
   return (
@@ -83,11 +102,9 @@ export default function FriendProfileScreen({
           <Text style={styles.title}>@{friend.profile.handle}</Text>
         </View>
 
-        {loading ? (
-          <ActivityIndicator color={theme.accent} style={styles.loader} />
-        ) : snapshot ? (
-          <>
-            <Glass style={styles.bodyCard}>
+        {loading && <ActivityIndicator color={theme.accent} style={styles.loader} />}
+        {!loading && snapshot && (
+          <Glass style={styles.bodyCard}>
               <View style={styles.cardHeader}>
                 <View>
                   <Text style={styles.cardTitle}>Current Stimulus Body</Text>
@@ -107,10 +124,25 @@ export default function FriendProfileScreen({
                 </Suspense>
               </View>
               <Text style={styles.updated}>Updated {new Date(snapshot.published_at).toLocaleString()}</Text>
-            </Glass>
+          </Glass>
+        )}
+        {!loading && !snapshot && (
+          <Glass style={styles.emptyCard}>
+            <Text style={styles.cardTitle}>Stimulus Body is private</Text>
+            <Text style={styles.emptyText}>
+              {error ?? `@${friend.profile.handle} has not published a snapshot yet.`}
+            </Text>
+          </Glass>
+        )}
 
+        {!loading && (
+          <>
             <View style={styles.actionRow}>
-              <Pressable onPress={onCompare} style={styles.primaryAction}>
+              <Pressable
+                onPress={onCompare}
+                disabled={!snapshot}
+                style={[styles.primaryAction, !snapshot && styles.disabledAction]}
+              >
                 <Text style={styles.primaryActionText}>Compare</Text>
               </Pressable>
               <Pressable onPress={onSharedSplits} style={styles.secondaryButton}>
@@ -144,11 +176,11 @@ export default function FriendProfileScreen({
               )}
             </Glass>
 
-            {snapshot.lift_trends.length > 0 && (
+            {liftTrends.length > 0 && (
               <>
                 <Text style={styles.sectionHeading}>Selected lift trends</Text>
                 <Glass style={styles.trendsCard}>
-                  {snapshot.lift_trends.map((trend) => (
+                  {liftTrends.map((trend) => (
                     <View key={trend.id} style={styles.trendRow}>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.trendName}>{trend.exercise_name}</Text>
@@ -163,13 +195,6 @@ export default function FriendProfileScreen({
               </>
             )}
           </>
-        ) : (
-          <Glass style={styles.emptyCard}>
-            <Text style={styles.cardTitle}>Stimulus Body is private</Text>
-            <Text style={styles.emptyText}>
-              {error ?? `@${friend.profile.handle} has not published a snapshot yet.`}
-            </Text>
-          </Glass>
         )}
       </ScrollView>
 
@@ -221,6 +246,7 @@ const styles = StyleSheet.create({
   updated: { color: theme.textDim, fontSize: 10, textAlign: 'center', paddingBottom: 15 },
   actionRow: { flexDirection: 'row', gap: 10, marginTop: 12, marginBottom: 22 },
   primaryAction: { flex: 1, backgroundColor: theme.accent, borderRadius: 17, paddingVertical: 13, alignItems: 'center' },
+  disabledAction: { opacity: 0.4 },
   primaryActionText: { color: '#07150b', fontSize: 14, fontWeight: '800' },
   secondaryButton: { flex: 1, backgroundColor: theme.surfaceHigh, borderRadius: 17, paddingVertical: 13, alignItems: 'center', borderWidth: 1, borderColor: theme.border },
   secondaryButtonText: { color: theme.text, fontSize: 14, fontWeight: '700' },

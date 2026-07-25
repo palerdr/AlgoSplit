@@ -143,6 +143,11 @@ class StimulusSnapshotResponse(StimulusSnapshotPublish):
     lift_trends: List[LiftTrendResponse] = Field(default_factory=list)
 
 
+class FriendActivityResponse(BaseModel):
+    weekly_activity: Optional[WeeklyActivityResponse] = None
+    lift_trends: List[LiftTrendResponse] = Field(default_factory=list)
+
+
 DifferenceState = Literal["ahead", "behind", "similar"]
 
 

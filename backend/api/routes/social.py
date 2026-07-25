@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from api.dependencies import AuthUser, get_current_user
 from db.supabase import get_supabase_client_with_token
 from schemas.social import (
+    FriendActivityResponse,
     FriendListResponse,
     FriendRequestCreate,
     FriendshipResponse,
@@ -401,6 +402,35 @@ def _latest_snapshot(supabase, owner_id: str) -> StimulusSnapshotResponse:
     )
 
 
+def _latest_activity(supabase, owner_id: str) -> FriendActivityResponse:
+    activity_result = (
+        supabase.table("social_weekly_activity_cards").select("*")
+        .eq("owner_id", owner_id).order("published_at", desc=True).limit(1).execute()
+    )
+    lifts_result = (
+        supabase.table("social_lift_trends").select("*")
+        .eq("owner_id", owner_id).order("published_at", desc=True).limit(5).execute()
+    )
+    return FriendActivityResponse(
+        weekly_activity=(
+            WeeklyActivityResponse.model_validate(activity_result.data[0])
+            if activity_result.data
+            else None
+        ),
+        lift_trends=[
+            LiftTrendResponse.model_validate(lift) for lift in (lifts_result.data or [])
+        ],
+    )
+
+
+@router.get(
+    "/api/social/snapshots/current",
+    response_model=StimulusSnapshotResponse,
+)
+def get_current_snapshot(current_user: AuthUser = Depends(get_current_user)):
+    return _latest_snapshot(_client(current_user), current_user.id)
+
+
 @router.post(
     "/api/social/snapshots/publish",
     response_model=StimulusSnapshotResponse,
@@ -421,6 +451,16 @@ def publish_snapshot(
     snapshot = supabase.table("social_stimulus_snapshots").insert(snapshot_row).execute()
     if not snapshot.data:
         raise HTTPException(status_code=500, detail="Snapshot could not be published")
+
+    # Weekly activity and lift trends are current cards, not an append-only
+    # history. Replace the previous set so deselected/private trends disappear
+    # instead of resurfacing beside a newer snapshot.
+    supabase.table("social_weekly_activity_cards").delete().eq(
+        "owner_id", current_user.id
+    ).execute()
+    supabase.table("social_lift_trends").delete().eq(
+        "owner_id", current_user.id
+    ).execute()
 
     activity = None
     if payload.weekly_activity:
@@ -451,6 +491,19 @@ def get_friend_snapshot(
     supabase = _client(current_user)
     _require_accepted(supabase, current_user.id, friend_id)
     return _latest_snapshot(supabase, friend_id)
+
+
+@router.get(
+    "/api/friends/{friend_id}/activity",
+    response_model=FriendActivityResponse,
+)
+def get_friend_activity(
+    friend_id: str,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    supabase = _client(current_user)
+    _require_accepted(supabase, current_user.id, friend_id)
+    return _latest_activity(supabase, friend_id)
 
 
 @router.get(

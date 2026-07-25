@@ -357,6 +357,26 @@ class FakeTableQuery:
 
             if self.table_name == "splits":
                 new_row.setdefault("cycle_length", None)
+            elif self.table_name == "friendships":
+                new_row.setdefault("requested_at", now)
+                new_row.setdefault("responded_at", None)
+                new_row.setdefault("blocked_by", None)
+                new_row.setdefault("updated_at", now)
+            elif self.table_name == "friend_visibility_settings":
+                new_row.setdefault("stimulus_body", True)
+                new_row.setdefault("weekly_activity", False)
+                new_row.setdefault("lift_progress", False)
+                new_row.setdefault("shared_splits", True)
+                new_row.setdefault("updated_at", now)
+            elif self.table_name in {
+                "social_stimulus_snapshots",
+                "social_weekly_activity_cards",
+                "social_lift_trends",
+                "social_split_shares",
+            }:
+                new_row.setdefault("published_at", now)
+                if self.table_name == "social_split_shares":
+                    new_row.setdefault("revoked_at", None)
 
             self.client.tables[self.table_name].append(new_row)
             inserted.append(copy.deepcopy(new_row))
@@ -560,6 +580,25 @@ class FakeSupabaseClient:
         return response
 
     def execute_rpc(self, function_name: str, params: dict[str, Any]):
+        if function_name == "lookup_profile_by_handle":
+            handle = str(params.get("p_handle", "")).strip().lower()
+            profile = next(
+                (
+                    row
+                    for row in self.tables.get("profiles", [])
+                    if row.get("handle") == handle
+                    and row.get("discoverable", True)
+                    and row.get("user_id") != "user-123"
+                ),
+                None,
+            )
+            if profile is None:
+                return []
+            return {
+                key: copy.deepcopy(profile.get(key))
+                for key in ("user_id", "handle", "display_name", "avatar_url")
+            }
+
         if function_name == "create_split_share":
             split = next(
                 (
