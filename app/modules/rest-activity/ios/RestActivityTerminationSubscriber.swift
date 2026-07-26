@@ -11,6 +11,25 @@ public final class RestActivityTerminationSubscriber: ExpoAppDelegateSubscriber 
     }
   }
 
+  // Releases a rest that is already over before the process is suspended.
+  // After this the app gets no runtime until the user comes back, so anything
+  // left in the Dynamic Island stays there for as long as they stay away.
+  public func applicationDidEnterBackground(_ application: UIApplication) {
+    let sweepFinished = DispatchSemaphore(value: 0)
+
+    Task.detached(priority: .userInitiated) {
+      defer { sweepFinished.signal() }
+      await handleRestActivityBackgroundTransition()
+    }
+
+    // The sweep ends nothing in the common case (a rest still running, or none
+    // at all) and returns in microseconds. The bounded wait is only here so an
+    // actual end request lands before suspension freezes it mid-flight; it
+    // stays well inside the runtime iOS grants on this transition. Nothing on
+    // this path touches the main actor, so the wait cannot deadlock.
+    _ = sweepFinished.wait(timeout: .now() + 2)
+  }
+
   public func applicationWillTerminate(_ application: UIApplication) {
     let cleanupFinished = DispatchSemaphore(value: 0)
 

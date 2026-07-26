@@ -141,8 +141,9 @@ export default function RestTimer({
     const reason = resolveRestFinishReason(requestedReason, Date.now(), endsAtRef.current);
     committedRef.current = true;
     if (reason === 'expired') {
-      // The completed activity is intentionally left visible after this overlay
-      // unmounts so its expanded action can return the user to the workout.
+      // Completing already retires the activity natively — it leaves the
+      // Dynamic Island and lingers only as a self-dismissing Lock Screen card.
+      // Unmount must not chase it with a redundant end.
       liveActivityDispositionRef.current = 'completed';
       void completeRestLiveActivity();
       void playRestCompletionHaptics().catch(() => {});

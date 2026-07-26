@@ -1027,9 +1027,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       setLastCompleted(done);
       setHistory((h) => [done, ...h]);
       setSession(null);
-      // A completed rest reminder is deliberately kept in the Dynamic Island
-      // while the workout continues. The session lifecycle owns the final
-      // teardown so every finish path releases that system surface.
+      // A finished workout owns nothing on the system's surfaces: this clears
+      // even the self-dismissing Lock Screen card a completed rest leaves
+      // behind, so the split ends with AlgoSplit fully out of the way.
       void endRestLiveActivity();
       return true;
     },

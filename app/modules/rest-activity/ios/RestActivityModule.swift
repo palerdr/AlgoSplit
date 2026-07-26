@@ -4,14 +4,24 @@ import ExpoModulesCore
 // Owns the full lifecycle of the rest-timer Live Activity: one persistent
 // activity per rest, created with typed state (no serialized UI payloads).
 //
+// A rest that is over releases the system surface. The Dynamic Island is a
+// single shared slot — a finished reminder left sitting in it strands whatever
+// the user is actually doing (navigation, CarPlay, a call) out of the island —
+// so completion ENDS the activity rather than parking it in a terminal state.
+// Once ended, iOS drops it from the island immediately and closes its update
+// channel; only a tappable Lock Screen card survives, for a bounded window the
+// system tears down on its own even if the app is never opened again.
+//
 // Deadline behavior without the app running:
 // - staleDate is set to the rest deadline. When it passes, the system
 //   re-renders the widget with isStale == true and the widget flips to its
 //   completion UI. No push, no background task.
 // - On iOS 26+, a second, transient activity is scheduled at the deadline
-//   purely to fire an AlertConfiguration (haptic + expanded island alert).
-//   It removes itself after alerting; the persistent activity remains as the
-//   completion state until the user returns or the next rest starts.
+//   purely to fire an AlertConfiguration (haptic + Lock Screen alert). It
+//   removes itself after alerting.
+// - The persistent activity is swept on every lifecycle edge the app is given
+//   — foreground, background, termination — so a rest that ended while the app
+//   was suspended never outlives the app's next breath of runtime.
 public final class RestActivityModule: Module {
   public func definition() -> ModuleDefinition {
     Name("RestActivity")
@@ -23,24 +33,7 @@ public final class RestActivityModule: Module {
     }
 
     AsyncFunction("complete") { () async in
-      await cancelScheduledAlert()
-
-      // Flip the persistent activity to its completion state. The alert asks
-      // iOS to expand the Dynamic Island (or present on the Lock Screen) so
-      // an in-app completion is just as loud as the scheduled one.
-      for activity in Activity<RestActivityAttributes>.activities {
-        let previous = activity.content.state
-        let completed = RestActivityAttributes.ContentState(
-          startedAtMs: previous.startedAtMs,
-          endsAtMs: previous.endsAtMs,
-          nextUp: previous.nextUp,
-          isComplete: true
-        )
-        await activity.update(
-          ActivityContent(state: completed, staleDate: nil, relevanceScore: 100),
-          alertConfiguration: restAlertConfiguration()
-        )
-      }
+      await endRestActivitiesAsCompleted()
     }
 
     AsyncFunction("end") { () async in
@@ -51,9 +44,20 @@ public final class RestActivityModule: Module {
 
 enum RestActivityConstants {
   static let scheduledAlertIDKey = "algosplit.rest.scheduled-alert-id"
-  // Give an active foreground timer one tick to cancel the scheduled alert
-  // and present the same alert on the persistent activity instead.
+  // Give an active foreground timer one tick to retire the scheduled alert
+  // before it fires: a rest the user watched end needs no buzz.
   static let foregroundGraceSeconds: TimeInterval = 0.75
+  // How long the finished reminder may linger on the Lock Screen after its
+  // activity has ended. The Dynamic Island releases an ended activity
+  // immediately; this only bounds the tappable "Time for your set" card, and
+  // the system removes it without the app running.
+  static let completionResidueSeconds: TimeInterval = 45
+  // Relevance only breaks ties for the single Dynamic Island slot. A running
+  // rest earns its place there; anything finished must never outrank another
+  // app's live activity, which is exactly how a straggling reminder ends up
+  // holding the island hostage.
+  static let runningRelevance: Double = 50
+  static let finishedRelevance: Double = 0
 }
 
 struct RestStartTiming {
@@ -90,7 +94,7 @@ func performRestActivityStart(_ timing: RestStartTiming) async -> Bool {
   let content = ActivityContent(
     state: state,
     staleDate: endsAt,
-    relevanceScore: 50
+    relevanceScore: RestActivityConstants.runningRelevance
   )
 
   do {
@@ -124,11 +128,38 @@ func handleRestActivityForegroundActivation() async {
     return
   }
   await MainActor.run { RestActivityPendingStart.timing = nil }
+  await endFinishedRestActivities(keepingResidue: false)
+}
 
+// Runs as the app leaves the foreground. A rest that finished while the app
+// was in front is released here rather than being frozen into the Dynamic
+// Island for as long as the user stays out of the app — which, for someone who
+// closes AlgoSplit and starts driving, is the whole trip.
+//
+// Deliberately does NOT touch a parked start: that start exists precisely
+// because it raced this transition, and the next activation retries it.
+func handleRestActivityBackgroundTransition() async {
+  await endFinishedRestActivities(keepingResidue: true)
+}
+
+// Ends every activity that has nothing left to say — an app-driven completion,
+// or a deadline the system already passed while the app was suspended — and
+// leaves a still-running rest alone.
+//
+// `keepingResidue` spares an activity that is already ended and merely waiting
+// out its system-owned Lock Screen dismissal. On the way out of the app that
+// card is still the user's way back into the workout; on the way in they are
+// already back, so the reminder has served its purpose and goes.
+func endFinishedRestActivities(keepingResidue: Bool) async {
   let scheduledAlertID = UserDefaults.standard.string(
     forKey: RestActivityConstants.scheduledAlertIDKey
   )
+
   for activity in Activity<RestActivityAttributes>.activities {
+    let retired =
+      activity.activityState == .ended || activity.activityState == .dismissed
+    if keepingResidue && retired { continue }
+
     let state = activity.content.state
     let deadlinePassed =
       Date(timeIntervalSince1970: state.endsAtMs / 1_000).timeIntervalSinceNow <= 0
@@ -140,6 +171,50 @@ func handleRestActivityForegroundActivation() async {
     if state.isComplete || deadlinePassed {
       await activity.end(nil, dismissalPolicy: .immediate)
     }
+  }
+}
+
+// Retires every rest activity into its completion state.
+//
+// Ending — rather than updating and leaving the activity alive — is what
+// releases the Dynamic Island: iOS drops an ended activity from the island at
+// once and stops treating the app as an owner of that surface. The dismissal
+// policy then hands the leftover Lock Screen card to the system on a fixed
+// deadline, so nothing here depends on the app ever being opened again.
+func endRestActivitiesAsCompleted() async {
+  let defaults = UserDefaults.standard
+  // Taken before the loop: the scheduled buzz is redundant once the rest has
+  // finished with the app watching, and must not leave a second card behind.
+  let scheduledAlertID = defaults.string(
+    forKey: RestActivityConstants.scheduledAlertIDKey
+  )
+  defaults.removeObject(forKey: RestActivityConstants.scheduledAlertIDKey)
+
+  let dismissAt = Date().addingTimeInterval(
+    RestActivityConstants.completionResidueSeconds
+  )
+  for activity in Activity<RestActivityAttributes>.activities
+  where activity.activityState != .ended && activity.activityState != .dismissed {
+    guard activity.id != scheduledAlertID else {
+      await activity.end(nil, dismissalPolicy: .immediate)
+      continue
+    }
+
+    let previous = activity.content.state
+    let completed = RestActivityAttributes.ContentState(
+      startedAtMs: previous.startedAtMs,
+      endsAtMs: previous.endsAtMs,
+      nextUp: previous.nextUp,
+      isComplete: true
+    )
+    await activity.end(
+      ActivityContent(
+        state: completed,
+        staleDate: nil,
+        relevanceScore: RestActivityConstants.finishedRelevance
+      ),
+      dismissalPolicy: .after(dismissAt)
+    )
   }
 }
 
@@ -164,10 +239,12 @@ private func scheduleCompletionAlert(
     nextUp: runningState.nextUp,
     isComplete: true
   )
+  // The AlertConfiguration is what makes this loud; relevance would only buy
+  // it the island slot at another app's expense, which is not worth a buzz.
   let content = ActivityContent(
     state: completedState,
     staleDate: nil,
-    relevanceScore: 100
+    relevanceScore: RestActivityConstants.finishedRelevance
   )
 
   do {
@@ -186,20 +263,6 @@ private func scheduleCompletionAlert(
   } catch {
     // Live Activities can be disabled or throttled; the rest timer must
     // never fail because its completion alert could not be scheduled.
-  }
-}
-
-// Ends only the scheduled alert activity, leaving the persistent one alone.
-private func cancelScheduledAlert() async {
-  let defaults = UserDefaults.standard
-  guard let storedID = defaults.string(
-    forKey: RestActivityConstants.scheduledAlertIDKey
-  ) else { return }
-  defaults.removeObject(forKey: RestActivityConstants.scheduledAlertIDKey)
-
-  for activity in Activity<RestActivityAttributes>.activities
-  where activity.id == storedID {
-    await activity.end(nil, dismissalPolicy: .immediate)
   }
 }
 

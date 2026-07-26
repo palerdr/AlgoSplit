@@ -63,7 +63,7 @@ describe('RestTimer Live Activity lifecycle', () => {
     jest.useRealTimers();
   });
 
-  it('preserves the completion activity when a naturally expired overlay unmounts', () => {
+  it('retires a naturally expired activity once, without a redundant end on unmount', () => {
     let renderer: ReturnType<typeof TestRenderer.create>;
     TestRenderer.act(() => {
       renderer = TestRenderer.create(

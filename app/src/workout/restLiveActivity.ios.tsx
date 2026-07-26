@@ -34,7 +34,12 @@ export function startRestLiveActivity({
   });
 }
 
-/** Flips the activity to "Time for your set" and alerts. */
+/**
+ * Retires the activity in its "Time for your set" state. The native side ends
+ * it rather than parking it: the Dynamic Island is released the moment the rest
+ * is over, and the leftover Lock Screen card is on a system-owned dismissal
+ * timer, so nothing survives that would need the app to come back and clear it.
+ */
 export function completeRestLiveActivity(): Promise<void> {
   return enqueueLifecycle(async () => {
     await RestActivity.complete();

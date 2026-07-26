@@ -46,7 +46,7 @@ describe('rest Live Activity', () => {
     expect(mockStart).toHaveBeenCalledWith(1_000, 181_000, null);
   });
 
-  it('completes without ending so the activity stays until the user returns', async () => {
+  it('routes completion through complete(), which retires the activity natively', async () => {
     await completeRestLiveActivity();
 
     expect(mockComplete).toHaveBeenCalledTimes(1);
