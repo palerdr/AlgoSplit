@@ -597,15 +597,9 @@ export default function FriendsScreen({
             <FadeIn delay={155}>
               <Text style={styles.sectionHeading}>Publish current snapshot</Text>
               <Glass style={styles.publishCard}>
-                <Text style={styles.personName}>Share a fresh Stimulus Body</Text>
-                <Text style={styles.visibilityDetail}>
-                  Publishes only the 29 derived region values and calculation window—never workout rows.
-                </Text>
                 {currentSnapshot && (
                   <Text style={styles.publishedStatus}>
-                    Currently shared · updated {new Date(currentSnapshot.published_at).toLocaleString()}
-                    {'\n'}
-                    Window {currentSnapshot.calculation_window_start}–{currentSnapshot.calculation_window_end}
+                    Last updated {new Date(currentSnapshot.published_at).toLocaleDateString()}
                   </Text>
                 )}
                 <Pressable
@@ -722,6 +716,6 @@ const styles = StyleSheet.create({
   publishCard: { borderRadius: 24, padding: 18, marginBottom: 18 },
   publishButton: { backgroundColor: theme.accent, borderRadius: 15, alignItems: 'center', paddingVertical: 12, marginTop: 14 },
   publishButtonText: { color: '#07150b', fontSize: 13, fontWeight: '800' },
-  publishedStatus: { color: theme.accent, fontSize: 10, lineHeight: 15, marginTop: 12 },
+  publishedStatus: { color: theme.accent, fontSize: 10, lineHeight: 15 },
   disabledButton: { opacity: 0.45 },
 });
