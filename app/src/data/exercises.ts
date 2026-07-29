@@ -58,3 +58,16 @@ const byId = new Map(EXERCISES.map((e) => [e.id, e]));
 export function getExercise(id: string): Exercise | undefined {
   return byId.get(id);
 }
+
+// Saved splits store the exercise *name*, not the catalog id — the editor and
+// the backend both round-trip names. First entry wins so the canonical spelling
+// of a duplicated movement resolves rather than a later alias.
+const byName = new Map<string, Exercise>();
+for (const exercise of EXERCISES) {
+  const key = exercise.name.toLocaleLowerCase();
+  if (!byName.has(key)) byName.set(key, exercise);
+}
+
+export function getExerciseByName(name: string): Exercise | undefined {
+  return byName.get(name.trim().toLocaleLowerCase());
+}

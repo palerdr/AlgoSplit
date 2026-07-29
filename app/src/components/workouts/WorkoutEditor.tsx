@@ -204,7 +204,11 @@ export default function WorkoutEditor(props: WorkoutEditorProps) {
           name: exercise.name,
           sets: 3,
           unilateral: exercise.unilateral,
-          resistanceProfile: 'mid',
+          // The movement pattern's own curve, not a blanket 'mid' — pinning mid
+          // silently overrides e.g. a lateral raise's descending profile, which
+          // the leverage model then scores against the wrong muscles. Matches
+          // what replaceWorkoutDraftExercise already does on a swap.
+          resistanceProfile: exercise.resistanceProfile,
         },
       ],
     }));
