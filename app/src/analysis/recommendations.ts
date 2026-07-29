@@ -183,14 +183,21 @@ interface Patch {
   profile?: ResistanceProfile;
 }
 
-function scheduleEntries(schedule: Schedule, patch?: Patch): ScheduledSession[] {
+/**
+ * Apply any number of patches at once. Moves are deduplicated to one per
+ * movement, so their target sets never overlap and order does not matter.
+ */
+function scheduleEntries(
+  schedule: Schedule,
+  patches: readonly Patch[] = []
+): ScheduledSession[] {
   return schedule.sessions.map((session, sessionIndex) => ({
     day: session.day,
     entries: session.exercises
       .map((row, exerciseIndex) => {
-        if (!patch || !patch.targets.has(`${sessionIndex}:${exerciseIndex}`)) {
-          return { exercise: row.exercise, sets: row.sets };
-        }
+        const key = `${sessionIndex}:${exerciseIndex}`;
+        const patch = patches.find((candidate) => candidate.targets.has(key));
+        if (!patch) return { exercise: row.exercise, sets: row.sets };
         return {
           exercise: patch.profile
             ? { ...row.exercise, resistanceProfile: patch.profile }
@@ -295,6 +302,21 @@ function diffNet(
   return delta;
 }
 
+/**
+ * Every ranked move applied together.
+ *
+ * Simulated rather than summed: the engine is non-linear — CNS fatigue,
+ * per-muscle diminishing returns and leverage redistribution all interact — so
+ * adding the individual `deltaNet`s would overstate the result. Fatigue is the
+ * one additive term, being a linear sum of per-set costs.
+ */
+export interface CombinedMoves {
+  count: number;
+  deltaScore: number;
+  deltaFatigue: number;
+  deltaNet: Record<string, number>;
+}
+
 export interface Recommendation {
   /**
    * Local-engine reference the deltas are measured from. It is not the number
@@ -305,6 +327,8 @@ export interface Recommendation {
   baselineScore: number;
   baselineNet: Record<string, number>;
   moves: Move[];
+  /** All of `moves` at once; null when there is nothing to suggest. */
+  combined: CombinedMoves | null;
   unresolved: string[];
 }
 
@@ -321,7 +345,9 @@ export function recommendMoves(schedule: Schedule, limit = 4): Recommendation {
   const regions = Object.keys(baselineNet);
   const baselineScore = rankingScore(baselineNet, regions);
   const sessionsPerWeek = DAYS_PER_WEEK / Math.max(1, schedule.cycleLength);
-  const moves: Move[] = [];
+  // The patch is kept beside each move so the chosen set can be re-simulated
+  // together rather than summed.
+  const candidates: { move: Move; patch: Patch }[] = [];
 
   const evaluate = (
     group: MovementGroup,
@@ -330,12 +356,12 @@ export function recommendMoves(schedule: Schedule, limit = 4): Recommendation {
     action: string,
     deltaFatigue: number
   ): void => {
-    const net = analyzeSchedule(scheduleEntries(schedule, patch), schedule.cycleLength);
+    const net = analyzeSchedule(scheduleEntries(schedule, [patch]), schedule.cycleLength);
     const deltaScore = rankingScore(net, regions) - baselineScore;
     if (deltaScore < MIN_DELTA_SCORE) return;
     const deltaNet = diffNet(baselineNet, net);
     const occurrences = group.rows.length;
-    moves.push({
+    const move: Move = {
       id: `${kind}:${group.name.toLocaleLowerCase()}:${action}`,
       kind,
       action,
@@ -348,7 +374,8 @@ export function recommendMoves(schedule: Schedule, limit = 4): Recommendation {
       efficiency: deltaFatigue > 0 ? deltaScore / deltaFatigue : Infinity,
       deltaNet,
       drivers: driversOf(deltaNet),
-    });
+    };
+    candidates.push({ move, patch });
   };
 
   for (const group of movementGroups(schedule)) {
@@ -378,7 +405,9 @@ export function recommendMoves(schedule: Schedule, limit = 4): Recommendation {
     }
   }
 
-  moves.sort((a, b) => {
+  candidates.sort((left, right) => {
+    const a = left.move;
+    const b = right.move;
     const aFree = a.deltaFatigue <= 0;
     const bFree = b.deltaFatigue <= 0;
     if (aFree !== bFree) return aFree ? -1 : 1;
@@ -388,9 +417,10 @@ export function recommendMoves(schedule: Schedule, limit = 4): Recommendation {
 
   // One suggestion per movement — a list offering both "ascending" and
   // "descending" for the same bench press is noise, and the best-ranked
-  // variant already represents that movement's opportunity.
+  // variant already represents that movement's opportunity. It also keeps the
+  // chosen set conflict-free, so they can all be applied at once.
   const claimed = new Set<string>();
-  const best = moves.filter((move) => {
+  const best = candidates.filter(({ move }) => {
     const key = move.exerciseName.toLocaleLowerCase();
     if (claimed.has(key)) return false;
     claimed.add(key);
@@ -403,18 +433,34 @@ export function recommendMoves(schedule: Schedule, limit = 4): Recommendation {
   // ranking — which only separates moves that *cost* fatigue — never shows.
   // Reserve the last slot for the most efficient costed move so the trade-off
   // is always on screen.
-  if (limit > 1 && ranked.every((move) => move.deltaFatigue <= 0)) {
-    const costed = best.find((move) => move.deltaFatigue > 0);
+  if (limit > 1 && ranked.every(({ move }) => move.deltaFatigue <= 0)) {
+    const costed = best.find(({ move }) => move.deltaFatigue > 0);
     if (costed) {
       if (ranked.length === limit) ranked[limit - 1] = costed;
       else ranked.push(costed);
     }
   }
 
+  const moves = ranked.map(({ move }) => move);
+  let combined: CombinedMoves | null = null;
+  if (ranked.length > 0) {
+    const net = analyzeSchedule(
+      scheduleEntries(schedule, ranked.map(({ patch }) => patch)),
+      schedule.cycleLength
+    );
+    combined = {
+      count: ranked.length,
+      deltaScore: rankingScore(net, regions) - baselineScore,
+      deltaFatigue: moves.reduce((total, move) => total + move.deltaFatigue, 0),
+      deltaNet: diffNet(baselineNet, net),
+    };
+  }
+
   return {
     baselineScore,
     baselineNet,
-    moves: ranked,
+    moves,
+    combined,
     unresolved: schedule.unresolved,
   };
 }

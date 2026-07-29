@@ -145,15 +145,16 @@ function AnalysisCard({
   const [selectedMoveId, setSelectedMoveId] = useState<string | null>(null);
 
   const moves = recommendation?.moves ?? [];
-  // The highest-ranked move previews itself, so the ghost bars and the score
-  // projection are explained by a visible, selected row rather than by chrome.
-  const selectedMove =
-    moves.find((move) => move.id === selectedMoveId) ?? moves[0] ?? null;
-  const deltaNet = selectedMove?.deltaNet ?? {};
+  const combined = recommendation?.combined ?? null;
+  // The chart previews the whole set of moves by default; tapping a row
+  // isolates it, and tapping it again returns to the combined view.
+  const selectedMove = moves.find((move) => move.id === selectedMoveId) ?? null;
+  const preview = selectedMove ?? combined;
+  const deltaNet = preview?.deltaNet ?? {};
   // The displayed score comes from the backend engine; the local recommender
   // measures only the change, so project rather than replace it.
-  const projectedScore = selectedMove
-    ? Math.max(0, Math.min(100, Math.round(score + selectedMove.deltaScore)))
+  const projectedScore = preview
+    ? Math.max(0, Math.min(100, Math.round(score + preview.deltaScore)))
     : null;
 
   const previewRows = rows.map((row) => ({
@@ -242,9 +243,30 @@ function AnalysisCard({
         </Pressable>
       )}
 
-      {moves.length > 0 && (
+      {moves.length > 0 && combined && (
         <View style={styles.movesSection}>
-          <Text style={styles.movesLabel}>Best moves</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Preview all ${combined.count} moves together, plus ${combined.deltaScore.toFixed(
+              1
+            )} score`}
+            accessibilityState={{ selected: selectedMove === null }}
+            onPress={() => setSelectedMoveId(null)}
+          >
+            <View style={styles.movesHeader}>
+              <Text style={styles.movesLabel}>Best moves</Text>
+              <Text
+                style={[
+                  styles.movesTotal,
+                  selectedMove !== null && styles.movesTotalAction,
+                ]}
+              >
+                {selectedMove === null
+                  ? `all ${combined.count} · +${combined.deltaScore.toFixed(1)}`
+                  : `← all ${combined.count}`}
+              </Text>
+            </View>
+          </Pressable>
           {moves.map((move) => {
             const active = selectedMove?.id === move.id;
             const cost = fatigueGlyph(move);
@@ -260,7 +282,9 @@ function AnalysisCard({
                 }. Plus ${move.deltaScore.toFixed(1)} score, ${cost.label}${
                   move.drivers.length > 0 ? `, mainly ${move.drivers.join(' and ')}` : ''
                 }.`}
-                onPress={() => setSelectedMoveId(move.id)}
+                onPress={() =>
+                  setSelectedMoveId((current) => (current === move.id ? null : move.id))
+                }
               >
                 <View style={[styles.moveRow, active && styles.moveRowActive]}>
                   <Text
@@ -756,14 +780,29 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.14)',
   },
+  movesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 6,
+  },
   movesLabel: {
     color: theme.textDim,
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 1,
-    marginBottom: 6,
   },
+  // Dim while it describes the active preview; accent once it becomes the way
+  // back from an isolated move.
+  movesTotal: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  movesTotalAction: { color: theme.accent },
   // Same 34pt rhythm as the muscle rows above, so the two lists read as one
   // card rather than a chart with a panel bolted underneath.
   moveRow: {

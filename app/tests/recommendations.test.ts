@@ -279,6 +279,47 @@ describe('recommendMoves', () => {
     }
   });
 
+  describe('combined moves', () => {
+    const { combined, moves } = result;
+
+    it('reports every ranked move applied at once', () => {
+      expect(combined).not.toBeNull();
+      expect(combined?.count).toBe(moves.length);
+      expect(combined?.deltaScore).toBeGreaterThan(0);
+    });
+
+    it('beats any single move on its own', () => {
+      const bestSingle = Math.max(...moves.map((move) => move.deltaScore));
+      expect(combined?.deltaScore).toBeGreaterThan(bestSingle);
+    });
+
+    it('is simulated, not summed — the engine is non-linear', () => {
+      const summedScore = moves.reduce((total, move) => total + move.deltaScore, 0);
+      expect(combined?.deltaScore).not.toBeCloseTo(summedScore, 3);
+      // Same for the per-region preview the ghost bars draw.
+      const summedNet: Record<string, number> = {};
+      for (const move of moves) {
+        for (const [region, delta] of Object.entries(move.deltaNet)) {
+          summedNet[region] = (summedNet[region] ?? 0) + delta;
+        }
+      }
+      const differs = Object.keys(summedNet).some(
+        (region) =>
+          Math.abs((combined?.deltaNet[region] ?? 0) - summedNet[region]) > 1e-6
+      );
+      expect(differs).toBe(true);
+    });
+
+    it('sums fatigue, which is the one additive term', () => {
+      const summedFatigue = moves.reduce((total, move) => total + move.deltaFatigue, 0);
+      expect(combined?.deltaFatigue).toBeCloseTo(summedFatigue, 10);
+    });
+
+    it('is null when there is nothing to suggest', () => {
+      expect(recommendMoves(buildSchedule({ cycleLength: 7, sessions: [] })).combined).toBeNull();
+    });
+  });
+
   it('attributes each move to the regions it actually moves', () => {
     for (const move of result.moves) {
       expect(Object.keys(move.deltaNet).length).toBeGreaterThan(0);
