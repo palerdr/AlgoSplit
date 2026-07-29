@@ -142,12 +142,11 @@ function AnalysisCard({
   delay?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [face, setFace] = useState<'muscles' | 'moves'>('muscles');
   const [selectedMoveId, setSelectedMoveId] = useState<string | null>(null);
 
   const moves = recommendation?.moves ?? [];
-  // A split with nothing worth changing has no Moves face to return from.
-  const activeFace = moves.length > 0 ? face : 'muscles';
+  // The highest-ranked move previews itself, so the ghost bars and the score
+  // projection are explained by a visible, selected row rather than by chrome.
   const selectedMove =
     moves.find((move) => move.id === selectedMoveId) ?? moves[0] ?? null;
   const deltaNet = selectedMove?.deltaNet ?? {};
@@ -186,57 +185,70 @@ function AnalysisCard({
         </View>
       </View>
 
-      {activeFace === 'muscles' ? (
-        <View style={styles.rows}>
-          {visibleRows.map((row, index) => {
-            const level = getStimulusLevel(row.net);
-            const current = Math.max(0, row.net);
-            const projected = Math.max(0, row.projected);
-            const kept = Math.min(current, projected);
-            const change = Math.abs(projected - current);
-            const hasGhost = change > 0.005;
-            return (
-              <View key={row.region} style={[styles.muscleRow, index > 0 && styles.rowBorder]}>
-                <Text style={styles.muscleName} numberOfLines={1}>
-                  {row.name}
-                </Text>
-                <View style={styles.track}>
+      <View style={styles.rows}>
+        {visibleRows.map((row, index) => {
+          const level = getStimulusLevel(row.net);
+          const current = Math.max(0, row.net);
+          const projected = Math.max(0, row.projected);
+          const kept = Math.min(current, projected);
+          const change = Math.abs(projected - current);
+          const hasGhost = change > 0.005;
+          return (
+            <View key={row.region} style={[styles.muscleRow, index > 0 && styles.rowBorder]}>
+              <Text style={styles.muscleName} numberOfLines={1}>
+                {row.name}
+              </Text>
+              <View style={styles.track}>
+                <View
+                  style={[
+                    styles.fill,
+                    {
+                      width: `${(kept / maxNet) * 100}%`,
+                      backgroundColor: stimulusBarColor(level),
+                    },
+                    // The two segments read as one bar: only the outer ends
+                    // are rounded, so the join stays flush.
+                    hasGhost && styles.fillJoinedLeft,
+                  ]}
+                />
+                {hasGhost && (
                   <View
                     style={[
                       styles.fill,
+                      styles.fillJoinedRight,
                       {
-                        width: `${(kept / maxNet) * 100}%`,
-                        backgroundColor: stimulusBarColor(level),
+                        width: `${(change / maxNet) * 100}%`,
+                        backgroundColor:
+                          projected > current ? GHOST_GAIN : GHOST_LOSS,
                       },
-                      // The two segments read as one bar: only the outer ends
-                      // are rounded, so the join stays flush.
-                      hasGhost && styles.fillJoinedLeft,
                     ]}
                   />
-                  {hasGhost && (
-                    <View
-                      style={[
-                        styles.fill,
-                        styles.fillJoinedRight,
-                        {
-                          width: `${(change / maxNet) * 100}%`,
-                          backgroundColor:
-                            projected > current ? GHOST_GAIN : GHOST_LOSS,
-                        },
-                      ]}
-                    />
-                  )}
-                </View>
-                <Text style={styles.net}>{row.net.toFixed(1)}</Text>
+                )}
               </View>
-            );
-          })}
-        </View>
-      ) : (
-        <View style={styles.rows}>
-          {moves.map((move, index) => {
+              <Text style={styles.net}>{row.net.toFixed(1)}</Text>
+            </View>
+          );
+        })}
+      </View>
+
+      {rows.length > 12 && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setExpanded((value) => !value)}
+        >
+          <Text style={styles.action}>
+            {expanded ? 'Show top 12' : `Show all ${rows.length}`}
+          </Text>
+        </Pressable>
+      )}
+
+      {moves.length > 0 && (
+        <View style={styles.movesSection}>
+          <Text style={styles.movesLabel}>Best moves</Text>
+          {moves.map((move) => {
             const active = selectedMove?.id === move.id;
             const cost = fatigueGlyph(move);
+            const scope = move.occurrences > 1 ? ` ×${move.occurrences}` : '';
             return (
               <Pressable
                 key={move.id}
@@ -245,22 +257,19 @@ function AnalysisCard({
                 accessibilityState={{ selected: active }}
                 accessibilityLabel={`${move.action}, ${move.exerciseName}, ${
                   move.sessionName
-                }. Plus ${move.deltaScore.toFixed(1)} score, ${cost.label}.`}
+                }. Plus ${move.deltaScore.toFixed(1)} score, ${cost.label}${
+                  move.drivers.length > 0 ? `, mainly ${move.drivers.join(' and ')}` : ''
+                }.`}
                 onPress={() => setSelectedMoveId(move.id)}
               >
-                <View style={[styles.moveRow, index > 0 && styles.rowBorder]}>
-                  <View style={styles.moveText}>
-                    <Text
-                      style={[styles.moveAction, active && styles.moveActionActive]}
-                      numberOfLines={1}
-                    >
-                      {move.action}
-                    </Text>
-                    <Text style={styles.moveMeta} numberOfLines={1}>
-                      {move.exerciseName} · {move.sessionName}
-                      {move.drivers.length > 0 ? ` · ${move.drivers.join(', ')}` : ''}
-                    </Text>
-                  </View>
+                <View style={[styles.moveRow, active && styles.moveRowActive]}>
+                  <Text
+                    style={[styles.moveLabel, active && styles.moveLabelActive]}
+                    numberOfLines={1}
+                  >
+                    {move.exerciseName}
+                    {scope} · {move.action}
+                  </Text>
                   <Text style={styles.moveDelta}>+{move.deltaScore.toFixed(1)}</Text>
                   <Text style={styles.moveCost}>{cost.glyph}</Text>
                 </View>
@@ -270,38 +279,7 @@ function AnalysisCard({
         </View>
       )}
 
-      <View style={styles.cardActions}>
-        {activeFace === 'muscles' && rows.length > 12 ? (
-          <Pressable onPress={() => setExpanded((value) => !value)}>
-            <Text style={styles.action}>
-              {expanded ? 'Show top 12' : `Show all ${rows.length}`}
-            </Text>
-          </Pressable>
-        ) : (
-          <View />
-        )}
-        {moves.length > 0 && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={
-              activeFace === 'muscles'
-                ? `Show ${moves.length} suggested moves`
-                : 'Show the muscle chart'
-            }
-            onPress={() => setFace(activeFace === 'muscles' ? 'moves' : 'muscles')}
-          >
-            <Text style={styles.action}>
-              {activeFace === 'muscles' ? `${moves.length} moves →` : '← Muscles'}
-            </Text>
-          </Pressable>
-        )}
-      </View>
-
-      <Text style={styles.hint}>
-        {selectedMove
-          ? `${footer} · previewing “${selectedMove.action} · ${selectedMove.exerciseName}”`
-          : footer}
-      </Text>
+      <Text style={styles.hint}>{footer}</Text>
       </Glass>
     </FadeIn>
   );
@@ -772,17 +750,34 @@ const styles = StyleSheet.create({
   fillJoinedLeft: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
   fillJoinedRight: { borderTopLeftRadius: 0, borderBottomLeftRadius: 0 },
   net: { color: theme.textDim, fontSize: 11, width: 28, textAlign: 'right' },
-  cardActions: {
+  movesSection: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.14)',
+  },
+  movesLabel: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 6,
+  },
+  // Same 34pt rhythm as the muscle rows above, so the two lists read as one
+  // card rather than a chart with a panel bolted underneath.
+  moveRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
+    minHeight: 34,
+    gap: 10,
+    paddingHorizontal: 8,
+    marginHorizontal: -8,
+    borderRadius: 9,
   },
-  moveRow: { flexDirection: 'row', alignItems: 'center', minHeight: 46, gap: 10 },
-  moveText: { flex: 1, minWidth: 0 },
-  moveAction: { color: theme.text, fontSize: 13, fontWeight: '600' },
-  moveActionActive: { color: theme.accent },
-  moveMeta: { color: theme.textDim, fontSize: 11, marginTop: 2 },
+  moveRowActive: { backgroundColor: 'rgba(65,196,110,0.14)' },
+  moveLabel: { flex: 1, minWidth: 0, color: theme.text, fontSize: 13 },
+  moveLabelActive: { color: theme.accent, fontWeight: '600' },
   moveDelta: {
     color: theme.accent,
     fontSize: 13,
