@@ -65,11 +65,13 @@ import {
   loadAnalysisPreferences,
   loadPersistedHomeAnalysis,
   loadPersistedHomeSplits,
+  loadPersistedWorkoutSummaries,
   normalizeAnalysisPreferences,
   saveActiveSplitId,
   saveAnalysisPreferences,
   savePersistedHomeAnalysis,
   savePersistedHomeSplits,
+  savePersistedWorkoutSummaries,
 } from './localPersistence';
 import { scheduleAfterFirstPaint } from '../ui/afterFirstPaint';
 
@@ -670,21 +672,23 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
             (workout) => !deletedWorkoutIdsRef.current.has(workout.id)
           );
           const filteredCount = response.workouts.length - visibleWorkouts.length;
-          setWorkoutSummaries((previous) => {
-            const workouts = append
-                ? [...previous.data.workouts, ...visibleWorkouts]
-                : visibleWorkouts;
-            return {
-              data: {
-                workouts,
-                total: Math.max(workouts.length, response.total - filteredCount),
-              },
-              loading: false,
-              loaded: true,
-              error: null,
-              fetchedAt: Date.now(),
-            };
+          const workouts = append
+            ? [...summariesRef.current.data.workouts, ...visibleWorkouts]
+            : visibleWorkouts;
+          const data = {
+            workouts,
+            total: Math.max(workouts.length, response.total - filteredCount),
+          };
+          setWorkoutSummaries({
+            data,
+            loading: false,
+            loaded: true,
+            error: null,
+            fetchedAt: Date.now(),
           });
+          if (user?.id) {
+            void savePersistedWorkoutSummaries(user.id, data).catch(() => {});
+          }
         })
         .catch((error) => {
           if (generation !== generationRef.current) return;
@@ -692,7 +696,9 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
           setWorkoutSummaries((previous) => ({
             ...previous,
             loading: false,
-            loaded: true,
+            // Without a verified server response (or a persisted one), the
+            // device-only workout list is not an authoritative streak.
+            loaded: previous.loaded,
             error: messageFromError(error),
           }));
         })
@@ -702,7 +708,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       summariesInFlight.current = promise;
       return promise;
     },
-    [markSignedOut]
+    [markSignedOut, user?.id]
   );
   const ensureWorkoutSummaries = useCallback(() => loadSummaries(false, false), [loadSummaries]);
   const refreshWorkoutSummaries = useCallback(() => loadSummaries(true, false), [loadSummaries]);
@@ -994,21 +1000,27 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
           data: previous.data.filter((workout) => workout.id !== workoutId),
           fetchedAt,
         }));
+        const summaryContainedWorkout = summariesRef.current.data.workouts.some(
+          (workout) => workout.id === workoutId
+        );
+        const summaryData = {
+          workouts: summariesRef.current.data.workouts.filter(
+            (workout) => workout.id !== workoutId
+          ),
+          total: summaryContainedWorkout
+            ? Math.max(0, summariesRef.current.data.total - 1)
+            : summariesRef.current.data.total,
+        };
         setWorkoutSummaries((previous) => {
-          const containedWorkout = previous.data.workouts.some(
-            (workout) => workout.id === workoutId
-          );
           return {
             ...previous,
-            data: {
-              workouts: previous.data.workouts.filter((workout) => workout.id !== workoutId),
-              total: containedWorkout
-                ? Math.max(0, previous.data.total - 1)
-                : previous.data.total,
-            },
+            data: summaryData,
             fetchedAt,
           };
         });
+        if (user?.id) {
+          void savePersistedWorkoutSummaries(user.id, summaryData).catch(() => {});
+        }
         setWorkoutDetails((previous) => {
           const next = { ...previous };
           delete next[workoutId];
@@ -1038,7 +1050,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
         throw error;
       }
     },
-    [loadStimulus, markSignedOut]
+    [loadStimulus, markSignedOut, user?.id]
   );
 
   const saveSplitSession = useCallback(
@@ -1367,8 +1379,12 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       if (nextState !== 'active' || !user?.id) return;
       auth
         .refreshIfNeeded()
-        .then((refreshed) => {
-          if (refreshed) return refreshSession();
+        .then(async (refreshed) => {
+          if (refreshed) await refreshSession();
+          // Streak correctness must not depend on navigating to a screen that
+          // happens to consume workout history. Foregrounding is also the
+          // retry path after an offline or provider failure.
+          await loadSummaries(true, false);
         })
         .catch((error) => {
           if (isSignedOutError(error)) {
@@ -1386,7 +1402,7 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
         });
     });
     return () => subscription.remove();
-  }, [markSignedOut, refreshSession, user?.id]);
+  }, [loadSummaries, markSignedOut, refreshSession, user?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1455,6 +1471,44 @@ export function AccountStateProvider({ children }: { children: ReactNode }) {
       cancelRefresh();
     };
   }, [status, user?.id, loadSplits]);
+
+  useEffect(() => {
+    if (status !== 'authenticated' || !user?.id) return;
+    let cancelled = false;
+    let cancelRefresh = () => {};
+    const generation = generationRef.current;
+    loadPersistedWorkoutSummaries<WorkoutSummaryListResponse>(user.id)
+      .then((cached) => {
+        if (
+          cancelled ||
+          generation !== generationRef.current ||
+          !cached ||
+          !cached.data ||
+          !Array.isArray(cached.data.workouts) ||
+          !Number.isFinite(cached.data.total)
+        ) return;
+        const currentFetchedAt = summariesRef.current.fetchedAt;
+        if (currentFetchedAt !== null && currentFetchedAt >= cached.savedAt) return;
+        setWorkoutSummaries({
+          data: cached.data,
+          loading: false,
+          loaded: true,
+          error: null,
+          fetchedAt: cached.savedAt,
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (cancelled || generation !== generationRef.current) return;
+        // Refresh independently of Home mounting so a slow/failed request
+        // cannot be "fixed" only by visiting another tab.
+        cancelRefresh = scheduleAfterFirstPaint(() => void loadSummaries(true, false));
+      });
+    return () => {
+      cancelled = true;
+      cancelRefresh();
+    };
+  }, [status, user?.id, loadSummaries]);
 
   useEffect(() => {
     if (status !== 'authenticated' || !analysisPreferencesReady || !user?.id) return;

@@ -2,6 +2,7 @@ export const LEGACY_APP_STORAGE_KEY = 'fitapp:v1';
 const APP_STORAGE_PREFIX = 'algosplit:v2';
 const HOME_SPLITS_CACHE_SEGMENT = 'homeSplits';
 const HOME_ANALYSIS_CACHE_SEGMENT = 'homeAnalysis';
+const WORKOUT_SUMMARIES_CACHE_SEGMENT = 'workoutSummaries';
 
 export type AnalysisDataset = 'schoenfeld' | 'pelland' | 'average';
 
@@ -48,6 +49,10 @@ export function homeSplitsCacheKey(userId: string): string {
   return `${APP_STORAGE_PREFIX}:${HOME_SPLITS_CACHE_SEGMENT}:${encodeURIComponent(userId)}`;
 }
 
+export function workoutSummariesCacheKey(userId: string): string {
+  return `${APP_STORAGE_PREFIX}:${WORKOUT_SUMMARIES_CACHE_SEGMENT}:${encodeURIComponent(userId)}`;
+}
+
 function homeAnalysisCachePrefix(userId: string): string {
   return `${APP_STORAGE_PREFIX}:${HOME_ANALYSIS_CACHE_SEGMENT}:${encodeURIComponent(userId)}:`;
 }
@@ -67,9 +72,9 @@ export function homeAnalysisCacheKey(
   ].map(encodeURIComponent).join(':')}`;
 }
 
-async function loadPersistedResource<T>(key: string): Promise<PersistedHomeResource<T> | null> {
-  const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
-  const raw = await AsyncStorage.getItem(key);
+export function decodePersistedResource<T>(
+  raw: string | null
+): PersistedHomeResource<T> | null {
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw) as Partial<PersistedHomeResource<T>>;
@@ -80,9 +85,18 @@ async function loadPersistedResource<T>(key: string): Promise<PersistedHomeResou
   }
 }
 
+export function encodePersistedResource<T>(data: T, savedAt = Date.now()): string {
+  return JSON.stringify({ data, savedAt });
+}
+
+async function loadPersistedResource<T>(key: string): Promise<PersistedHomeResource<T> | null> {
+  const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
+  return decodePersistedResource<T>(await AsyncStorage.getItem(key));
+}
+
 async function savePersistedResource<T>(key: string, data: T): Promise<void> {
   const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
-  await AsyncStorage.setItem(key, JSON.stringify({ data, savedAt: Date.now() }));
+  await AsyncStorage.setItem(key, encodePersistedResource(data));
 }
 
 export function loadPersistedHomeSplits<T>(
@@ -93,6 +107,16 @@ export function loadPersistedHomeSplits<T>(
 
 export function savePersistedHomeSplits<T>(userId: string, data: T): Promise<void> {
   return savePersistedResource(homeSplitsCacheKey(userId), data);
+}
+
+export function loadPersistedWorkoutSummaries<T>(
+  userId: string
+): Promise<PersistedHomeResource<T> | null> {
+  return loadPersistedResource<T>(workoutSummariesCacheKey(userId));
+}
+
+export function savePersistedWorkoutSummaries<T>(userId: string, data: T): Promise<void> {
+  return savePersistedResource(workoutSummariesCacheKey(userId), data);
 }
 
 export function loadPersistedHomeAnalysis<T>(
@@ -180,6 +204,7 @@ export async function clearPersistedAccountData(userId: string): Promise<void> {
     analysisPreferencesKey(userId),
     activeSplitKey(userId),
     homeSplitsCacheKey(userId),
+    workoutSummariesCacheKey(userId),
     ...keys.filter((key) => key.startsWith(analysisPrefix)),
   ];
   await AsyncStorage.multiRemove(accountKeys);
