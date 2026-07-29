@@ -29,6 +29,10 @@ import {
 } from './stimulus';
 import { Exercise, getExerciseByName } from '../data/exercises';
 import { MUSCLE_REGIONS } from '../data/muscleRegions.gen';
+import {
+  groupSplitExercises,
+  type SplitExerciseGroup,
+} from '../workout/splitExerciseGroups';
 
 export type ResistanceProfile = Exercise['resistanceProfile'];
 
@@ -209,28 +213,14 @@ function scheduleEntries(
   }));
 }
 
-/** Rows sharing a movement, in split order. */
-interface MovementGroup {
-  name: string;
-  targets: Set<string>;
-  rows: { session: ScheduleSession; row: ScheduleExercise }[];
-}
+type MovementGroup = SplitExerciseGroup<ScheduleSession, ScheduleExercise>;
 
 function movementGroups(schedule: Schedule): MovementGroup[] {
-  const groups = new Map<string, MovementGroup>();
-  schedule.sessions.forEach((session, sessionIndex) => {
-    session.exercises.forEach((row, exerciseIndex) => {
-      const key = row.name.toLocaleLowerCase();
-      let group = groups.get(key);
-      if (!group) {
-        group = { name: row.name, targets: new Set(), rows: [] };
-        groups.set(key, group);
-      }
-      group.targets.add(`${sessionIndex}:${exerciseIndex}`);
-      group.rows.push({ session, row });
-    });
+  return groupSplitExercises(schedule.sessions, {
+    exercises: (session) => session.exercises,
+    name: (row) => row.name,
+    identity: (row) => row.exercise.id,
   });
-  return [...groups.values()];
 }
 
 export type MoveKind = 'trim' | 'add' | 'profile';
@@ -360,14 +350,14 @@ export function recommendMoves(schedule: Schedule, limit = 4): Recommendation {
     const deltaScore = rankingScore(net, regions) - baselineScore;
     if (deltaScore < MIN_DELTA_SCORE) return;
     const deltaNet = diffNet(baselineNet, net);
-    const occurrences = group.rows.length;
+    const occurrences = group.occurrences.length;
     const move: Move = {
       id: `${kind}:${group.name.toLocaleLowerCase()}:${action}`,
       kind,
       action,
       exerciseName: group.name,
       sessionName:
-        occurrences === 1 ? group.rows[0].session.name : `${occurrences} days`,
+        occurrences === 1 ? group.occurrences[0].session.name : `${occurrences} days`,
       occurrences,
       deltaScore,
       deltaFatigue,
@@ -379,25 +369,39 @@ export function recommendMoves(schedule: Schedule, limit = 4): Recommendation {
   };
 
   for (const group of movementGroups(schedule)) {
+    const targets = new Set(
+      group.occurrences.map((occurrence) => occurrence.targetKey)
+    );
     // One set of this movement everywhere it appears, per week.
-    const perSet = group.rows.reduce(
-      (total, { row }) => total + setFatigueLoad(row.exercise) * sessionsPerWeek,
+    const perSet = group.occurrences.reduce(
+      (total, { exercise }) =>
+        total + setFatigueLoad(exercise.exercise) * sessionsPerWeek,
       0
     );
 
-    if (group.rows.every(({ row }) => row.sets > 1)) {
-      evaluate(group, { targets: group.targets, setsDelta: -1 }, 'trim', 'Cut 1 set', -perSet);
+    if (group.occurrences.every(({ exercise }) => exercise.sets > 1)) {
+      evaluate(group, { targets, setsDelta: -1 }, 'trim', 'Cut 1 set', -perSet);
     }
-    if (group.rows.every(({ row }) => row.sets < MAX_SETS_PER_EXERCISE)) {
-      evaluate(group, { targets: group.targets, setsDelta: 1 }, 'add', 'Add 1 set', perSet);
+    if (
+      group.occurrences.every(
+        ({ exercise }) => exercise.sets < MAX_SETS_PER_EXERCISE
+      )
+    ) {
+      evaluate(group, { targets, setsDelta: 1 }, 'add', 'Add 1 set', perSet);
     }
     for (const profile of PROFILES) {
-      if (group.rows.every(({ row }) => row.exercise.resistanceProfile === profile)) continue;
+      if (
+        group.occurrences.every(
+          ({ exercise }) => exercise.exercise.resistanceProfile === profile
+        )
+      ) {
+        continue;
+      }
       // Re-rating the resistance curve changes which muscles the leverage model
       // credits — it costs nothing, so it is priced at zero fatigue.
       evaluate(
         group,
-        { targets: group.targets, profile },
+        { targets, profile },
         'profile',
         `${PROFILE_LABEL[profile]} profile`,
         0
