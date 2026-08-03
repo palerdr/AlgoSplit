@@ -6,6 +6,8 @@ Supabase or HTTP fixtures.
 
 from datetime import datetime, timedelta
 
+import pytest
+
 from api.analysis_routes import _build_workout_analysis
 
 
@@ -38,7 +40,7 @@ def test_no_workouts_returns_zero():
 
 
 # ------------------------------------------------------------------ #
-#  2. One workout 6 days ago → decayed stimulus, not "fresh"
+#  2. One workout 6 days ago remains included and carries atrophy
 # ------------------------------------------------------------------ #
 
 def test_workout_6_days_ago_has_atrophy():
@@ -57,12 +59,11 @@ def test_workout_6_days_ago_has_atrophy():
     trained_muscles = [m for m in result.muscles if m.prime_sets > 0]
     assert len(trained_muscles) > 0
 
-    # Prime movers should show meaningful atrophy after 6 days
+    # The workout remains in the stimulus sum, but the uncovered rest gap after
+    # its recovery window contributes atrophy.
     for m in trained_muscles:
-        assert m.atrophy > 0, f"{m.display_name} should have atrophy after 6 days"
-        assert m.net_stimulus < m.stimulus, (
-            f"{m.display_name} net_stimulus should be less than raw stimulus"
-        )
+        assert m.atrophy > 0
+        assert m.net_stimulus < m.stimulus
 
     assert any(m.secondary_sets > 0 for m in result.muscles if m.stimulus > 0), (
         "Bench Press should still stimulate at least one indirect mover"
@@ -70,7 +71,7 @@ def test_workout_6_days_ago_has_atrophy():
 
 
 # ------------------------------------------------------------------ #
-#  3. One workout today > one workout 6 days ago
+#  3. A current workout has less accumulated atrophy than an old workout
 # ------------------------------------------------------------------ #
 
 def test_today_workout_beats_6_day_old():
@@ -101,6 +102,132 @@ def test_today_workout_beats_6_day_old():
             f"{region}: today ({today_map[region]:.3f}) should beat "
             f"6-day-old ({old_map[region]:.3f})"
         )
+
+
+def test_every_other_day_workouts_stack_for_the_full_window():
+    now = datetime(2026, 3, 9, 12, 0, 0)
+    workouts = [
+        _make_workout(f"w{days_ago}", now - timedelta(days=days_ago))
+        for days_ago in (6, 4, 2, 0)
+    ]
+    exercises = [
+        _make_exercise(workout["id"], "Bench Press", 4)
+        for workout in workouts
+    ]
+
+    result = _build_workout_analysis(
+        workouts, exercises, days=7, stimulus_duration=48, now=now,
+    )
+    single = _build_workout_analysis(
+        [workouts[-1]], [exercises[-1]], days=7, stimulus_duration=48, now=now,
+    )
+    result_chest = next(m for m in result.muscles if m.region_id == "sternocostal")
+    single_chest = next(m for m in single.muscles if m.region_id == "sternocostal")
+
+    assert result.summary.total_sets == 16
+    assert result_chest.atrophy == 0
+    assert result_chest.net_stimulus == result_chest.stimulus
+    assert result_chest.stimulus == pytest.approx(single_chest.stimulus * 4)
+
+
+def test_rest_gap_atrophy_remains_in_rolling_analysis():
+    now = datetime(2026, 3, 9, 12, 0, 0)
+    workouts = [
+        _make_workout(f"w{days_ago}", now - timedelta(days=days_ago))
+        for days_ago in (6, 3, 1)
+    ]
+    exercises = [
+        _make_exercise(workout["id"], "Bench Press", 4)
+        for workout in workouts
+    ]
+
+    result = _build_workout_analysis(
+        workouts, exercises, days=7, stimulus_duration=48, now=now,
+    )
+    chest = next(m for m in result.muscles if m.region_id == "sternocostal")
+
+    assert chest.atrophy > 0
+    assert chest.net_stimulus < chest.stimulus
+
+
+def test_workout_is_evicted_after_the_seven_calendar_day_window():
+    now = datetime(2026, 3, 9, 12, 0, 0)
+    outside = _make_workout("w1", now - timedelta(days=7))
+
+    result = _build_workout_analysis(
+        [outside], [_make_exercise("w1", "Bench Press", 4)], days=7, now=now,
+    )
+
+    assert result.summary.total_sets == 0
+    assert result.muscles == []
+
+
+def test_client_local_day_controls_window_position_not_utc_date():
+    window_start = datetime(2026, 3, 4).date()
+    morning = _make_workout("w1", datetime(2026, 3, 10, 15, 0, 0))
+    evening = _make_workout("w1", datetime(2026, 3, 11, 0, 30, 0))
+    exercise = _make_exercise("w1", "Bench Press", 4)
+
+    morning_result = _build_workout_analysis(
+        [morning], [exercise], days=7,
+        now=datetime(2026, 3, 11, 4, 59, 59),
+        window_start_date=window_start,
+        timezone_offset_minutes=300,
+    )
+    evening_result = _build_workout_analysis(
+        [evening], [exercise], days=7,
+        now=datetime(2026, 3, 11, 4, 59, 59),
+        window_start_date=window_start,
+        timezone_offset_minutes=300,
+    )
+
+    morning_chest = next(m for m in morning_result.muscles if m.region_id == "sternocostal")
+    evening_chest = next(m for m in evening_result.muscles if m.region_id == "sternocostal")
+    assert morning_chest.net_stimulus == evening_chest.net_stimulus
+    assert morning_chest.recovery_readiness == evening_chest.recovery_readiness == 0.5
+
+
+def test_client_local_every_other_day_sessions_stack_across_utc_date_changes():
+    window_start = datetime(2026, 3, 4).date()
+    completed_times = (
+        datetime(2026, 3, 4, 23, 0, 0),
+        datetime(2026, 3, 7, 2, 0, 0),
+        datetime(2026, 3, 8, 23, 0, 0),
+        datetime(2026, 3, 11, 2, 0, 0),
+    )
+    workouts = [
+        _make_workout(f"w{index}", completed_at)
+        for index, completed_at in enumerate(completed_times)
+    ]
+    exercises = [
+        _make_exercise(workout["id"], "Bench Press", 4)
+        for workout in workouts
+    ]
+
+    result = _build_workout_analysis(
+        workouts,
+        exercises,
+        days=7,
+        stimulus_duration=48,
+        now=datetime(2026, 3, 11, 4, 59, 59),
+        window_start_date=window_start,
+        timezone_offset_minutes=300,
+    )
+    single = _build_workout_analysis(
+        [workouts[-1]],
+        [exercises[-1]],
+        days=7,
+        stimulus_duration=48,
+        now=datetime(2026, 3, 11, 4, 59, 59),
+        window_start_date=window_start,
+        timezone_offset_minutes=300,
+    )
+    chest = next(m for m in result.muscles if m.region_id == "sternocostal")
+    single_chest = next(m for m in single.muscles if m.region_id == "sternocostal")
+
+    assert result.summary.total_sets == 16
+    assert chest.atrophy == 0
+    assert chest.stimulus == pytest.approx(single_chest.stimulus * 4)
 
 
 # ------------------------------------------------------------------ #

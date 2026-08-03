@@ -96,6 +96,16 @@ describe('local account isolation', () => {
         maintenanceVolume: 3,
         dataset: 'schoenfeld',
       })
+    ).toContain(':homeAnalysis:user-a:2:');
+    expect(
+      homeAnalysisCacheKey('user-a', {
+        days: 7,
+        endDate: '2026-07-21',
+        timezoneOffsetMinutes: 240,
+        stimulusDuration: 48,
+        maintenanceVolume: 3,
+        dataset: 'schoenfeld',
+      })
     ).not.toBe(
       homeAnalysisCacheKey('user-a', {
         days: 7,
