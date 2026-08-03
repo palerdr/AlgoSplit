@@ -13,6 +13,7 @@ import {
   getStimulusLevel,
   leverageAdjustedWeights,
   levelsFromNet,
+  localCalendarDaysAgo,
   marginalAt,
   regionWindowHours,
   residualLocalMultiplier,
@@ -189,14 +190,38 @@ describe('atrophy + weekly steady state', () => {
   });
 });
 
-describe('rolling decay', () => {
-  it('holds through the window then decays to zero by a week', () => {
+describe('rolling window', () => {
+  it('uses local calendar dates rather than elapsed 24-hour buckets', () => {
+    const now = new Date(2026, 2, 9, 1, 0, 0);
+    const lateYesterday = new Date(2026, 2, 8, 23, 0, 0);
+    expect(localCalendarDaysAgo(lateYesterday, now)).toBe(1);
+  });
+
+  it('includes ages 0 through 7 exclusively and preserves rest-gap atrophy', () => {
     const net = { biceps_brachii: 1.0 };
     expect(rollingNet([{ stimulus: net, daysAgo: 1 }]).biceps_brachii).toBeCloseTo(1);
+    expect(rollingNet([{ stimulus: net, daysAgo: 5 }]).biceps_brachii).toBeLessThan(1);
+    expect(rollingNet([{ stimulus: net, daysAgo: 6.999 }]).biceps_brachii).toBeLessThan(1);
+    expect(rollingNet([{ stimulus: net, daysAgo: 7 }]).biceps_brachii ?? 0).toBe(0);
     expect(rollingNet([{ stimulus: net, daysAgo: 8 }]).biceps_brachii ?? 0).toBe(0);
-    const mid = rollingNet([{ stimulus: net, daysAgo: 5 }]).biceps_brachii;
-    expect(mid).toBeGreaterThan(0);
-    expect(mid).toBeLessThan(1);
+  });
+
+  it('stacks every-other-day workouts without independently fading them', () => {
+    const net = { biceps_brachii: 1.0 };
+    expect(
+      rollingNet(
+        [0, 2, 4, 6].map((daysAgo) => ({ stimulus: net, daysAgo }))
+      ).biceps_brachii
+    ).toBe(4);
+  });
+
+  it('subtracts atrophy for an uncovered rest gap inside the window', () => {
+    const net = { biceps_brachii: 1.0 };
+    const result = rollingNet(
+      [0, 2, 5].map((daysAgo) => ({ stimulus: net, daysAgo }))
+    ).biceps_brachii;
+    expect(result).toBeLessThan(3);
+    expect(result).toBeGreaterThan(2);
   });
 });
 

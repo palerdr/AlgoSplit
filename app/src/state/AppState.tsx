@@ -34,6 +34,7 @@ import { TEMPLATES as SEED_TEMPLATES, TemplateExercise, WorkoutTemplate } from '
 import {
   computeWorkoutStimulus,
   levelsFromNet,
+  localCalendarDaysAgo,
   rollingNet,
 } from '../analysis/stimulus';
 import type { AccountWorkoutPlan } from '../workout/splitSessions';
@@ -220,11 +221,11 @@ function computeSessionStimulus(
 
 /** Home heatmap levels: decayed rolling net across history → 0–7 heat. */
 function computeRecentStimulusNet(history: CompletedWorkout[]): Record<string, number> {
-  const now = Date.now();
+  const now = new Date();
   return rollingNet(
     history.map((w) => ({
       stimulus: w.stimulus,
-      daysAgo: (now - new Date(w.date).getTime()) / 86_400_000,
+      daysAgo: localCalendarDaysAgo(w.date, now),
     }))
   );
 }

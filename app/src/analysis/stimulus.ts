@@ -19,8 +19,8 @@
  *    conserved and redistributed to perfectly-matched muscles.
  * 7. ATROPHY + WEEKLY STEADY STATE (MainClasses.apply_atrophy /
  *    simulate_split): net = stimulus − atrophy, atrophy accruing outside the
- *    stimulus window at maintenance-volume rate — enables analyzing a
- *    TEMPLATE's steady-state, not just logged history.
+ *    stimulus window at maintenance-volume rate for templates and rolling
+ *    logged history.
  * 8. e1RM (Brzycki), for progress tracking.
  *
  * Not yet ported: consecutive-day penalties, movement-pattern MATCHING (we
@@ -334,29 +334,73 @@ export function analyzeSchedule(
   return scaled;
 }
 
-// ── Rolling decay for the home heatmap ──────────────────────────────────────
+// ── Rolling window for the home heatmap ─────────────────────────────────────
 
-const FULL_DECAY_DAYS = 7;
+const ROLLING_WINDOW_DAYS = 7;
+const DAY_MS = 86_400_000;
 
-/** How much of a workout's stimulus still "counts", by age in days. */
-export function recoveryFactor(daysAgo: number, region?: string): number {
-  const windowDays = (region ? regionWindowHours(region) : STIMULUS_DURATION_HOURS) / 24;
-  if (!Number.isFinite(daysAgo) || daysAgo <= windowDays) return 1;
-  if (daysAgo >= FULL_DECAY_DAYS) return 0;
-  return 1 - (daysAgo - windowDays) / (FULL_DECAY_DAYS - windowDays);
+/** Calendar-date distance in the device timezone, unaffected by DST or time of day. */
+export function localCalendarDaysAgo(
+  completedAt: string | number | Date,
+  now = new Date()
+): number {
+  const completed = completedAt instanceof Date ? completedAt : new Date(completedAt);
+  if (!Number.isFinite(completed.getTime()) || !Number.isFinite(now.getTime())) return Number.NaN;
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const completedDay = Date.UTC(
+    completed.getFullYear(),
+    completed.getMonth(),
+    completed.getDate()
+  );
+  return (today - completedDay) / DAY_MS;
 }
 
-/** Sum decayed per-workout nets into a current rolling net per muscle. */
+/** Hard seven-day inclusion factor for one completed workout. */
+export function rollingWindowFactor(daysAgo: number): number {
+  if (!Number.isFinite(daysAgo) || daysAgo < 0 || daysAgo >= ROLLING_WINDOW_DAYS) return 0;
+  return 1;
+}
+
+/**
+ * Sum every included workout, then charge atrophy only for uncovered gaps.
+ * This mirrors the backend clock: a later exposure resets the clock instead of
+ * independently fading every older workout in the window.
+ */
 export function rollingNet(
   workouts: { stimulus: Record<string, number>; daysAgo: number }[]
 ): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const w of workouts) {
-    for (const [region, net] of Object.entries(w.stimulus)) {
-      const f = recoveryFactor(w.daysAgo, region);
-      if (f <= 0) continue;
-      out[region] = (out[region] ?? 0) + net * f;
+  const eventsByRegion: Record<string, { atHour: number; stimulus: number }[]> = {};
+
+  for (const workout of workouts) {
+    if (rollingWindowFactor(workout.daysAgo) === 0) continue;
+    const atHour = WEEK_HOURS - workout.daysAgo * 24;
+    for (const [region, stimulus] of Object.entries(workout.stimulus)) {
+      if (!Number.isFinite(stimulus) || stimulus <= 0) continue;
+      (eventsByRegion[region] ??= []).push({ atHour, stimulus });
     }
+  }
+
+  const out: Record<string, number> = {};
+  for (const [region, events] of Object.entries(eventsByRegion)) {
+    events.sort((a, b) => a.atHour - b.atHour);
+    // The backend atrophy clock uses the configured stimulus duration, not
+    // per-region recovery modifiers. Exact every-other-day training therefore
+    // has no artificial uncovered gap at the 48-hour boundary.
+    const windowHours = STIMULUS_DURATION_HOURS;
+    const rate = atrophyRatePerHour(windowHours);
+    let stimulus = 0;
+    let atrophy = 0;
+    let lastExposure = events[0].atHour;
+
+    for (const event of events) {
+      stimulus += event.stimulus;
+      if (event.atHour > lastExposure) {
+        atrophy += rate * Math.max(0, event.atHour - lastExposure - windowHours);
+        lastExposure = event.atHour;
+      }
+    }
+    atrophy += rate * Math.max(0, WEEK_HOURS - lastExposure - windowHours);
+    out[region] = stimulus - atrophy;
   }
   return out;
 }

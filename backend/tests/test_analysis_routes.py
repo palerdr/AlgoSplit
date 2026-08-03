@@ -117,6 +117,44 @@ def test_analyze_workouts_reuses_durable_snapshot_after_memory_cache_is_cleared(
     assert second.json() == first.json()
 
 
+def test_analyze_workouts_recomputes_an_unversioned_durable_snapshot(
+    client, fake_supabase, auth_user, monkeypatch
+):
+    monkeypatch.setattr(
+        analysis_routes,
+        "get_supabase_client_with_token",
+        lambda _token: fake_supabase,
+    )
+    analysis_routes.invalidate_analysis_cache(auth_user.id)
+
+    first = client.post(
+        "/api/analyze-workouts?days=7&end_date=2026-07-21&timezone_offset_minutes=240"
+    )
+    assert first.status_code == 200
+    stored = fake_supabase.tables["analysis_snapshots"][0]["response"]
+    stored.pop("_calculation_version")
+
+    calls = 0
+    compute = analysis_routes._compute_workout_analysis
+
+    def tracked_compute(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return compute(*args, **kwargs)
+
+    monkeypatch.setattr(analysis_routes, "_compute_workout_analysis", tracked_compute)
+    analysis_routes.invalidate_analysis_cache(auth_user.id)
+    second = client.post(
+        "/api/analyze-workouts?days=7&end_date=2026-07-21&timezone_offset_minutes=240"
+    )
+
+    assert second.status_code == 200
+    assert calls == 1
+    assert fake_supabase.tables["analysis_snapshots"][0]["response"][
+        "_calculation_version"
+    ] == analysis_routes._WORKOUT_ANALYSIS_CALCULATION_VERSION
+
+
 def test_analyze_workouts_exposes_recovery_readiness(client, fake_supabase, auth_user, monkeypatch):
     """Every muscle in the response carries a `recovery_readiness` field. Trained
     muscles get a 0..1 fraction (the same time-since/recovery-window ratio the

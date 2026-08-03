@@ -2,6 +2,7 @@ export const LEGACY_APP_STORAGE_KEY = 'fitapp:v1';
 const APP_STORAGE_PREFIX = 'algosplit:v2';
 const HOME_SPLITS_CACHE_SEGMENT = 'homeSplits';
 const HOME_ANALYSIS_CACHE_SEGMENT = 'homeAnalysis';
+const HOME_ANALYSIS_CALCULATION_VERSION = 2;
 const WORKOUT_SUMMARIES_CACHE_SEGMENT = 'workoutSummaries';
 
 export type AnalysisDataset = 'schoenfeld' | 'pelland' | 'average';
@@ -53,8 +54,12 @@ export function workoutSummariesCacheKey(userId: string): string {
   return `${APP_STORAGE_PREFIX}:${WORKOUT_SUMMARIES_CACHE_SEGMENT}:${encodeURIComponent(userId)}`;
 }
 
-function homeAnalysisCachePrefix(userId: string): string {
+function homeAnalysisCacheUserPrefix(userId: string): string {
   return `${APP_STORAGE_PREFIX}:${HOME_ANALYSIS_CACHE_SEGMENT}:${encodeURIComponent(userId)}:`;
+}
+
+function homeAnalysisCachePrefix(userId: string): string {
+  return `${homeAnalysisCacheUserPrefix(userId)}${HOME_ANALYSIS_CALCULATION_VERSION}:`;
 }
 
 export function homeAnalysisCacheKey(
@@ -198,7 +203,7 @@ export async function saveAnalysisPreferences(
 export async function clearPersistedAccountData(userId: string): Promise<void> {
   const { default: AsyncStorage } = await import('@react-native-async-storage/async-storage');
   const keys = await AsyncStorage.getAllKeys();
-  const analysisPrefix = homeAnalysisCachePrefix(userId);
+  const analysisPrefix = homeAnalysisCacheUserPrefix(userId);
   const accountKeys = [
     accountStorageKey(userId),
     analysisPreferencesKey(userId),

@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { useAppState } from '../state/AppState';
-import { rollingNet, stimulusScore } from '../analysis/stimulus';
+import { localCalendarDaysAgo, rollingNet, stimulusScore } from '../analysis/stimulus';
 import {
   buildTrainingDayCells,
   TRAINING_GRID_DAYS,
@@ -218,12 +218,12 @@ export default function DetailsScreen({ onBack }: DetailsScreenProps) {
         : null;
     }
     if (!demoMode) return null;
-    const now = Date.now();
+    const now = new Date();
     return stimulusScore(
       rollingNet(
         history.map((workout) => ({
           stimulus: workout.stimulus,
-          daysAgo: (now - new Date(workout.date).getTime()) / DAY_MS,
+          daysAgo: localCalendarDaysAgo(workout.date, now),
         }))
       )
     );

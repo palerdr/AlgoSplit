@@ -362,6 +362,16 @@ Recovery readiness is separately reported as
 `clamp(hours_since_any_stimulus / stimulus_duration, 0, 1)` at the end of the
 analysis window.
 
+Logged workout analysis uses different window semantics from saved-plan
+analysis. `/api/analyze-workouts?days=7` is an inclusive seven-day window in
+the client's local calendar: day 1 is the oldest included date and day 7 is
+today. In age notation, today is `daysAgo = 0`; `daysAgo = 7` is outside the
+window. Effective stimulus from every included workout is accumulated, while
+the atrophy debit above is charged only for uncovered gaps after a region's
+stimulus window ends. Properly spaced sessions therefore stack without each
+older workout being independently faded, while rest days still reduce net
+stimulus.
+
 ### Important interpretation limits
 
 - Split analysis is driven by exercise identity, set count, order, schedule,

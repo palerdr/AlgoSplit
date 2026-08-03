@@ -49,6 +49,11 @@ from core.granular_patterns import (
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+# Bump whenever logged-workout rolling semantics change. The version is part
+# of the Redis key and embedded in durable snapshot JSON so a deploy cannot
+# keep serving results calculated under an older contract.
+_WORKOUT_ANALYSIS_CALCULATION_VERSION = 2
+
 
 def _analysis_cache_parameters(
     days: int,
@@ -59,6 +64,7 @@ def _analysis_cache_parameters(
     dataset: str,
 ) -> dict:
     return {
+        "calculation_version": _WORKOUT_ANALYSIS_CALCULATION_VERSION,
         "days": days,
         "end_date": end_date.isoformat() if end_date else None,
         "timezone_offset_minutes": timezone_offset_minutes,
@@ -306,7 +312,10 @@ def _load_analysis_snapshot(supabase, **params) -> AnalysisResponse | None:
         ).limit(1).execute()
         if not result.data:
             return None
-        return AnalysisResponse.model_validate(result.data[0]["response"])
+        payload = result.data[0]["response"]
+        if payload.get("_calculation_version") != _WORKOUT_ANALYSIS_CALCULATION_VERSION:
+            return None
+        return AnalysisResponse.model_validate(payload)
     except Exception:
         # Code and migration can roll out independently. A missing snapshot
         # table degrades to computation instead of breaking workout analysis.
@@ -315,10 +324,12 @@ def _load_analysis_snapshot(supabase, **params) -> AnalysisResponse | None:
 
 
 def _store_analysis_snapshot(supabase, response: AnalysisResponse, **params) -> None:
+    response_payload = response.model_dump(mode="json")
+    response_payload["_calculation_version"] = _WORKOUT_ANALYSIS_CALCULATION_VERSION
     payload = {
         **params,
         "end_date": params["end_date"].isoformat(),
-        "response": response.model_dump(mode="json"),
+        "response": response_payload,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     try:
@@ -378,6 +389,8 @@ def _compute_workout_analysis(
         maintenance_volume=maintenance_volume,
         dataset=dataset,
         now=window_end,
+        window_start_date=window_start_date,
+        timezone_offset_minutes=timezone_offset_minutes,
         user_id=user_id,
         user_exercise_maps=user_exercise_maps,
     )
@@ -438,7 +451,9 @@ def analyze_workouts(
 ):
     """Return a durable snapshot when available, otherwise compute and persist it."""
     try:
-        effective_end_date = end_date or datetime.utcnow().date()
+        effective_end_date = end_date or (
+            datetime.now(timezone.utc) - timedelta(minutes=timezone_offset_minutes)
+        ).date()
         cache_parameters = _analysis_cache_parameters(
             days, effective_end_date, timezone_offset_minutes,
             stimulus_duration, maintenance_volume, dataset,
@@ -502,6 +517,14 @@ def _empty_workout_analysis(
     )
 
 
+def _parse_completed_at(value: str) -> datetime:
+    """Parse a stored workout timestamp onto one UTC timeline."""
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def _build_workout_analysis(
     workouts_data: list,
     exercises_data: list,
@@ -510,14 +533,17 @@ def _build_workout_analysis(
     maintenance_volume: int = 3,
     dataset: str = "schoenfeld",
     now: Optional[datetime] = None,
+    window_start_date: Optional[date] = None,
+    timezone_offset_minutes: int = 0,
     user_id: Optional[str] = None,
     user_exercise_maps=None,
 ) -> AnalysisResponse:
     """Pure transform: workout + exercise rows → AnalysisResponse.
 
-    Anchors day numbering to the rolling window [now - days + 1 .. now]
-    so that stimulus correctly decays based on how many days ago each
-    session was performed.
+    Anchors day numbering to the inclusive client-local calendar window so
+    every workout is positioned on the correct day and is evicted only after
+    that date leaves the window. UTC dates are not interchangeable with the
+    client's local calendar dates.
     """
     if now is None:
         now = datetime.utcnow()
@@ -525,7 +551,15 @@ def _build_workout_analysis(
     if not workouts_data:
         return _empty_workout_analysis(days, stimulus_duration, maintenance_volume, dataset)
 
-    window_start_date = (now - timedelta(days=days - 1)).date()
+    offset_delta = timedelta(minutes=timezone_offset_minutes)
+    if window_start_date is None:
+        now_utc = now
+        if now_utc.tzinfo is None:
+            now_utc = now_utc.replace(tzinfo=timezone.utc)
+        else:
+            now_utc = now_utc.astimezone(timezone.utc)
+        window_start_date = (now_utc - offset_delta).date() - timedelta(days=days - 1)
+    window_end_date = window_start_date + timedelta(days=days - 1)
 
     # Group exercises by workout_log_id
     exercises_by_workout: dict = defaultdict(list)
@@ -535,11 +569,15 @@ def _build_workout_analysis(
     split_days = []
     sessions_for_request = []
 
-    for workout in workouts_data:
-        workout_date = datetime.fromisoformat(
-            workout["completed_at"].replace("Z", "+00:00")
-        ).date()
-        day_number = max(1, (workout_date - window_start_date).days + 1)
+    ordered_workouts = sorted(
+        ((_parse_completed_at(workout["completed_at"]), workout) for workout in workouts_data),
+        key=lambda item: item[0],
+    )
+    for completed_at, workout in ordered_workouts:
+        workout_date = (completed_at - offset_delta).date()
+        if workout_date < window_start_date or workout_date > window_end_date:
+            continue
+        day_number = (workout_date - window_start_date).days + 1
 
         # Accumulate sets for duplicate exercise names within the same workout
         exercises_dict: dict = {}
@@ -567,8 +605,9 @@ def _build_workout_analysis(
     if not split_days:
         return _empty_workout_analysis(days, stimulus_duration, maintenance_volume, dataset)
 
-    # Always use the full rolling window as the cycle length so the
-    # engine correctly models atrophy for the gap between sessions and now.
+    # Use the full rolling window as the engine horizon so session spacing,
+    # rest-gap atrophy, recovery readiness, and normalization align with the
+    # requested range.
     effective_cycle = days
 
     if user_id and user_exercise_maps is None:
