@@ -10,6 +10,7 @@ import {
   homeAnalysisCacheKey,
   homeSplitsCacheKey,
   normalizeAnalysisPreferences,
+  workoutSummariesCacheKey,
 } from '../src/state/localPersistence';
 import { recoveryTokenFromUrl } from '../src/auth/recoveryLink';
 
@@ -80,6 +81,12 @@ describe('local account isolation', () => {
     expect(analysisPreferencesKey('user-a')).not.toBe(analysisPreferencesKey('user-b'));
     expect(analysisPreferencesKey('user-a')).not.toBe(accountStorageKey('user-a'));
     expect(homeSplitsCacheKey('user-a')).not.toBe(homeSplitsCacheKey('user-b'));
+    expect(workoutSummariesCacheKey('user-a')).not.toBe(
+      workoutSummariesCacheKey('user-b')
+    );
+    expect(workoutSummariesCacheKey('user-a')).not.toBe(
+      homeSplitsCacheKey('user-a')
+    );
     expect(
       homeAnalysisCacheKey('user-a', {
         days: 7,

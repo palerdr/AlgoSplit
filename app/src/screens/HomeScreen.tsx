@@ -277,23 +277,17 @@ export default function HomeScreen({
   const activeSplit =
     account.splits.data.find((split) => split.id === account.activeSplitId) ?? null;
 
-  // Persisted local history paints the streak immediately. Reconcile after
-  // first paint for workouts logged on another device; this request never
-  // gates the Home shell and only runs when the widget has an active split.
-  useEffect(() => {
-    if (account.status !== 'authenticated' || !activeSplit?.id) return;
-    return scheduleAfterFirstPaint(() => {
-      void account.ensureWorkoutSummaries();
-    });
-  }, [account.status, account.ensureWorkoutSummaries, activeSplit?.id]);
-
   const splitLogs = React.useMemo(
     () => mergeSplitLogs(account.workoutSummaries.data.workouts, history),
     [account.workoutSummaries.data.workouts, history]
   );
+  const activeStreakReady = account.workoutSummaries.loaded;
   const activeStreak = React.useMemo(
-    () => (activeSplit ? splitWorkoutStreak(activeSplit, splitLogs, Date.now()) : 0),
-    [activeSplit, splitLogs]
+    () =>
+      activeSplit && activeStreakReady
+        ? splitWorkoutStreak(activeSplit, splitLogs, Date.now())
+        : 0,
+    [activeSplit, activeStreakReady, splitLogs]
   );
   const activeSplitRecentDays = React.useMemo(() => {
     if (!activeSplit) return [];
@@ -761,8 +755,16 @@ export default function HomeScreen({
                         {activeSplit.name}
                       </Text>
                       <View style={styles.activeStreakRow}>
-                        <FireIcon size={15} lit={activeStreak > 0} />
-                        {activeStreak > 0 && <Text style={styles.activeTag}>{activeStreak}</Text>}
+                        {activeStreakReady ? (
+                          <>
+                            <FireIcon size={15} lit={activeStreak > 0} />
+                            {activeStreak > 0 && (
+                              <Text style={styles.activeTag}>{activeStreak}</Text>
+                            )}
+                          </>
+                        ) : (
+                          <Text style={[styles.activeTag, styles.activeTagPending]}>…</Text>
+                        )}
                       </View>
                     </View>
                     <RecentSplitDays completed={activeSplitRecentDays} />
@@ -1137,9 +1139,11 @@ export default function HomeScreen({
             </View>
             <Text style={styles.pickerHint}>
               {activeSplit
-                ? `You’ve maintained this split for ${activeStreak} ${
-                    activeStreak === 1 ? 'day' : 'days'
-                  }.`
+                ? activeStreakReady
+                  ? `You’ve maintained this split for ${activeStreak} ${
+                      activeStreak === 1 ? 'day' : 'days'
+                    }.`
+                  : 'Syncing your split history…'
                 : 'Lives on your home screen with a streak and one-tap start.'}
             </Text>
             <ScrollView
@@ -1433,6 +1437,10 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '400',
     letterSpacing: 0.5,
+  },
+  activeTagPending: {
+    color: theme.textDim,
+    fontSize: 12,
   },
   activeStreakRow: {
     flexDirection: 'row',
