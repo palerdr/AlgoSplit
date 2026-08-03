@@ -72,8 +72,10 @@ export function residualLocalMultiplier(k: number, beta: number): number {
 const CNS_FLOOR = 0.85;
 const CNS_RANGE = 0.15;
 const CNS_DECAY = 0.06;
-const AXIAL_CNS_EQUIV_SETS = 2.5;
-const AXIAL_SET_CONTRIBUTION = 0.15;
+/** Set-equivalents of CNS cost carried by one unit of axial load. */
+export const AXIAL_CNS_EQUIV_SETS = 2.5;
+/** Axial load accrued per set, per unit of the movement's axial rating. */
+export const AXIAL_SET_CONTRIBUTION = 0.15;
 const UNILATERAL_BONUS = 1.05;
 
 /** CNS multiplier: ~1.0 fresh, asymptotically decaying toward 0.85. */
@@ -211,10 +213,10 @@ export function atrophyRatePerHour(windowHours: number): number {
   return AVG[MAINTENANCE_VOLUME - 1] / denom;
 }
 
-/** Union length of [start, end) intervals clamped to one week. */
-function coveredHours(intervals: [number, number][]): number {
+/** Union length of [start, end) intervals clamped to the horizon (default one week). */
+function coveredHours(intervals: [number, number][], horizonHours = WEEK_HOURS): number {
   const sorted = intervals
-    .map(([a, b]): [number, number] => [Math.max(0, a), Math.min(WEEK_HOURS, b)])
+    .map(([a, b]): [number, number] => [Math.max(0, a), Math.min(horizonHours, b)])
     .filter(([a, b]) => b > a)
     .sort((x, y) => x[0] - y[0]);
   let total = 0;
@@ -229,6 +231,57 @@ function coveredHours(intervals: [number, number][]): number {
   return total;
 }
 
+/** One bout placed on the timeline, in hours from the start of the horizon. */
+export interface ScheduledBout {
+  atHour: number;
+  entries: { exercise: Exercise; sets: number }[];
+}
+
+/**
+ * Core steady-state simulation: run each bout in time order, carrying the
+ * recovery penalty forward from whenever each muscle was last trained, then
+ * subtract atrophy accrued outside every muscle's stimulus windows.
+ *
+ * The first bout has no preceding history (cold start), matching the engine's
+ * `simulate_split` entry conditions.
+ */
+function simulateSchedule(
+  bouts: readonly ScheduledBout[],
+  horizonHours: number
+): Record<string, number> {
+  const ordered = [...bouts].sort((a, b) => a.atHour - b.atHour);
+  const total: Record<string, number> = {};
+  let lastTrainedAt: Record<string, number> | null = null;
+
+  for (const bout of ordered) {
+    let hoursSince: Record<string, number> | undefined;
+    if (lastTrainedAt) {
+      hoursSince = {};
+      for (const [region, at] of Object.entries(lastTrainedAt)) {
+        hoursSince[region] = bout.atHour - at;
+      }
+    }
+    const s = computeWorkoutStimulus(bout.entries, { hoursSinceByRegion: hoursSince });
+    lastTrainedAt = lastTrainedAt ?? {};
+    for (const [region, value] of Object.entries(s)) {
+      total[region] = (total[region] ?? 0) + value;
+      lastTrainedAt[region] = bout.atHour;
+    }
+  }
+
+  const net: Record<string, number> = {};
+  for (const [region, stim] of Object.entries(total)) {
+    const window = regionWindowHours(region);
+    const covered = coveredHours(
+      ordered.map((bout): [number, number] => [bout.atHour, bout.atHour + window]),
+      horizonHours
+    );
+    const atrophy = atrophyRatePerHour(window) * Math.max(0, horizonHours - covered);
+    net[region] = stim - atrophy;
+  }
+  return net;
+}
+
 /**
  * Steady-state weekly net stimulus for a workout template performed
  * `timesPerWeek` times (evenly spaced): summed session stimulus (with the
@@ -241,35 +294,44 @@ export function analyzeTemplate(
   timesPerWeek = 1
 ): Record<string, number> {
   const n = Math.max(1, Math.min(7, Math.round(timesPerWeek)));
-  const sessionTimes = Array.from({ length: n }, (_, i) => (WEEK_HOURS / n) * i);
+  const bouts = Array.from({ length: n }, (_, i) => ({
+    atHour: (WEEK_HOURS / n) * i,
+    entries,
+  }));
+  return simulateSchedule(bouts, WEEK_HOURS);
+}
 
-  const total: Record<string, number> = {};
-  let lastTrainedAt: Record<string, number> | null = null;
+/** A workout placed on a numbered day of a split's cycle (day 1 = first day). */
+export interface ScheduledSession {
+  day: number;
+  entries: { exercise: Exercise; sets: number }[];
+}
 
-  for (const t of sessionTimes) {
-    let hoursSince: Record<string, number> | undefined;
-    if (lastTrainedAt) {
-      hoursSince = {};
-      for (const [region, at] of Object.entries(lastTrainedAt)) {
-        hoursSince[region] = t - at;
-      }
-    }
-    const s = computeWorkoutStimulus(entries, { hoursSinceByRegion: hoursSince });
-    lastTrainedAt = lastTrainedAt ?? {};
-    for (const [region, value] of Object.entries(s)) {
-      total[region] = (total[region] ?? 0) + value;
-      lastTrainedAt[region] = t;
-    }
-  }
+export const MAX_CYCLE_DAYS = 14;
 
-  const net: Record<string, number> = {};
-  for (const [region, stim] of Object.entries(total)) {
-    const window = regionWindowHours(region);
-    const covered = coveredHours(sessionTimes.map((t): [number, number] => [t, t + window]));
-    const atrophy = atrophyRatePerHour(window) * Math.max(0, WEEK_HOURS - covered);
-    net[region] = stim - atrophy;
-  }
-  return net;
+/**
+ * Steady-state net stimulus for a split whose sessions differ day to day,
+ * normalized to a week. Cycles that are not 7 days long are scaled by
+ * week/cycle so scores stay comparable across splits — exact at cycleLength 7.
+ */
+export function analyzeSchedule(
+  sessions: readonly ScheduledSession[],
+  cycleLength: number
+): Record<string, number> {
+  const days = Math.max(1, Math.min(MAX_CYCLE_DAYS, Math.round(cycleLength)));
+  const horizon = days * 24;
+  const net = simulateSchedule(
+    sessions.map((session) => ({
+      atHour: (Math.max(1, Math.min(days, Math.round(session.day))) - 1) * 24,
+      entries: session.entries,
+    })),
+    horizon
+  );
+  if (horizon === WEEK_HOURS) return net;
+  const scale = WEEK_HOURS / horizon;
+  const scaled: Record<string, number> = {};
+  for (const [region, value] of Object.entries(net)) scaled[region] = value * scale;
+  return scaled;
 }
 
 // ── Rolling decay for the home heatmap ──────────────────────────────────────
@@ -337,6 +399,24 @@ export interface StimulusScoreMuscle {
   net_stimulus: number;
 }
 
+/** Array.isArray does not narrow a union holding a readonly array type. */
+function isMuscleRows(
+  input: Record<string, number> | readonly StimulusScoreMuscle[]
+): input is readonly StimulusScoreMuscle[] {
+  return Array.isArray(input);
+}
+
+/**
+ * The 0–100 score without the display rounding. Ranking candidate changes
+ * needs the raw value — rounding collapses moves that differ by a fraction of
+ * a point into ties.
+ */
+export function netScoreExact(net: Record<string, number>): number {
+  const values = Object.values(net).filter((value) => Number.isFinite(value) && value > 0);
+  if (values.length === 0) return 0;
+  return (values.reduce((n, v) => n + stimulusAdequacy(v), 0) / values.length) * 100;
+}
+
 /**
  * 0–100 stimulus score: mean adequacy across trained muscles. Backend muscle
  * rows identify training with raw stimulus, so a trained-but-under-maintenance
@@ -346,11 +426,10 @@ export interface StimulusScoreMuscle {
 export function stimulusScore(
   input: Record<string, number> | readonly StimulusScoreMuscle[]
 ): number {
-  const values = Array.isArray(input)
-    ? input
-        .filter((muscle) => Number.isFinite(muscle.stimulus) && muscle.stimulus > 0)
-        .map((muscle) => muscle.net_stimulus)
-    : Object.values(input).filter((value) => Number.isFinite(value) && value > 0);
+  if (!isMuscleRows(input)) return Math.round(netScoreExact(input));
+  const values = input
+    .filter((muscle) => Number.isFinite(muscle.stimulus) && muscle.stimulus > 0)
+    .map((muscle) => muscle.net_stimulus);
   if (values.length === 0) return 0;
   const mean = values.reduce((n, v) => n + stimulusAdequacy(v), 0) / values.length;
   return Math.round(mean * 100);

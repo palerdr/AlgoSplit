@@ -6,8 +6,14 @@ import {
   BackendError,
   SplitResponse,
 } from '../../api/backend';
-import { analyzeTemplate, getStimulusLevel, stimulusScore } from '../../analysis/stimulus';
-import { Exercise, getExercise } from '../../data/exercises';
+import { getStimulusLevel, stimulusScore } from '../../analysis/stimulus';
+import {
+  Move,
+  Recommendation,
+  ScheduleSource,
+  recommendForSource,
+} from '../../analysis/recommendations';
+import { getExercise } from '../../data/exercises';
 import { MUSCLE_REGIONS } from '../../data/muscleRegions.gen';
 import { WorkoutTemplate } from '../../data/templates';
 import { useAccountState } from '../../state/AccountState';
@@ -20,6 +26,18 @@ interface MuscleRowData {
   region: string;
   name: string;
   net: number;
+}
+
+/** Dimmed extension drawn on the same track as the current value. */
+const GHOST_GAIN = 'rgba(65,196,110,0.45)';
+const GHOST_LOSS = 'rgba(255,255,255,0.2)';
+const MOVES_SHOWN = 4;
+
+/** Fatigue direction, in the row's third column. */
+function fatigueGlyph(move: Move): { glyph: string; label: string } {
+  if (move.deltaFatigue === 0) return { glyph: '=', label: 'no added fatigue' };
+  if (move.deltaFatigue < 0) return { glyph: '↓', label: 'frees fatigue' };
+  return { glyph: '↑', label: 'costs fatigue' };
 }
 
 interface AnalysisState {
@@ -102,22 +120,52 @@ function Notice({
   );
 }
 
+/**
+ * The analysis card has two faces rather than two cards: the muscle chart, and
+ * the ranked moves that change it. Selecting a move previews it as a dimmed
+ * extension on the same tracks — the idiom the split comparison already uses —
+ * so the recommendation adds no persistent chrome.
+ */
 function AnalysisCard({
   title,
   rows,
   score,
   footer,
+  recommendation,
   delay = 0,
 }: {
   title: string;
   rows: MuscleRowData[];
   score: number;
   footer: string;
+  recommendation?: Recommendation | null;
   delay?: number;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const maxNet = Math.max(0.1, ...rows.map((row) => Math.max(0, row.net)));
-  const visibleRows = visibleMuscleRows(rows, expanded);
+  const [selectedMoveId, setSelectedMoveId] = useState<string | null>(null);
+
+  const moves = recommendation?.moves ?? [];
+  const combined = recommendation?.combined ?? null;
+  // The chart previews the whole set of moves by default; tapping a row
+  // isolates it, and tapping it again returns to the combined view.
+  const selectedMove = moves.find((move) => move.id === selectedMoveId) ?? null;
+  const preview = selectedMove ?? combined;
+  const deltaNet = preview?.deltaNet ?? {};
+  // The displayed score comes from the backend engine; the local recommender
+  // measures only the change, so project rather than replace it.
+  const projectedScore = preview
+    ? Math.max(0, Math.min(100, Math.round(score + preview.deltaScore)))
+    : null;
+
+  const previewRows = rows.map((row) => ({
+    ...row,
+    projected: row.net + (deltaNet[row.region] ?? 0),
+  }));
+  const maxNet = Math.max(
+    0.1,
+    ...previewRows.map((row) => Math.max(0, row.net, row.projected))
+  );
+  const visibleRows = visibleMuscleRows(previewRows, expanded);
 
   return (
     <FadeIn delay={delay}>
@@ -125,13 +173,27 @@ function AnalysisCard({
       <View style={styles.scoreHeader}>
         <Text style={styles.chartTitle}>{title}</Text>
         <View style={styles.scoreBadge}>
-          <Text style={styles.scoreValue}>{score}</Text>
+          <View style={styles.scoreLine}>
+            <Text style={styles.scoreValue}>{score}</Text>
+            {projectedScore !== null && projectedScore !== score && (
+              <>
+                <Text style={styles.scoreArrow}>→</Text>
+                <Text style={styles.scoreProjected}>{projectedScore}</Text>
+              </>
+            )}
+          </View>
           <Text style={styles.scoreLabel}>score</Text>
         </View>
       </View>
+
       <View style={styles.rows}>
         {visibleRows.map((row, index) => {
           const level = getStimulusLevel(row.net);
+          const current = Math.max(0, row.net);
+          const projected = Math.max(0, row.projected);
+          const kept = Math.min(current, projected);
+          const change = Math.abs(projected - current);
+          const hasGhost = change > 0.005;
           return (
             <View key={row.region} style={[styles.muscleRow, index > 0 && styles.rowBorder]}>
               <Text style={styles.muscleName} numberOfLines={1}>
@@ -142,22 +204,105 @@ function AnalysisCard({
                   style={[
                     styles.fill,
                     {
-                      width: `${(Math.max(0, row.net) / maxNet) * 100}%`,
+                      width: `${(kept / maxNet) * 100}%`,
                       backgroundColor: stimulusBarColor(level),
                     },
+                    // The two segments read as one bar: only the outer ends
+                    // are rounded, so the join stays flush.
+                    hasGhost && styles.fillJoinedLeft,
                   ]}
                 />
+                {hasGhost && (
+                  <View
+                    style={[
+                      styles.fill,
+                      styles.fillJoinedRight,
+                      {
+                        width: `${(change / maxNet) * 100}%`,
+                        backgroundColor:
+                          projected > current ? GHOST_GAIN : GHOST_LOSS,
+                      },
+                    ]}
+                  />
+                )}
               </View>
               <Text style={styles.net}>{row.net.toFixed(1)}</Text>
             </View>
           );
         })}
       </View>
+
       {rows.length > 12 && (
-        <Pressable onPress={() => setExpanded((value) => !value)}>
-          <Text style={styles.action}>{expanded ? 'Show top 12' : `Show all ${rows.length}`}</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setExpanded((value) => !value)}
+        >
+          <Text style={styles.action}>
+            {expanded ? 'Show top 12' : `Show all ${rows.length}`}
+          </Text>
         </Pressable>
       )}
+
+      {moves.length > 0 && combined && (
+        <View style={styles.movesSection}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Preview all ${combined.count} moves together, plus ${combined.deltaScore.toFixed(
+              1
+            )} score`}
+            accessibilityState={{ selected: selectedMove === null }}
+            onPress={() => setSelectedMoveId(null)}
+          >
+            <View style={styles.movesHeader}>
+              <Text style={styles.movesLabel}>Best moves</Text>
+              <Text
+                style={[
+                  styles.movesTotal,
+                  selectedMove !== null && styles.movesTotalAction,
+                ]}
+              >
+                {selectedMove === null
+                  ? `all ${combined.count} · +${combined.deltaScore.toFixed(1)}`
+                  : `← all ${combined.count}`}
+              </Text>
+            </View>
+          </Pressable>
+          {moves.map((move) => {
+            const active = selectedMove?.id === move.id;
+            const cost = fatigueGlyph(move);
+            const scope = move.occurrences > 1 ? ` ×${move.occurrences}` : '';
+            return (
+              <Pressable
+                key={move.id}
+                accessible
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${move.action}, ${move.exerciseName}, ${
+                  move.sessionName
+                }. Plus ${move.deltaScore.toFixed(1)} score, ${cost.label}${
+                  move.drivers.length > 0 ? `, mainly ${move.drivers.join(' and ')}` : ''
+                }.`}
+                onPress={() =>
+                  setSelectedMoveId((current) => (current === move.id ? null : move.id))
+                }
+              >
+                <View style={[styles.moveRow, active && styles.moveRowActive]}>
+                  <Text
+                    style={[styles.moveLabel, active && styles.moveLabelActive]}
+                    numberOfLines={1}
+                  >
+                    {move.exerciseName}
+                    {scope} · {move.action}
+                  </Text>
+                  <Text style={styles.moveDelta}>+{move.deltaScore.toFixed(1)}</Text>
+                  <Text style={styles.moveCost}>{cost.glyph}</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+
       <Text style={styles.hint}>{footer}</Text>
       </Glass>
     </FadeIn>
@@ -174,14 +319,7 @@ function rowsFromAnalysis(data: AnalysisResponse): MuscleRowData[] {
     .sort((a, b) => b.net - a.net);
 }
 
-function localRows(template: WorkoutTemplate): MuscleRowData[] {
-  const entries = template.exercises
-    .map((templateExercise) => {
-      const exercise = getExercise(templateExercise.exerciseId);
-      return exercise ? { exercise, sets: templateExercise.sets } : null;
-    })
-    .filter((entry): entry is { exercise: Exercise; sets: number } => entry !== null);
-  const net = analyzeTemplate(entries, 2);
+function rowsFromNet(net: Record<string, number>): MuscleRowData[] {
   return Object.entries(net)
     .map(([region, value]) => ({
       region,
@@ -191,13 +329,64 @@ function localRows(template: WorkoutTemplate): MuscleRowData[] {
     .sort((a, b) => b.net - a.net);
 }
 
+/** Demo templates run twice a week; days 1 and 4 place them on the cycle. */
+function demoSource(template: WorkoutTemplate): ScheduleSource {
+  const exercises = template.exercises
+    .map((templateExercise) => {
+      const exercise = getExercise(templateExercise.exerciseId);
+      return exercise ? { name: exercise.name, sets: templateExercise.sets } : null;
+    })
+    .filter((entry): entry is { name: string; sets: number } => entry !== null);
+  return {
+    cycleLength: 7,
+    sessions: [1, 4].map((day) => ({ name: template.name, day, exercises })),
+  };
+}
+
+/**
+ * Rebuild the saved split for the local recommender. The displayed chart still
+ * comes from the backend engine; this only measures what a change would do.
+ */
+function splitSource(split: SplitResponse): ScheduleSource {
+  return {
+    cycleLength: split.cycle_length,
+    sessions: split.sessions.map((session) => ({
+      name: session.name,
+      day: session.day_number,
+      exercises: [...session.exercises]
+        .sort((left, right) => left.order_index - right.order_index)
+        .map((exercise) => ({
+          name: exercise.exercise_name,
+          sets: exercise.sets,
+          unilateral: exercise.unilateral,
+          resistanceProfile: exercise.resistance_profile,
+        })),
+    })),
+  };
+}
+
 function DemoSplits({ templates }: { templates: WorkoutTemplate[] }) {
   const [selectedId, setSelectedId] = useState(templates[0]?.id ?? null);
   const [compareId, setCompareId] = useState<string | null>(null);
   const selected = templates.find((template) => template.id === selectedId) ?? templates[0] ?? null;
   const compare = templates.find((template) => template.id === compareId) ?? null;
-  const rows = useMemo(() => (selected ? localRows(selected) : []), [selected]);
-  const compareRows = useMemo(() => (compare ? localRows(compare) : []), [compare]);
+  // Chart and recommendation share one basis so the ghost preview lines up.
+  const recommendation = useMemo(
+    () => (selected ? recommendForSource(demoSource(selected), MOVES_SHOWN) : null),
+    [selected]
+  );
+  const compareRecommendation = useMemo(
+    () => (compare ? recommendForSource(demoSource(compare), MOVES_SHOWN) : null),
+    [compare]
+  );
+  const rows = useMemo(
+    () => (recommendation ? rowsFromNet(recommendation.baselineNet) : []),
+    [recommendation]
+  );
+  const compareRows = useMemo(
+    () => (compareRecommendation ? rowsFromNet(compareRecommendation.baselineNet) : []),
+    [compareRecommendation]
+  );
 
   return (
     <View>
@@ -232,6 +421,7 @@ function DemoSplits({ templates }: { templates: WorkoutTemplate[] }) {
           rows={rows}
           score={stimulusScore(Object.fromEntries(rows.map((row) => [row.region, row.net])))}
           footer="Demo engine · fixed example at 2×/week"
+          recommendation={recommendation}
           delay={90}
         />
       ) : (
@@ -270,6 +460,7 @@ function DemoSplits({ templates }: { templates: WorkoutTemplate[] }) {
                 Object.fromEntries(compareRows.map((row) => [row.region, row.net]))
               )}
               footer="Selected comparison · demo engine at 2×/week"
+              recommendation={compareRecommendation}
               delay={180}
             />
           )}
@@ -368,6 +559,12 @@ export default function SplitsTab({ templates }: { templates: WorkoutTemplate[] 
   const comparison = splits.find((split) => split.id === compareId) ?? null;
   const selectedAnalysis = useRemoteAnalysis(selected, analysisRetry);
   const comparisonAnalysis = useRemoteAnalysis(comparison, compareRetry);
+  // Ranking candidate changes means re-running the engine once per candidate,
+  // so it runs locally against the saved split rather than as N round trips.
+  const recommendation = useMemo(
+    () => (selected ? recommendForSource(splitSource(selected), MOVES_SHOWN) : null),
+    [selected]
+  );
 
   useEffect(() => {
     if (account.status === 'authenticated') account.ensureSplits();
@@ -452,9 +649,18 @@ export default function SplitsTab({ templates }: { templates: WorkoutTemplate[] 
           rows={rowsFromAnalysis(selectedAnalysis.data)}
           score={stimulusScore(selectedAnalysis.data.muscles)}
           footer={`net = stimulus − atrophy · ${selectedAnalysis.data.cycle_length}-day saved cycle`}
+          recommendation={recommendation}
           delay={45}
         />
       ) : null}
+
+      {recommendation && recommendation.unresolved.length > 0 && (
+        <Notice
+          title="Some exercises were not recognized"
+          body={`${recommendation.unresolved.join(', ')} — these are excluded from the suggestions, so their sets are not counted.`}
+          delay={60}
+        />
+      )}
 
       {splits.length > 1 && (
         <>
@@ -537,7 +743,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scoreBadge: { alignItems: 'flex-end' },
+  scoreLine: { flexDirection: 'row', alignItems: 'baseline', gap: 5 },
   scoreValue: { color: theme.accent, fontSize: 22, fontWeight: '700' },
+  scoreArrow: { color: theme.textDim, fontSize: 13 },
+  scoreProjected: {
+    color: theme.accent,
+    fontSize: 22,
+    fontWeight: '700',
+    opacity: 0.55,
+  },
   scoreLabel: { color: theme.textDim, fontSize: 9, textTransform: 'uppercase' },
   rows: { marginTop: 2 },
   muscleRow: { flexDirection: 'row', alignItems: 'center', minHeight: 34, gap: 10 },
@@ -551,10 +765,65 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
     overflow: 'hidden',
+    // Row direction so the current value and its projected extension sit
+    // side by side on one track rather than stacking.
+    flexDirection: 'row',
     backgroundColor: 'rgba(255,255,255,0.1)',
   },
   fill: { height: '100%', borderRadius: 3 },
+  fillJoinedLeft: { borderTopRightRadius: 0, borderBottomRightRadius: 0 },
+  fillJoinedRight: { borderTopLeftRadius: 0, borderBottomLeftRadius: 0 },
   net: { color: theme.textDim, fontSize: 11, width: 28, textAlign: 'right' },
+  movesSection: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.14)',
+  },
+  movesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 6,
+  },
+  movesLabel: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  // Dim while it describes the active preview; accent once it becomes the way
+  // back from an isolated move.
+  movesTotal: {
+    color: theme.textDim,
+    fontSize: 11,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  movesTotalAction: { color: theme.accent },
+  // Same 34pt rhythm as the muscle rows above, so the two lists read as one
+  // card rather than a chart with a panel bolted underneath.
+  moveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 34,
+    gap: 10,
+    paddingHorizontal: 8,
+    marginHorizontal: -8,
+    borderRadius: 9,
+  },
+  moveRowActive: { backgroundColor: 'rgba(65,196,110,0.14)' },
+  moveLabel: { flex: 1, minWidth: 0, color: theme.text, fontSize: 13 },
+  moveLabelActive: { color: theme.accent, fontWeight: '600' },
+  moveDelta: {
+    color: theme.accent,
+    fontSize: 13,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  moveCost: { color: theme.textDim, fontSize: 12, width: 12, textAlign: 'center' },
   hint: { color: theme.textDim, fontSize: 10, lineHeight: 15, marginTop: 10 },
   sectionLabel: {
     color: theme.textDim,
