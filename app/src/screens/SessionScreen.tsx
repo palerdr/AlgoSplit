@@ -1470,6 +1470,9 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   label="REPS"
                   values={REP_VALUES}
                   initial={effectiveInitialRecord.reps}
+                  markedValue={
+                    markedRecord ? snapTo(REP_VALUES, markedRecord.reps) : undefined
+                  }
                   onPreview={(value) => previewWheel({ reps: value })}
                   onInteractionChange={(active) =>
                     updateWheelInteraction('reps', active)
@@ -1501,9 +1504,9 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
               ) : (
                 <Text style={styles.shadowHint}>
                   {remoteShadowLoading
-                    ? 'Loading your last recorded weight…'
+                    ? 'Loading your last recorded weight and reps…'
                     : markedRecord
-                      ? '★ marks the last recorded weight for this exercise'
+                      ? '★ marks the last recorded weight and reps for this exercise'
                       : '0 lb = bodyweight · Failure = no reps left'}
                 </Text>
               )}
