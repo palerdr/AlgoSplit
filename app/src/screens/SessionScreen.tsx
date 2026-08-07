@@ -894,27 +894,31 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
   const wheelPageKey = `${current?.sessionExerciseId ?? 'none'}-${browseStepKey}-${
     selectedSetComplete ? 'complete' : 'entry'
   }`;
-  const previousSignature = previous
-    ? JSON.stringify([previous.records, previous.notes])
-    : 'none';
+  // Keep prefill and marker provenance in lockstep. Remote history may load
+  // after the screen first mounts, so include both its exercise-global record
+  // and any set-position shadow in the untouched-wheel hydration signature.
+  const prefillSignature = JSON.stringify([
+    markedRecord ?? null,
+    previous?.records ?? null,
+    previous?.notes ?? null,
+  ]);
   const [historyWheelRevision, setHistoryWheelRevision] = useState(0);
   const wheelTouchedRef = useRef(false);
   const wheelPageRef = useRef(wheelPageKey);
-  const adoptedPreviousSignatureRef = useRef(previousSignature);
+  const adoptedPrefillSignatureRef = useRef(prefillSignature);
   if (wheelPageRef.current !== wheelPageKey) {
     wheelPageRef.current = wheelPageKey;
     wheelTouchedRef.current = false;
-    adoptedPreviousSignatureRef.current = previousSignature;
+    adoptedPrefillSignatureRef.current = prefillSignature;
   }
   useEffect(() => {
     if (
-      previousSignature === 'none' ||
       wheelTouchedRef.current ||
-      adoptedPreviousSignatureRef.current === previousSignature
+      adoptedPrefillSignatureRef.current === prefillSignature
     ) return;
-    adoptedPreviousSignatureRef.current = previousSignature;
+    adoptedPrefillSignatureRef.current = prefillSignature;
     setHistoryWheelRevision((revision) => revision + 1);
-  }, [previousSignature, wheelPageKey]);
+  }, [prefillSignature, wheelPageKey]);
   // Async history may hydrate a wheel only while its page is untouched. Once
   // the user engages a dial, neither history nor parent state can remount it.
   const wheelEpoch = `${wheelPageKey}-history-${historyWheelRevision}`;
@@ -922,7 +926,7 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
     const fallback = (currentId ? lastUsed[currentId] : undefined) ?? DEFAULT_SET;
     const base = selectedSetComplete
       ? selectedCompletedRecord ?? currentSessionLast ?? previous?.records[0] ?? fallback
-      : latestCurrentExerciseRecord ?? shadow ?? previous?.records[0] ?? fallback;
+      : markedRecord ?? shadow ?? previous?.records[0] ?? fallback;
     return {
       weight: snapTo(WEIGHT_VALUES, base.weight),
       reps: snapTo(REP_VALUES, base.reps),
