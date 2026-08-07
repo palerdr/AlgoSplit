@@ -1485,6 +1485,9 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
                   label="RIR"
                   values={RIR_VALUES}
                   initial={effectiveInitialRecord.rir ?? 0}
+                  markedValue={
+                    markedRecord ? snapTo(RIR_VALUES, markedRecord.rir ?? 0) : undefined
+                  }
                   format={(v) => (v === 0 ? 'Failure' : String(v))}
                   onPreview={(value) => previewWheel({ rir: value })}
                   onInteractionChange={(active) =>
@@ -1504,9 +1507,9 @@ export default function SessionScreen({ onComplete, onDiscard }: SessionScreenPr
               ) : (
                 <Text style={styles.shadowHint}>
                   {remoteShadowLoading
-                    ? 'Loading your last recorded weight and reps…'
+                    ? 'Loading your last recorded weight, reps, and RIR…'
                     : markedRecord
-                      ? '★ marks the last recorded weight and reps for this exercise'
+                      ? '★ marks the last recorded weight, reps, and RIR for this exercise'
                       : '0 lb = bodyweight · Failure = no reps left'}
                 </Text>
               )}
